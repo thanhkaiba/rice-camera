@@ -85,6 +85,7 @@ class Evidence:
     computer: str = field(default_factory=socket.gethostname)
     version: str = __version__
     names: dict[str, str] = field(default_factory=dict)
+    email: str = ""
 
     @property
     def arrival_source(self) -> str | None:
@@ -107,7 +108,7 @@ class Evidence:
         return {
             "generated_at": self.generated_at.isoformat(), "software": f"Camera attendance {self.version}",
             "computer": self.computer, "timezone": self.timezone,
-            "employee": {"id": self.employee_id, "name": self.name}, "day": self.day.isoformat(),
+            "employee": {"email": self.email, "name": self.name}, "day": self.day.isoformat(),
             "status": self.status, "minutes_late": self.minutes_late,
             "rule": {"camera_hours": f"{self.start:%H:%M}-{self.end:%H:%M}", "late_from": f"{self.late_after:%H:%M}",
                      "arrival": "the earliest sighting of the day that was not removed; a time typed in by an "
@@ -124,7 +125,7 @@ class Evidence:
         }
 
     def text(self) -> str:
-        lines = [f"Attendance evidence: {self.name} ({self.employee_id}), {self.day:%A %d %B %Y}",
+        lines = [f"Attendance evidence: {self.name} ({self.email}), {self.day:%A %d %B %Y}",
                  f"Result: {self.status}" + (f", {self.minutes_late} min late" if self.minutes_late is not None else ""),
                  f"Rule: camera hours {self.start:%H:%M}-{self.end:%H:%M}, late from {self.late_after:%H:%M}; "
                  "the arrival is the earliest sighting not removed (a time typed in by an admin takes precedence).",
@@ -188,7 +189,8 @@ def build(service, day: dt.date, employee_id: str) -> Evidence:
     corrections = [(service._local(when), who, action, details) for when, who, action, details in corrections]
     return Evidence(day, employee_id, name, status, minutes, rep.window.start, rep.window.late_after, rep.window.end,
                     arrival, f"{service._local(arrival.first_seen):%H:%M:%S}" if arrival else None, items,
-                    corrections, service.now(), cfg.timezone, names=names)
+                    corrections, service.now(), cfg.timezone, names=names,
+                    email=store.employee_emails().get(employee_id, ""))
 
 
 def zip_bytes(ev: Evidence, data_dir: Path) -> bytes:

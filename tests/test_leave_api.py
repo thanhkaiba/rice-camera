@@ -9,9 +9,9 @@ HR = {
     "holidays": [{"date": "2026-10-20", "name": "Women's Day"}, {"date": "bad"}],
     "workdays": [{"date": "2026-10-24T00:00:00", "name": "Make-up day"}],
     "leaves": [
-        {"employee_id": "B", "start": "2026-10-14", "end": "2026-10-15", "type": "sick", "note": "flu"},
-        {"employee_id": "C", "start": "2026-10-14", "period": "afternoon"},  # mornings still count
-        {"employee_id": 7, "start": "2026-10-16"},
+        {"email": " BOB@Example.com ", "start": "2026-10-14", "end": "2026-10-15", "type": "sick", "note": "flu"},
+        {"email": "carol@example.com", "start": "2026-10-14", "period": "afternoon"},  # mornings still count
+        {"email": 7, "start": "2026-10-16"},
         {"start": "2026-10-16"},  # missing employee
     ],
 }
@@ -36,9 +36,8 @@ def connect(app, responses):
 def test_parse_skips_invalid_rows_and_afternoon_leave():
     days, leaves, skipped = leave_api.parse(HR)
     assert days == [(dt.date(2026, 10, 20), "holiday", "Women's Day"), (dt.date(2026, 10, 24), "workday", "Make-up day")]
-    assert leaves == [("B", DAY, DAY + dt.timedelta(days=1), "sick", "flu"),
-                      ("7", dt.date(2026, 10, 16), dt.date(2026, 10, 16), "leave", "")]
-    assert skipped == 2
+    assert leaves == [("bob@example.com", DAY, DAY + dt.timedelta(days=1), "sick", "flu")]
+    assert skipped == 3
 
 
 def test_sync_stores_data_and_leave_affects_attendance(core):
@@ -46,7 +45,7 @@ def test_sync_stores_data_and_leave_affects_attendance(core):
     calls = connect(app, [HR])
     assert app.leave_sync.due()
     status = app.leave_sync.sync()
-    assert status["ok"] and "2 invalid rows skipped" in status["message"]
+    assert status["ok"] and "3 invalid rows skipped" in status["message"]
     url, token = calls[0]
     assert token == "tok" and url.startswith("https://hr.example/api/calendar?site=hq&from=2026-10-07&to=2026-12-13")
     assert app.store.calendar_day(dt.date(2026, 10, 20)) == ("holiday", "Women's Day")

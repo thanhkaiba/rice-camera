@@ -37,13 +37,13 @@ Placement matters more than any setting. Then draw a **detection area** on the C
 With labelled photos (e.g. from earlier tests), find the threshold at which nobody is identified as someone else:
 
 ```bash
-# Folders: faces/<employee id>/*.jpg; optionally eval/<employee id>/*.jpg and eval/_unknown/*.jpg (non-employees)
+# Folders: faces/<email>/*.jpg; optionally eval/<email>/*.jpg and eval/_unknown/*.jpg (non-employees)
 python -m attendance evaluate --gallery faces --test eval --backends insightface opencv
 ```
 
 Enter the recommended values in **Settings → Recognition**, adding about 0.02 to the match threshold as a safety margin. Include hard photos (dark, blurred, side views, masks); they are what separates the backends.
 
-- **Visits:** frames from one walk past the camera can go in a subfolder, `faces/<employee id>/<visit>/*.jpg`. Without `--test`, a whole visit is left out of the references while it is tested (frames of one walk are nearly identical, so testing them against each other flatters the result), and each visit is also scored the way the live system decides, by several agreeing frames.
+- **Visits:** frames from one walk past the camera can go in a subfolder, `faces/<email>/<visit>/*.jpg`. Without `--test`, a whole visit is left out of the references while it is tested (frames of one walk are nearly identical, so testing them against each other flatters the result), and each visit is also scored the way the live system decides, by several agreeing frames.
 - **Centering:** each backend is also tested with `center_embeddings` (needs photos of at least 8 people). It removes the direction that all faces from one camera share, which makes some people look similar to everyone. Scores are lower with it, so it comes with its own threshold. If `evaluate` says it is more accurate, set in `config.yaml`:
   ```yaml
   recognition:
@@ -62,6 +62,12 @@ It uses faces moved to the right person, faces named on the review page, faces r
 `python -m attendance enroll --faces faces` imports the same folders as reference photos, as an alternative to uploading on the web page.
 
 **Review & learning settings** (Settings → Recognition → Advanced): whether a sighting moved to the right person on the Today page is learned as a reference photo (on by default), how many photos are learned per confirmed review group (5), over how many days look-alike unknown faces are grouped (14), and the *already-seen score* (0.3) above which an unclear face resembling someone checked in today is taken to be them and not sent for review (0 = always review).
+
+Review suggestions are recalculated from saved face embeddings against the current reference gallery when the page opens, so new reference photos can change an old suggestion. Group scores are averaged over usable faces from the current model; a suggestion must meet `accept_score`, `min_margin`, and have clear supporting votes from more than half those faces. Ambiguous groups show “No clear suggestion” for manual selection. Similarity is not a probability of identity. Opening Review does not assign anyone or learn a face; confirmation is still required.
+
+Still-photo imports and uploads retry small photos at detector sizes 320 and 160 when the default pass finds no usable face and the photo is smaller than `det_size`. They stop at the first successful pass. Large photos and live camera frames keep their existing detection path; the camera does not run these extra passes.
+
+Portable seed samples imported for review are marked **Seed sample**. Labelling one records the chosen employee and can learn a usable single-face embedding after confirmation, but creates no attendance or Chat announcement. Samples without a detectable face or with multiple detected faces can still be labelled without learning an arbitrary face, including when a second face is too small to learn. They remain separate from live camera groups, daily unknown counts, snapshot retention and camera evaluation data. `seed/import_seed.py --config config.yaml --review-only` adds missing review samples and refreshes missing vectors only for pending seed samples. Existing vectors, handled labels and camera samples are preserved; a refreshed vector still requires manual confirmation before learning.
 
 ## Groups of people (person tracking)
 
@@ -131,3 +137,6 @@ Lessons built into the settings:
 8. **Varied references:** reference photos are enrolled together with their mirror image, and a confirmed face that is almost identical (≥ 97%) to one already kept is not stored again.
 9. **Sharpest frame:** of the frames that arrived since the last one analysed, the one where the faces are sharpest is used (Wi-Fi cameras and people walking give many blurred frames).
 10. **Camera health:** a black, blank or frozen picture counts as an outage instead of "nobody came"; days without any camera data are never counted as absences.
+
+
+Seed Review shows **Source label** separately from the current model suggestion; the source email alone never establishes identity. Explicit `auto_resolve_email` / `auto_resolve_model` metadata is rechecked against the actual single-face photo and current active gallery during import. A match must score at least 0.60 with a margin of 0.12, honoring stricter configured thresholds. Automatic labelling adds no reference or attendance. **Auto-labelled seed samples → Review again** returns a sample to pending and prevents later imports from overriding that choice. Label, evidence and audit changes commit together. Live camera thresholds and inference are unchanged.

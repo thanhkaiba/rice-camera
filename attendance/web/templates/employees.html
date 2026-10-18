@@ -10,8 +10,8 @@
     </div>
   </div>
   <div class="actions">
-    <div class="search" style="width:240px"><input type="search" id="search" placeholder="Search…" aria-label="Search by name or id"></div>
-    <button class="primary" type="button" onclick="document.getElementById('add').showModal(); document.getElementById('new-id').focus()">{{ icon('user-plus') }}Add</button>
+    <div class="search" style="width:240px"><input type="search" id="search" placeholder="Search…" aria-label="Search by name or email"></div>
+    <button class="primary" type="button" onclick="document.getElementById('add').showModal(); document.getElementById('new-email').focus()">{{ icon('user-plus') }}Add</button>
   </div>
 </div>
 
@@ -30,9 +30,9 @@
     <tbody>
     {% for p in people %}
       {% set n = counts.get(p.id, 0) %}
-      <tr class="link" data-name="{{ p.name|lower }} {{ p.id|lower }}" onclick="location.href='{{ url_for('employee', employee_id=p.id) }}'">
+      <tr class="link" data-name="{{ p.name|lower }} {{ p.email|lower }}" onclick="location.href='{{ url_for('employee', employee_id=p.id) }}'">
         <td>{% if thumbs.get(p.id) %}<img class="avatar" src="{{ url_for('media', path=thumbs[p.id]) }}" alt="" loading="lazy">{% else %}<span class="avatar empty">{{ p.name[:1] }}</span>{% endif %}</td>
-        <td><div class="cell-main">{{ p.name }}</div><div class="cell-sub">{{ p.id }}</div></td>
+        <td><div class="cell-main">{{ p.name }}</div><div class="cell-sub">{{ p.email or "Add email" }}</div></td>
         <td>{% if n == 0 %}<span class="badge bad plain">{{ icon('image') }}No photos</span>
             {% elif n < 5 %}<span class="badge late plain" title="{{ n }} photos · add more (5–10)">{{ icon('image') }}{{ n }}</span>
             {% else %}<span class="badge ok plain" title="{{ n }} photos">{{ icon('image') }}{{ n }}</span>{% endif %}</td>
@@ -56,7 +56,7 @@
     <form method="post" action="{{ url_for('add_employee') }}">
       <strong class="row">{{ icon('user-plus') }}One person</strong>
       <div class="form-row">
-        <label class="field" style="width:130px">ID<input name="id" id="new-id" required placeholder="NV001"></label>
+        <label class="field grow">Email<input type="email" name="email" id="new-email" required placeholder="person@example.com" autocomplete="email"></label>
         <label class="field grow">Full name<input name="name" required placeholder="Nguyen Van An"></label>
       </div>
       <div><button class="primary">{{ icon('plus') }}Add</button></div>
@@ -64,7 +64,7 @@
     <div class="divider" style="margin:0"></div>
     <form method="post" action="{{ url_for('import_employees') }}" enctype="multipart/form-data">
       <strong class="row">{{ icon('upload') }}CSV file</strong>
-      <label class="field"><span>Columns <code>id,name</code> · optional <code>chat_user</code> (Google Chat ID), <code>boss</code> (1 = never counted late)</span>
+      <label class="field"><span>Columns <code>email,name</code> · optional <code>chat_user</code> (Google Chat ID)</span>
         <input type="file" name="file" accept=".csv,text/csv" required></label>
       <div><button>{{ icon('upload') }}Import</button></div>
     </form>

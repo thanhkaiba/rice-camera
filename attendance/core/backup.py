@@ -9,6 +9,7 @@ Google Drive, OneDrive or Dropbox keeps in the cloud. Inside it:
                                    `keep_days` kept (records, sightings, settings, learned faces)
       data/faces/                  reference photos, mirrored (new and changed files copied,
       data/crops/                  deleted ones removed); crops/ only with include_photos
+      data/review-seed/            offline review samples, always included
       latest.json                  when, what and how much
 
 `python -m attendance restore <folder>` (with the program stopped) puts it back, on this or
@@ -125,6 +126,8 @@ def run(store, cfg: Config, now: dt.datetime) -> Result:
             shutil.copy2(config_file, dest / "config.yaml")
 
         copied, removed, photo_bytes = mirror(data_dir / "faces", dest / "data" / "faces")
+        c, r, b = mirror(data_dir / "review-seed", dest / "data" / "review-seed")
+        copied, removed, photo_bytes = copied + c, removed + r, photo_bytes + b
         if cfg.backup.include_photos:
             c, r, b = mirror(data_dir / "crops", dest / "data" / "crops")
             copied, removed, photo_bytes = copied + c, removed + r, photo_bytes + b
@@ -241,7 +244,7 @@ def restore(cfg: Config, folder: Path, snapshot: str | None = None) -> str:
         (data_dir / stale).unlink(missing_ok=True)
     shutil.copy2(chosen, data_dir / "attendance.db")
     photos = 0
-    for name in ("faces", "crops"):
+    for name in ("faces", "crops", "review-seed"):
         if (src / "data" / name).is_dir():
             photos += mirror(src / "data" / name, data_dir / name)[0]
     lines = [f"Database restored from {chosen.name} ({employees} employees), {photos} photo files copied."]

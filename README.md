@@ -39,7 +39,7 @@ The camera only runs during the camera hours (default 08:00–11:00). Someone wh
 
 - **Today:** everyone's status. Click a person to correct: move a sighting to the right person (the face is learned for them), mark it *Not them*, type an arrival time, or delete the arrival. The page says when everyone is in. **Evidence** (a link in that dialog) is a printable page for the person's day: the camera pictures with the time stamp burned in, every sighting, every correction, and whether the files are unchanged since they were taken; also as a ZIP to hand over.
 - **Review:** faces the camera could not identify, grouped by person. Click one: *It's …*, pick a person, *New employee*, or *Skip*. Start without any photos this way: let the camera run a day, name each face once.
-- **People:** add or import (`id,name`, optional `chat_user`, `boss`), upload 5–10 photos each, switch *never count as late*.
+- **People:** add by email and name, or import CSV (`email,name`, optional `chat_user`). Email is unique; names may repeat. Upload 5–10 photos each and switch *never count as late* when needed.
 - **Reports:** late & absence per person and per day (CSV), recognition accuracy from your corrections, change log.
 - **Camera:** live picture with labelled faces; draw the **detection area** over the walkway.
 - **Settings:** hours, notifications, camera, access, HR system, recognition. Light/dark follows the system; the moon/sun button switches.
@@ -59,6 +59,8 @@ The default `insightface` models are **non-commercial research only**; company u
 Face photos are personal data: inform employees and get consent. Camera snapshots are deleted after 90 days, except for days on which the person was late: those are kept for a year as evidence (both in Settings); reference photos stay until deleted; deleting a person removes their face data. **Backup:** once a day everything is copied to a folder you choose (external drive, network share or cloud-synced folder); moving to another computer is `restore` from that folder, see [docs/install.md](docs/install.md#backup-and-moving-to-another-computer). Everything is in the data folder (`attendance.db`, `faces/`, `crops/`, `attendance.log`). The admin page is for the office network only; for remote access use [Tailscale](https://tailscale.com), never an open port.
 
 ## Development
+
+Import the portable employee/photo/review dataset after pulling the code: [hướng dẫn chi tiết bằng tiếng Việt](docs/seed-import.md). The `seed/` directory must be transferred separately because Git ignores it.
 
 ```bash
 pip install -r requirements-dev.txt

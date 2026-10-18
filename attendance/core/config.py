@@ -202,7 +202,7 @@ class BackupConfig:
 class Config:
     timezone: str = "Asia/Ho_Chi_Minh"
     data_dir: str = "data"
-    employees_file: str = "employees.csv"  # imported once, when the database has no employees yet
+    employees_file: str = "employees.csv"  # email,name CSV, imported initially or once to attach legacy emails
     healthcheck_url: str = ""
     retention_days: int = 90  # face photos of arrivals and unknown faces are deleted after this
     # Snapshots of a day on which someone was late are kept this long instead, as evidence in case

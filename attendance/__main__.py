@@ -37,7 +37,7 @@ def main() -> None:
                    help="default: the backend in config.yaml")
     p.add_argument("--person", choices=["yolox_tiny", "yolox_s"], nargs="?", const="yolox_tiny", default=None,
                    help="download a person detector for tracking.mode: person instead (default yolox_tiny)")
-    p = sub.add_parser("enroll", help="enroll reference photos from faces/<employee id>/")
+    p = sub.add_parser("enroll", help="enroll reference photos from faces/<email>/")
     p.add_argument("--faces", default="faces")
     p = sub.add_parser("evaluate", help="compare backends and choose thresholds from labelled photos")
     p.add_argument("--gallery", default="faces")

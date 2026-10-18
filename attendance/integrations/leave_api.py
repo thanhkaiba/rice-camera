@@ -6,7 +6,7 @@ Response (JSON):
     {
       "holidays": [{"date": "2026-10-20", "name": "Women's Day"}],
       "workdays": [{"date": "2026-10-24", "name": "Make-up day"}],
-      "leaves":   [{"employee_id": "NV001", "start": "2026-10-15", "end": "2026-10-16",
+      "leaves":   [{"email": "person@example.com", "start": "2026-10-15", "end": "2026-10-16",
                     "type": "leave", "period": "full", "note": "Family"}]
     }
 - "end" defaults to "start"; "type" is free text (leave, sick, business_trip, remote, ...).
@@ -28,7 +28,7 @@ import urllib.request
 from typing import Callable
 
 from ..core.config import Config
-from ..store import Store
+from ..store import Store, normalize_email
 
 log = logging.getLogger(__name__)
 
@@ -67,9 +67,10 @@ def parse(data: object) -> tuple[list[tuple[dt.date, str, str]], list[tuple[str,
                 continue
             start = _date(row["start"])
             end = _date(row.get("end") or row["start"])
-            if end < start or not str(row["employee_id"]).strip():
+            email = normalize_email(str(row["email"]))
+            if end < start:
                 raise ValueError
-            leaves.append((str(row["employee_id"]).strip(), start, end, str(row.get("type") or "leave"),
+            leaves.append((email, start, end, str(row.get("type") or "leave"),
                            str(row.get("note") or "")))
         except (KeyError, TypeError, ValueError, AttributeError):
             skipped += 1
@@ -124,8 +125,15 @@ class LeaveSync:
         except Exception as exc:  # network error, timeout, invalid JSON or format
             message = f"{type(exc).__name__}: {exc}"
         else:
-            self.store.replace_external(start, end, days, leaves)
-            message = f"{len(days)} calendar days, {len(leaves)} leave entries"
+            resolved = []
+            for email, first, last, kind, note in leaves:
+                person = self.store.employee_by_email(email)
+                if person is None:
+                    skipped += 1
+                else:
+                    resolved.append((person.id, first, last, kind, note))
+            self.store.replace_external(start, end, days, resolved)
+            message = f"{len(days)} calendar days, {len(resolved)} leave entries"
             if skipped:
                 message += f", {skipped} invalid rows skipped"
             status = {"at": now.isoformat(), "ok": True, "message": message, "last_success": now.isoformat()}

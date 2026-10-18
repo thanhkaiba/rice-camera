@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as dt
 import hmac
-import re
 import secrets
 import sys
 from pathlib import Path
@@ -38,19 +37,6 @@ def _time(value: str) -> dt.time:
         return dt.time.fromisoformat(value)
     except ValueError:
         raise ValueError("enter the time as HH:MM") from None
-
-
-def _next_id(people) -> str:
-    """Suggest the next employee id, following the existing ones (NV007 -> NV008)."""
-    best = None
-    for p in people:
-        m = re.fullmatch(r"(.*?)(\d+)", p.id)
-        if m and (best is None or int(m.group(2)) > int(best.group(2))):
-            best = m
-    if best is None:
-        return ""
-    digits = best.group(2)
-    return f"{best.group(1)}{int(digits) + 1:0{len(digits)}d}"
 
 
 def current_user(cfg) -> str:
@@ -157,7 +143,8 @@ def create_app(core: "App") -> "Flask":
         return {"pending": store.pending_group_count(), "nav": request.endpoint, "SOURCES": SOURCES,
                 "setup_open": first_setup.open_count(core), "models_status": core.live.models,
                 "translocated": sys.platform == "darwin" and "/AppTranslocation/" in sys.executable,
-                "leave_label": lambda kind: LEAVE_KINDS.get(kind, kind), "WEEKDAYS": WEEKDAYS}
+                "leave_label": lambda kind: LEAVE_KINDS.get(kind, kind), "WEEKDAYS": WEEKDAYS,
+                "employee_emails": store.employee_emails()}
 
     from . import attendance as attendance_routes
     from . import employees as employees_routes
@@ -171,7 +158,7 @@ def create_app(core: "App") -> "Flask":
 
     @app.get("/media/<path:path>")
     def media(path: str):
-        if not (path.startswith("crops/") or path.startswith("faces/")) or ".." in Path(path).parts:
+        if not path.startswith(("crops/", "faces/", "review-seed/")) or ".." in Path(path).parts:
             abort(404)
         return send_from_directory(core.data_dir, path)
 

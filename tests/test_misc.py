@@ -81,10 +81,10 @@ def test_sweep_and_recommend_pick_safest_setting_with_no_wrong_matches():
 
 def test_import_employees_handles_excel_bom_and_never_removes_anyone(tmp_path):
     store = Store(tmp_path / "db")
-    store.import_employees("\ufeffid,name\nA,Ánh\nB,Bình\n")  # Excel BOM, accented names
-    store.import_employees("ID , Name\nA,Ánh Nguyễn\n")
-    assert store.employees() == {"A": "Ánh Nguyễn", "B": "Bình"}
-    with pytest.raises(ValueError, match="id,name"):
+    store.import_employees("\ufeffemail,name\nanh@example.com,Ánh\nbinh@example.com,Bình\n")
+    store.import_employees("Email , Name\nANH@example.com,Ánh Nguyễn\n")
+    assert {p.email: p.name for p in store.all_employees()} == {"anh@example.com": "Ánh Nguyễn", "binh@example.com": "Bình"}
+    with pytest.raises(ValueError, match="email,name"):
         store.import_employees("code;full name\nA;X\n")
 
 

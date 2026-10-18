@@ -79,7 +79,8 @@ def test_evidence_page_and_zip_tell_the_whole_story(core):
     assert summary["status"] == "Late" and summary["minutes_late"] == 15
     assert summary["sightings"][0]["integrity"] == "files unchanged since capture"
     assert set(summary["sightings"][0]["sha256_now"]) == {"scene", "face", "body"}
-    assert "Alice (A)" in z.read("summary.txt").decode()
+    assert summary["employee"] == {"email": "alice@example.com", "name": "Alice"}
+    assert "Alice (alice@example.com)" in z.read("summary.txt").decode()
     assert "export evidence" in c.get("/audit").get_data(as_text=True)
 
     # Someone edits a picture afterwards: the page says so.

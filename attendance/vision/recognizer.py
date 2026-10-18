@@ -287,11 +287,25 @@ class FaceRecognizer:
                                     raw_yaw, raw_pitch))
         return out
 
+    def analyze_photo(self, image: np.ndarray) -> list[DetectedFace]:
+        """Retry small photos at crop scales when enlarging them hid the face."""
+        faces = self.analyze(image)
+        if faces or max(image.shape[:2]) >= self.cfg.det_size:
+            return faces
+        h, w = image.shape[:2]
+        for size in (320, 160):
+            if size >= self.cfg.det_size:
+                continue
+            faces = self.analyze(image, [(0, 0, w, h)], region_size=size, full_frame=False)
+            if faces:
+                return faces
+        return []
+
     def largest_face(self, image: np.ndarray, mirror: bool = False) -> DetectedFace | None:
         """The biggest face in a photo. With `mirror` (reference photos), its embedding is the
         average of the photo and its mirror image, which describes the face rather than the
         side it happened to be lit or turned from."""
-        faces = self.analyze(image)
+        faces = self.analyze_photo(image)
         if not faces:
             return None
         face = max(faces, key=lambda f: f.size)

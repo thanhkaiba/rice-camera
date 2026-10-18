@@ -290,6 +290,7 @@ dialog[open]::backdrop { animation: fade-in .25s ease-out; }
 .dialog-head .tools { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .dialog-body { padding: 18px 22px 22px; display: grid; gap: 20px; }
 .dialog-body form { display: grid; gap: 6px; }
+.dialog-body, .dialog-body form { grid-template-columns: minmax(0, 1fr); }
 .dialog-body .form-row { align-items: center; }
 .x, .dialog-head .close { width: 32px; height: 32px; border-radius: 8px; padding: 0; display: grid; place-items: center; border-color: transparent; box-shadow: none; background: transparent; color: var(--muted); }
 .x:hover, .dialog-head .close:hover { background: var(--soft-2); color: var(--text); }

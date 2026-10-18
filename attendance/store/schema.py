@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -10,6 +11,7 @@ import numpy as np
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS employees (
     id TEXT PRIMARY KEY,
+    email TEXT,
     name TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
     chat_user TEXT NOT NULL DEFAULT '',  -- Google Chat user ID, used to @mention the person
@@ -65,7 +67,8 @@ CREATE TABLE IF NOT EXISTS unknowns (
     notified INTEGER NOT NULL DEFAULT 0,
     group_id INTEGER,  -- unknown faces that look like the same person share a group
     ignored_day TEXT,  -- set when the admin ignored the face; ignoring only lasts that day
-    sha256 TEXT
+    sha256 TEXT,
+    source TEXT NOT NULL DEFAULT 'camera'
 );
 CREATE TABLE IF NOT EXISTS calendar (
     day TEXT PRIMARY KEY,
@@ -122,6 +125,7 @@ class Employee:
     active: bool
     chat_user: str = ""
     exempt: bool = False  # not counted as late or absent
+    email: str = ""
 
 
 @dataclass
@@ -162,6 +166,7 @@ class Unknown:
     employee_id: str | None
     group_id: int = 0
     sha256: str | None = None
+    source: str = "camera"
 
 
 @dataclass
@@ -185,6 +190,16 @@ class Leave:
 
 # Accepted CSV column names for the Google Chat user ID.
 CHAT_COLUMNS = ("chat_user", "chat_id", "google_chat_id", "chat")
+
+
+def normalize_email(value: str) -> str:
+    value = value.strip().lower()
+    local = value.partition("@")[0]
+    if (len(value) > 254 or len(local) > 64 or local.startswith(".") or local.endswith(".")
+            or ".." in local or not re.fullmatch(
+                r"[a-z0-9._%+\-]+@(?:[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?\.)+[a-z]{2,63}", value)):
+        raise ValueError("a valid employee email is required")
+    return value
 
 
 def normalize_chat_user(value: str | None) -> str:
@@ -218,8 +233,8 @@ def _blob(vector) -> bytes | None:
 
 def migrate(db: sqlite3.Connection) -> None:
     """Add columns introduced after a database was created."""
-    added = {"embeddings": [("image", "TEXT")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT")],
-             "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0")],
+    added = {"embeddings": [("image", "TEXT")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'")],
+             "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT")],
              "sightings": [("camera_id", "TEXT"), ("model", "TEXT"), ("vector", "BLOB"), ("sha256", "TEXT")]}
     for table, columns in added.items():
         have = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
@@ -228,6 +243,7 @@ def migrate(db: sqlite3.Connection) -> None:
                 db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
                 if (table, name) == ("sightings", "camera_id"):
                     db.execute("UPDATE sightings SET camera_id = employee_id WHERE source = 'camera'")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS employees_email ON employees(email COLLATE NOCASE)")
     # Databases from before sightings existed: each arrival becomes its first sighting.
     if not db.execute("SELECT 1 FROM sightings LIMIT 1").fetchone():
         db.execute("INSERT INTO sightings (day, employee_id, ts, source, score, image, camera_id) "

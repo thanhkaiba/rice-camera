@@ -50,7 +50,7 @@
       <tbody>
       {% for p in acc.people %}
         <tr>
-          <td><a href="{{ url_for('employee', employee_id=p.employee_id) }}"><strong>{{ p.name }}</strong></a><div class="cell-sub">{{ p.employee_id }}</div></td>
+          <td><a href="{{ url_for('employee', employee_id=p.employee_id) }}"><strong>{{ p.name }}</strong></a><div class="cell-sub">{{ employee_emails.get(p.employee_id, "") }}</div></td>
           <td class="num">{{ p.photos }}</td>
           <td class="num">{{ p.missed or '–' }}</td>
           <td class="num">{{ p.taken_as_other or '–' }}</td>

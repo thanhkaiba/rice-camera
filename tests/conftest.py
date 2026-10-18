@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from attendance.config import Config  # noqa: E402
 from attendance.pipeline import App  # noqa: E402
 from attendance.recognizer import DetectedFace  # noqa: E402
+from attendance.store import Store  # noqa: E402
 
 TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 DAY = dt.date(2026, 10, 14)  # Wednesday
@@ -50,10 +51,23 @@ class FakeRecognizer:
             return None
         return DetectedFace((50.0, 50.0, 150.0, 150.0), person_vector(person), 0.9, 100.0, 100.0, 0.0, 0.0, True, 0.8)
 
+    def analyze(self, image):
+        face = self.largest_face(image)
+        return [face] if face is not None else []
+
+    def analyze_photo(self, image):
+        return self.analyze(image)
+
 
 @pytest.fixture
 def core(tmp_path):
-    (tmp_path / "employees.csv").write_text("id,name\nA,Alice\nB,Bob\nC,Carol\n", encoding="utf-8")
+    (tmp_path / "employees.csv").write_text("email,name\nalice@example.com,Alice\nbob@example.com,Bob\ncarol@example.com,Carol\n", encoding="utf-8")
+    seed = Store(tmp_path / "data" / "attendance.db")
+    with seed._db:
+        seed._db.executemany("INSERT INTO employees (id,email,name) VALUES (?,?,?)",
+                             [("A", "alice@example.com", "Alice"), ("B", "bob@example.com", "Bob"),
+                              ("C", "carol@example.com", "Carol")])
+    seed.close()
     cfg = Config(employees_file="employees.csv", data_dir="data", base_dir=tmp_path)
     cfg.web.public_url = "http://pc:8000"
     cfg.google_chat.webhook_url = "https://chat.googleapis.com/v1/spaces/X/messages?key=k&token=t"

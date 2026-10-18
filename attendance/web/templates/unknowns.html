@@ -4,7 +4,7 @@
 <div class="page-head">
   <div>
     <h1>Review</h1>
-    <p class="subtitle">Faces the camera could not identify, grouped by person. Click one to name it.</p>
+    <p class="subtitle">Camera faces and seed samples awaiting review. Click one to name it.</p>
   </div>
   {% if groups %}<div class="actions"><span class="badge bad" title="{{ groups|length }} to review">{{ groups|length }}</span></div>{% endif %}
 </div>
@@ -16,12 +16,15 @@
   {% for g in groups %}
   {% set first, last = g.members[0], g.latest %}
   {% set guess = employees.get(g.guess) if g.guess else None %}
+  {% set guess_label = guess ~ ' (' ~ employee_emails.get(g.guess, '') ~ ')' if guess else '' %}
   {% set when = local(last.ts).strftime('%a %d %b %H:%M') if g.members|length == 1
      else 'First ' ~ local(first.ts).strftime('%a %d %b %H:%M') ~ ' · last ' ~ local(last.ts).strftime('%a %d %b %H:%M') %}
   <div class="face-card" role="button" tabindex="0" style="animation-delay: {{ (loop.index0 % 8) * 40 }}ms"
        data-id="{{ g.id }}" data-count="{{ g.members|length }}" data-when="{{ when }}"
-       data-guess="{{ g.guess or '' }}" data-guess-name="{{ guess or '' }}"
-       data-score="{{ '%.0f'|format(g.guess_score * 100) if guess else '' }}"
+       data-seed="{{ 1 if g.source == 'seed' else 0 }}"
+       data-source-id="{{ g.expected_id or '' }}" data-source-name="{{ g.expected_name or '' }}"
+       data-guess="{{ g.guess or '' }}" data-guess-name="{{ guess_label }}"
+       data-score="{{ '%.2f'|format(g.guess_score) if guess else '' }}"
        data-body="{{ url_for('media', path=g.body) if g.body else '' }}"
        data-photos='{{ g.photo_urls|tojson|forceescape }}'
        onclick="openReview(this)" onkeydown="if(event.key==='Enter')openReview(this)">
@@ -33,8 +36,12 @@
     {% set thumbs = g.photos if g.body else g.photos[1:] %}
     {% if thumbs %}<div class="thumbs">{% for p in thumbs[:4] %}<img src="{{ url_for('media', path=p) }}" alt="" loading="lazy">{% endfor %}</div>{% endif %}
     <div class="body">
+      {% if g.source == 'seed' %}<span class="badge info" title="No attendance will be recorded when this sample is labelled">Seed sample</span>{% endif %}
       <div class="small muted tnum">{{ local(last.ts).strftime('%a %d %b %H:%M') }}</div>
-      {% if guess %}<div class="small">Looks like <strong>{{ guess }}</strong> <span class="muted">({{ '%.0f'|format(g.guess_score * 100) }}%)</span></div>{% endif %}
+      {% if guess %}<div class="small">Looks like <strong>{{ guess_label }}</strong> <span class="muted" title="Similarity score, not a probability of identity">(similarity {{ '%.2f'|format(g.guess_score) }})</span></div>
+      {% else %}<div class="small muted">No clear suggestion · choose a person manually</div>{% endif %}
+      {% if g.expected_name %}<div class="small">Source label: <strong>{{ g.expected_name }}</strong> · check the photo</div>{% endif %}
+      {% if guess and g.expected_id and g.expected_id != g.guess %}<div class="small">Model and source disagree · manual review required</div>{% endif %}
       <button type="button" class="primary btn-sm btn-block">{{ icon('help') }}Who is this?</button>
     </div>
   </div>
@@ -42,6 +49,25 @@
 </div>
 {% else %}
 <div class="card empty-state"><span class="ico">{{ icon('smile') }}</span><strong>Nothing to review.</strong></div>
+{% endif %}
+
+{% if auto_labelled %}
+<details class="panel" id="auto-labelled-seed" style="margin-top:20px">
+  <summary>Auto-labelled seed samples ({{ auto_labelled|length }})</summary>
+  <p class="hint">Strong reference matches agreeing with source labels. No attendance or reference photos were added. You can review any sample again.</p>
+  <div class="face-grid">
+    {% for sample in auto_labelled %}
+    <div class="face-card" style="cursor:default">
+      <div class="pic"><img class="face" src="{{ url_for('media', path=sample.image) }}" alt="" loading="lazy"></div>
+      <div class="body">
+        <strong class="small">{{ sample.name }}</strong>
+        <div class="small muted">Similarity {{ '%.2f'|format(sample.score) }} · check the photo</div>
+        <form method="post" action="{{ url_for('reopen_seed', unknown_id=sample.id) }}"><button class="btn-sm btn-block">Review again</button></form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</details>
 {% endif %}
 
 {% if ignored %}
@@ -78,13 +104,19 @@
       <button class="primary btn-lg btn-block" id="guess-button"></button>
       <span class="hint" id="guess-hint"></span>
     </form>
+    <form method="post" id="form-source" hidden>
+      <strong id="source-name"></strong>
+      <input type="hidden" name="employee_id" id="source-id">
+      <button type="submit" id="source-button">Confirm source label</button>
+      <span class="hint">Source label only; verify the photo before confirming. No attendance will be recorded.</span>
+    </form>
     {% if employees %}
     <form method="post" id="form-pick">
       <strong id="pick-label">Someone else?</strong>
       <div class="form-row" style="flex-wrap:nowrap">
         <select name="employee_id" id="pick-id" required style="flex:1; min-width:0">
           <option value="">Choose a person…</option>
-          {% for id, name in employees.items() %}<option value="{{ id }}">{{ name }}</option>{% endfor %}
+          {% for id, name in employees.items() %}<option value="{{ id }}">{{ name }} ({{ employee_emails.get(id, "") }})</option>{% endfor %}
         </select>
         <button title="Records their arrival on every day seen and learns the face">{{ icon('check') }}Confirm</button>
       </div>
@@ -94,7 +126,7 @@
       <summary>{{ icon('user-plus') }} New employee</summary>
       <form method="post" id="form-new" style="margin-top:8px">
         <div class="form-row">
-          <input name="id" required placeholder="ID" value="{{ next_id }}" style="width:130px">
+          <input type="email" name="email" required placeholder="Email" aria-label="Employee email" style="flex:1 1 200px">
           <input name="name" required placeholder="Full name" style="flex:1 1 160px">
         </div>
         <div><button class="{{ 'primary' if not employees }}">{{ icon('user-plus') }}Add &amp; confirm</button></div>
@@ -126,16 +158,23 @@
       const img = document.createElement('img'); img.src = src; img.alt = '';
       a.append(img); return a;
     }));
-    document.getElementById('review-when').textContent = d.when + (d.count > 1 ? ' · seen ' + d.count + ' times' : '');
+    document.getElementById('review-when').textContent = d.when + (d.count > 1 ? ' · seen ' + d.count + ' times' : '') +
+      (d.seed === '1' ? ' · Seed sample · No attendance will be recorded' : '');
     const guess = document.getElementById('form-guess');
     guess.hidden = !d.guess;
     guess.action = url(urls.assign);
     document.getElementById('guess-id').value = d.guess;
-    document.getElementById('guess-button').textContent = '✓ It\'s ' + d.guessName;
-    document.getElementById('guess-hint').textContent = d.score + '% match';
+    document.getElementById('guess-button').textContent = 'Confirm: ' + d.guessName;
+    document.getElementById('guess-hint').textContent = 'Similarity ' + d.score + ' · check the photos before confirming';
+    const source = document.getElementById('form-source');
+    source.hidden = !d.sourceId || d.sourceId === d.guess;
+    source.action = url(urls.assign);
+    document.getElementById('source-id').value = d.sourceId;
+    document.getElementById('source-name').textContent = d.sourceName;
     const pick = document.getElementById('form-pick');
     if (pick) {
       pick.action = url(urls.assign);
+      pick.querySelector('button').title = d.seed === '1' ? 'Label this sample; no attendance is recorded' : 'Confirm this person and learn the face';
       document.getElementById('pick-label').textContent = d.guess ? 'Someone else?' : 'Which person?';
       for (const o of document.getElementById('pick-id').options) o.hidden = o.value && o.value === d.guess;
       document.getElementById('pick-id').value = '';

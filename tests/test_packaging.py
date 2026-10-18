@@ -1,4 +1,5 @@
 import os
+import subprocess
 import struct
 import sys
 from pathlib import Path
@@ -73,3 +74,56 @@ def test_page_warns_when_run_from_a_translocated_copy(core, monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(sys, "executable", "/private/var/folders/x/AppTranslocation/ABC/FaceAttendance")
     assert "drag <b>FaceAttendance</b> into <b>Applications</b>" in client(app).get("/settings").get_data(as_text=True)
+
+
+def test_source_install_resolves_wheels_and_rejects_missing_ffmpeg(tmp_path, monkeypatch):
+    calls = []
+    run = subprocess.run
+    monkeypatch.setattr(launcher.subprocess, "run", lambda cmd, **kw: calls.append((cmd, kw)))
+    monkeypatch.setattr(launcher, "app_home", lambda: pytest.fail("installation must precede application startup"))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
+    source = tmp_path / "source with spaces"
+    uv = tmp_path / "tools with spaces" / "uv"
+
+    launcher.main(["--install", str(uv), str(source)])
+
+    assert calls[0] == ([str(uv), "pip", "install", "--python", sys.executable, "--upgrade",
+                         "--only-binary", ":all:", "-r", str(source / "requirements.txt")], {"check": True})
+    probe, options = calls[1]
+    assert probe[:2] == [sys.executable, "-c"] and options == {"check": True}
+    assert calls[2] == ([str(uv), "pip", "install", "--python", sys.executable, "--no-deps",
+                         "--reinstall-package", "face-attendance", str(source)], {"check": True})
+    (tmp_path / "cv2.py").write_text(
+        "from types import SimpleNamespace\nCAP_FFMPEG = 1900\n__version__ = 'test'\n"
+        "videoio_registry = SimpleNamespace(hasBackend=lambda backend: False)\n")
+    (tmp_path / "onnxruntime.py").write_text("__version__ = 'test'\n")
+    result = run(probe, env={**os.environ, "PYTHONPATH": str(tmp_path)}, capture_output=True, text=True)
+    assert result.returncode != 0 and "FFmpeg" in result.stderr
+
+
+@pytest.mark.parametrize("failed_step", [1, 2])
+def test_source_install_stops_before_updating_the_app_on_library_failure(tmp_path, monkeypatch, failed_step):
+    calls = []
+    monkeypatch.setattr(launcher, "app_home", lambda: pytest.fail("installation must precede application startup"))
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        if len(calls) == failed_step:
+            raise subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
+    with pytest.raises(SystemExit) as exc:
+        launcher.main(["--install", "uv", str(tmp_path)])
+    assert exc.value.code == 1
+    assert len(calls) == failed_step
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_source_install_requires_an_unbundled_virtual_environment(tmp_path, monkeypatch, frozen):
+    monkeypatch.setattr(launcher, "app_home", lambda: pytest.fail("installation must precede application startup"))
+    monkeypatch.setattr(sys, "frozen", frozen, raising=False)
+    monkeypatch.setattr(sys, "prefix", sys.base_prefix if not frozen else str(tmp_path / "venv"))
+    monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **kw: pytest.fail("unsafe installation"))
+    with pytest.raises(SystemExit, match="virtual environment"):
+        launcher.main(["--install", "uv", str(tmp_path)])

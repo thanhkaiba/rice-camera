@@ -75,9 +75,10 @@ def register(app: Flask, core: "App") -> None:
     def report_summary_csv():
         start, end = _period()
         rep = service.period_report(start, end)
+        emails = store.employee_emails()
         return _csv(f"attendance-summary-{start}-{rep.end}.csv",
-                    ["employee_id", "name", "work_days", "on_time", "late", "late_minutes", "not_seen", "on_leave"],
-                    [[p.employee_id, p.name, p.work_days, p.on_time, p.late, p.late_minutes, p.not_seen, p.on_leave]
+                    ["email", "name", "work_days", "on_time", "late", "late_minutes", "not_seen", "on_leave"],
+                    [[emails.get(p.employee_id, ""), p.name, p.work_days, p.on_time, p.late, p.late_minutes, p.not_seen, p.on_leave]
                      for p in rep.people])
 
     @app.get("/report/details.csv")
@@ -97,8 +98,11 @@ def register(app: Flask, core: "App") -> None:
                              "", "", "", outage])
             for emp_id, name, kind in d.on_leave:
                 rows.append([d.day, emp_id, name, "on_leave", "", "", kind, outage])
+        emails = store.employee_emails()
+        for row in rows:
+            row[1] = emails.get(row[1], "")
         return _csv(f"attendance-details-{start}-{rep.end}.csv",
-                    ["date", "employee_id", "name", "status", "arrived", "minutes_late", "source_or_leave", "note"], rows)
+                    ["date", "email", "name", "status", "arrived", "minutes_late", "source_or_leave", "note"], rows)
 
     @app.get("/audit")
     def audit():

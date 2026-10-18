@@ -98,7 +98,7 @@ class AttendanceStoreMixin:
 
     def unknown_counts(self, start: dt.date, end: dt.date) -> dict[dt.date, int]:
         """Unidentified faces per day, whatever became of them."""
-        rows = self._all("SELECT day, COUNT(*) AS n FROM unknowns WHERE day BETWEEN ? AND ? GROUP BY day",
+        rows = self._all("SELECT day, COUNT(*) AS n FROM unknowns WHERE day BETWEEN ? AND ? AND source='camera' GROUP BY day",
                          (start.isoformat(), end.isoformat()))
         return {dt.date.fromisoformat(r["day"]): r["n"] for r in rows}
 
@@ -150,7 +150,7 @@ class AttendanceStoreMixin:
             else:
                 out.append((r["employee_id"], r["image"], r["source"]))
         for r in self._all("SELECT image FROM unknowns WHERE day BETWEEN ? AND ? AND status = 'ignored' "
-                           "AND image IS NOT NULL", (start.isoformat(), end.isoformat())):
+                           "AND image IS NOT NULL AND source='camera'", (start.isoformat(), end.isoformat())):
             out.append((None, r["image"], "ignored"))
         return out
 
@@ -158,15 +158,18 @@ class AttendanceStoreMixin:
 
     def add_unknown(self, day: dt.date, ts: dt.datetime, image: str | None, model: str | None,
                     vector: np.ndarray | None, guess_id: str | None, guess_score: float | None,
-                    group_id: int | None = None, ignored: bool = False, sha256: str | None = None) -> int:
+                    group_id: int | None = None, ignored: bool = False, sha256: str | None = None,
+                    *, source: str = "camera") -> int:
         """Store an unidentified face; without a group it starts a new group of its own.
         `ignored` stores it as already ignored for the day (its group was ignored earlier today)."""
+        if source not in {"camera", "seed"}:
+            raise ValueError("unknown face source must be camera or seed")
         with self._lock, self._db:
             cur = self._db.execute(
                 "INSERT INTO unknowns (day, ts, image, model, vector, guess_id, guess_score, group_id, status, "
-                "ignored_day, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "ignored_day, sha256, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (day.isoformat(), ts.isoformat(), image, model, _blob(vector), guess_id, guess_score, group_id,
-                 "ignored" if ignored else "pending", day.isoformat() if ignored else None, sha256),
+                 "ignored" if ignored else "pending", day.isoformat() if ignored else None, sha256, source),
             )
             if group_id is None:
                 self._db.execute("UPDATE unknowns SET group_id = id WHERE id = ?", (cur.lastrowid,))
@@ -175,7 +178,7 @@ class AttendanceStoreMixin:
     def _unknown(self, r) -> Unknown:
         return Unknown(r["id"], dt.datetime.fromisoformat(r["ts"]), r["image"], r["model"], _vec(r["vector"]),
                        r["guess_id"], r["guess_score"], r["status"], r["employee_id"], r["group_id"] or r["id"],
-                       r["sha256"])
+                       r["sha256"], r["source"])
 
     def pending_groups(self) -> list[list[Unknown]]:
         """Pending unknown faces grouped by person, most recently seen group first."""
@@ -217,7 +220,7 @@ class AttendanceStoreMixin:
     def pending_group_count(self, day: dt.date | None = None) -> int:
         sql, params = "SELECT COUNT(DISTINCT COALESCE(group_id, id)) AS n FROM unknowns WHERE status = 'pending'", []
         if day is not None:
-            sql += " AND day = ?"
+            sql += " AND day = ? AND source='camera'"
             params.append(day.isoformat())
         return self._all(sql, params)[0]["n"]
 
@@ -225,7 +228,45 @@ class AttendanceStoreMixin:
         rows = self._all("SELECT * FROM unknowns WHERE id = ?", (unknown_id,))
         return self._unknown(rows[0]) if rows else None
 
-    def unknowns(self, day: dt.date | None = None, status: str | None = "pending") -> list[Unknown]:
+    def refresh_seed_vector(self, unknown_id: int, model: str, vector: np.ndarray) -> bool:
+        cur = self._exec("UPDATE unknowns SET model=?, vector=? WHERE id=? "
+                         "AND source='seed' AND status='pending' AND vector IS NULL",
+                         (model, _blob(vector), unknown_id))
+        return bool(cur.rowcount)
+
+    def label_seed(self, unknown_id: int, employee_id: str, model: str,
+                   evidence: str, now: dt.datetime) -> bool:
+        with self._lock, self._db:
+            cur = self._db.execute("UPDATE unknowns SET status='assigned', employee_id=? WHERE id=? "
+                         "AND source='seed' AND status='pending' AND employee_id IS NULL "
+                         "AND model=? AND vector IS NOT NULL "
+                         "AND EXISTS (SELECT 1 FROM employees WHERE id=? AND active=1) "
+                         "AND NOT EXISTS (SELECT 1 FROM kv WHERE key=?)",
+                         (employee_id, unknown_id, model, employee_id, f"seed_review_manual:{unknown_id}"))
+            if not cur.rowcount:
+                return False
+            self._db.execute("INSERT OR REPLACE INTO kv (key,value) VALUES (?,?)",
+                             (f"seed_review_auto:{unknown_id}", evidence))
+            self._db.execute("INSERT INTO audit (ts,user,action,details) VALUES (?,?,?,?)",
+                             (now.isoformat(), "seed", "auto-label seed", f"sample {unknown_id}; {evidence}"))
+        return True
+
+    def reopen_seed(self, unknown_id: int, employee_id: str, now: dt.datetime, user: str) -> bool:
+        with self._lock, self._db:
+            cur = self._db.execute("UPDATE unknowns SET status='pending', employee_id=NULL WHERE id=? "
+                         "AND source='seed' AND status='assigned' AND employee_id=? "
+                         "AND EXISTS (SELECT 1 FROM kv WHERE key=?) "
+                         "AND NOT EXISTS (SELECT 1 FROM kv WHERE key=?)",
+                         (unknown_id, employee_id, f"seed_review_auto:{unknown_id}", f"seed_review_manual:{unknown_id}"))
+            if not cur.rowcount:
+                return False
+            self._db.execute("INSERT INTO kv (key,value) VALUES (?,?)", (f"seed_review_manual:{unknown_id}", "1"))
+            self._db.execute("INSERT INTO audit (ts,user,action,details) VALUES (?,?,?,?)",
+                             (now.isoformat(), user, "reopen seed", f"sample {unknown_id}; no attendance or learning"))
+        return True
+
+    def unknowns(self, day: dt.date | None = None, status: str | None = "pending",
+                 *, source: str | None = None) -> list[Unknown]:
         sql, params = "SELECT * FROM unknowns WHERE 1 = 1", []
         if day is not None:
             sql += " AND day = ?"
@@ -233,11 +274,14 @@ class AttendanceStoreMixin:
         if status is not None:
             sql += " AND status = ?"
             params.append(status)
+        if source is not None:
+            sql += " AND source = ?"
+            params.append(source)
         return [self._unknown(r) for r in self._all(sql + " ORDER BY ts", params)]
 
     def unnotified_unknowns(self, day: dt.date) -> list[Unknown]:
         rows = self._all(
-            "SELECT * FROM unknowns WHERE day = ? AND status = 'pending' AND notified = 0 ORDER BY ts", (day.isoformat(),)
+            "SELECT * FROM unknowns WHERE day = ? AND status = 'pending' AND notified = 0 AND source='camera' ORDER BY ts", (day.isoformat(),)
         )
         return [self._unknown(r) for r in rows]
 

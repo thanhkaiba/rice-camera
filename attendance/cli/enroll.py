@@ -1,4 +1,4 @@
-"""Enroll reference photos from folders: faces/<employee_id>/*.jpg (the web page can do the same)."""
+"""Enroll reference photos from folders: faces/<email>/*.jpg (the web page can do the same)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,10 +34,14 @@ def enroll(cfg: Config, faces_dir: Path) -> None:
     print(f"Enrolling with model {cfg.recognition.model_id()}")
     seen = set()
     for person_dir in sorted(p for p in faces_dir.iterdir() if p.is_dir()):
-        emp = person_dir.name
-        if emp not in employees:
-            print(f"! {emp}: not an active employee (add them on the Employees page first), skipped")
+        try:
+            person = app.store.employee_by_email(person_dir.name)
+        except ValueError:
+            person = None
+        if person is None or not person.active:
+            print(f"! {person_dir.name}: not an active employee email (add them on the People page first), skipped")
             continue
+        emp = person.id
         seen.add(emp)
         # Re-running replaces photos enrolled from folders; uploads and admin-confirmed faces are kept.
         for employee_id, image, source in app.store.reference_images():

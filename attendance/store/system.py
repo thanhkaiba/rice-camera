@@ -46,8 +46,8 @@ class SystemStoreMixin:
             self._db.executemany("UPDATE checkins SET image = NULL WHERE day = ? AND employee_id = ?",
                                  [(r["day"], r["employee_id"]) for r in expired])
             images |= {r["image"] for r in self._db.execute(
-                "SELECT image FROM unknowns WHERE day < ? AND image IS NOT NULL", (day,))}
-            self._db.execute("DELETE FROM unknowns WHERE day < ?", (day,))
+                "SELECT image FROM unknowns WHERE day < ? AND image IS NOT NULL AND source='camera'", (day,))}
+            self._db.execute("DELETE FROM unknowns WHERE day < ? AND source='camera'", (day,))
             # A file still used by a kept sighting (a confirmed face that became an arrival) stays.
             used = {r["image"] for r in self._db.execute(
                 "SELECT image FROM sightings WHERE image IS NOT NULL UNION SELECT image FROM checkins "

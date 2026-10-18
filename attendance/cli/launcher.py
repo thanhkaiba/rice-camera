@@ -331,8 +331,34 @@ def hand_over(home: Path, argv: list[str]) -> bool:
     return True
 
 
+def install_source(uv: str, source: Path) -> None:
+    """Let uv select wheels for this Python and machine before installing the program."""
+    if frozen() or sys.prefix == sys.base_prefix:
+        raise SystemExit("Source installation requires an unbundled Python virtual environment.")
+    command = [uv, "pip", "install", "--python", sys.executable]
+    subprocess.run([*command, "--upgrade", "--only-binary", ":all:",
+                    "-r", str(source / "requirements.txt")], check=True)
+    # A fresh process checks native-library loading before the program is replaced.
+    subprocess.run([sys.executable, "-c",
+                    "import cv2, onnxruntime, numpy, flask, yaml\n"
+                    "if not cv2.videoio_registry.hasBackend(cv2.CAP_FFMPEG):\n"
+                    "    raise SystemExit('OpenCV has no FFmpeg backend for RTSP.')\n"
+                    "print(f'Libraries ready: OpenCV {cv2.__version__}, '"
+                    "f'ONNX Runtime {onnxruntime.__version__}, NumPy {numpy.__version__}; FFmpeg available.')"],
+                   check=True)
+    subprocess.run([*command, "--no-deps", "--reinstall-package", "face-attendance", str(source)], check=True)
+
+
 def main(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "--install":
+        if len(argv) != 3:
+            raise SystemExit("Usage: launcher.py --install <uv> <source-folder>")
+        try:
+            install_source(argv[1], Path(argv[2]))
+        except subprocess.CalledProcessError as exc:
+            raise SystemExit(exc.returncode) from exc
+        return
     home = app_home()
     if hand_over(home, argv):
         return

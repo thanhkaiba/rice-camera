@@ -22,6 +22,7 @@ import numpy as np
 from ..integrations import leave_api
 from .config import Config, parse_clock
 from ..vision.gallery import Gallery
+from ..vision.tracker import vote_for
 from ..integrations.notifier import GoogleChat
 from ..store import LEAVE_KINDS, Store, body_photo, scene_photo
 
@@ -285,7 +286,7 @@ class AttendanceService:
         best, best_ignored, best_score = None, False, self.cfg.recognition.accept_score
         within = dt.timedelta(days=self.cfg.recognition.group_days)
         for u, ignored in candidates:
-            if u.vector is None or u.model != self.model_id or ts - self._local(u.ts) > within:
+            if u.source != "camera" or u.vector is None or u.model != self.model_id or ts - self._local(u.ts) > within:
                 continue
             score = float(np.dot(v, self.gallery.prepare(u.vector)))
             if score >= best_score:
@@ -293,6 +294,36 @@ class AttendanceService:
         return best, best_ignored
 
     # admin actions -------------------------------------------------------------
+
+    def review_guess(self, members) -> tuple[str, float] | None:
+        """A current, unambiguous suggestion supported by most usable faces in the group."""
+        count = len(self.gallery.counts())
+        if not count:
+            return None
+        active = self.store.employees()
+        matches = []
+        for u in members:
+            if (u.model != self.model_id or u.vector is None
+                    or not np.all(np.isfinite(u.vector)) or np.linalg.norm(u.vector) < 1e-12):
+                continue
+            candidates = [(person, score) for person, score in self.gallery.match(u.vector, k=count)
+                          if person in active]
+            if candidates:
+                matches.append(candidates)
+        if not matches:
+            return None
+        totals = {}
+        for candidates in matches:
+            for person, score in candidates:
+                totals[person] = totals.get(person, 0.0) + score
+        ranked = sorted(((person, score / len(matches)) for person, score in totals.items()),
+                        key=lambda item: item[1], reverse=True)
+        params = self.cfg.recognition
+        winner = vote_for(ranked, True, True, params)
+        if winner and sum(vote_for(candidates, True, True, params) == winner
+                          for candidates in matches) > len(matches) / 2:
+            return ranked[0]
+        return None
 
     def _pending_group(self, unknown_id: int) -> list:
         u = self.store.unknown(unknown_id)
@@ -316,6 +347,8 @@ class AttendanceService:
             self._learn(employee_id, u.vector, u.image, u.model)
         today = self.now().date()
         for u in members:
+            if u.source == "seed":
+                continue
             ts = self._local(u.ts)
             result = self.store.record_checkin(ts.date(), employee_id, ts, "admin", u.guess_score, u.image,
                                                sha256=u.sha256)
@@ -335,12 +368,12 @@ class AttendanceService:
             self.gallery.add(employee_id, vector)
         return True
 
-    def add_employee_from_unknown(self, unknown_id: int, employee_id: str, name: str, user: str = "admin") -> None:
+    def add_employee_from_unknown(self, unknown_id: int, email: str, name: str, user: str = "admin") -> None:
         """Create a new employee from a face the camera collected, and confirm it as them."""
         self._pending_group(unknown_id)
-        self.store.add_employee(employee_id, name)
-        self.store.log(self.now(), user, "add employee", f"{employee_id.strip()} {name.strip()} (from camera)")
-        self.resolve_unknown(unknown_id, employee_id.strip(), user)
+        employee_id = self.store.add_employee(email, name)
+        self.store.log(self.now(), user, "add employee", f"{email.strip()} {name.strip()} (from camera)")
+        self.resolve_unknown(unknown_id, employee_id, user)
 
     def ignore_unknown(self, unknown_id: int, user: str = "admin") -> None:
         """Hide this face for today only: later sightings today are ignored too, but if the person

@@ -19,6 +19,8 @@ The program starts at login, restarts itself if it stops, and opens the **Setup*
 
 No commands needed, and no admin rights. The script gets its own Python, the libraries and the models, starts the program now and at every login, puts a shortcut on the Desktop and opens the **Setup** page.
 
+The launcher selects prebuilt libraries compatible with this computer's OS, CPU and Python. It checks that ONNX Runtime and OpenCV's FFmpeg backend load before installing the program and starting it. If no compatible wheels are available, or the libraries fail to load, installation stops with an error.
+
 1. Download this repository (on GitHub: *Code → Download ZIP*) and unzip it.
 2. Double-click the installer in the unzipped folder:
    - **macOS:** `Install.command`. If macOS says it cannot be opened, right-click it → *Open* → *Open*. When asked whether Python may accept incoming network connections, click *Allow*.
@@ -49,6 +51,10 @@ python -m attendance run
 Allow Python on private networks when the firewall asks, so the page can be opened from other computers at `http://<computer IP>:8000`. On Linux with an NVIDIA GPU, install `onnxruntime-gpu` instead of `onnxruntime` and set `use_gpu: true`.
 
 ## First-time setup
+
+For the prepared employee/photo/review seed, follow [Nhập employee và ảnh sau khi pull code](seed-import.md). It covers transferring the ignored `seed/` directory, importing employees by email, and updating an existing system.
+
+People are identified by a unique email and a display name. Add them on People or import a CSV with `email,name` columns; emails are trimmed and lowercased. Names can repeat, and editing a name or email keeps the person's photos and attendance history. For older installations, the configured employee CSV attaches emails to existing records only when the name matches exactly one legacy person and one CSV row. Ambiguous matches stop the import; set those emails individually on People first. Invalid or old `id,name` CSV files are skipped at startup, so People stays available. After a successful import, restarts keep your edits; import again on People to apply later CSV changes.
 
 The Setup page walks through it: camera address (for Ezviz, `rtsp://admin:<VERIFICATION_CODE>@<CAMERA_IP>:554/Streaming/Channels/101`; the code is the 6 capital letters on the camera label; give the camera a fixed IP in the router), working hours, the Google Chat webhook (space name → *Apps & integrations* → *Webhooks* → *Add webhook*), a password, the address other computers use, and the employees.
 

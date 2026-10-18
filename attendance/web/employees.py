@@ -30,11 +30,11 @@ def register(app: Flask, core: "App") -> None:
     @app.post("/employees")
     def add_employee():
         try:
-            store.add_employee(request.form.get("id", ""), request.form.get("name", ""))
+            employee_id = store.add_employee(request.form.get("email", ""), request.form.get("name", ""))
         except ValueError as exc:
             return failed(str(exc), "employees")
-        store.log(service.now(), current_user(cfg), "add employee", f"{request.form['id']} {request.form['name']}")
-        return done("Employee added. Now upload their photos.", "employee", employee_id=request.form["id"].strip())
+        store.log(service.now(), current_user(cfg), "add employee", f"{request.form['email']} {request.form['name']}")
+        return done("Employee added. Now upload their photos.", "employee", employee_id=employee_id)
 
     @app.post("/employees/import")
     def import_employees():
@@ -45,6 +45,7 @@ def register(app: Flask, core: "App") -> None:
             n = store.import_employees(file.read().decode("utf-8-sig"))
         except (ValueError, UnicodeDecodeError) as exc:
             return failed(f"Import failed: {exc}", "employees")
+        store.put("employee_email_csv_imported", "1")
         library.reload()
         store.log(service.now(), current_user(cfg), "import employees", f"{n} rows")
         return done(f"Imported {n} employees.", "employees")
@@ -58,14 +59,15 @@ def register(app: Flask, core: "App") -> None:
 
     @app.post("/employees/<employee_id>")
     def update_employee(employee_id: str):
-        store.employee(employee_id) or abort(404)
+        person = store.employee(employee_id) or abort(404)
         try:
             store.update_employee(employee_id, request.form.get("name", ""), request.form.get("active") == "on",
-                                  request.form.get("chat_user"), request.form.get("exempt") == "on")
+                                  request.form.get("chat_user"), request.form.get("exempt") == "on",
+                                  email=request.form.get("email", person.email))
         except ValueError as exc:
             return failed(str(exc), "employee", employee_id=employee_id)
         library.reload()
-        store.log(service.now(), current_user(cfg), "edit employee", f"{employee_id} {request.form.get('name')} "
+        store.log(service.now(), current_user(cfg), "edit employee", f"{store.employee(employee_id).email} {request.form.get('name')} "
                   f"active={request.form.get('active') == 'on'} exempt={request.form.get('exempt') == 'on'}")
         return done("Saved.", "employee", employee_id=employee_id)
 
@@ -87,7 +89,7 @@ def register(app: Flask, core: "App") -> None:
     def upload_photos(employee_id: str):
         from ..vision.faces import decode_image
 
-        store.employee(employee_id) or abort(404)
+        person = store.employee(employee_id) or abort(404)
         files = [f for f in request.files.getlist("photos") if f.filename]
         if not files:
             return failed("Choose one or more photos.", "employee", employee_id=employee_id)
@@ -108,13 +110,14 @@ def register(app: Flask, core: "App") -> None:
                 flash(f"{f.filename}: {result.message}", "error")
             for w in result.warnings:
                 flash(f"{f.filename}: {w}", "warn")
-        store.log(service.now(), current_user(cfg), "upload photos", f"{employee_id}: {added} added")
+        store.log(service.now(), current_user(cfg), "upload photos", f"{person.email}: {added} added")
         if added:
             flash(f"{added} photo(s) added.", "ok")
         return redirect(url_for("employee", employee_id=employee_id))
 
     @app.post("/employees/<employee_id>/photos/delete")
     def delete_photo(employee_id: str):
+        person = store.employee(employee_id) or abort(404)
         refs = store.references(cfg.recognition.model_id(), employee_id)
         image = request.form.get("image", "")
         if request.form.get("ref_id"):  # a reference without a saved photo
@@ -128,14 +131,14 @@ def register(app: Flask, core: "App") -> None:
             library.delete_photo(image)
         else:
             abort(400)
-        store.log(service.now(), current_user(cfg), "delete photo", f"{employee_id} {image}")
+        store.log(service.now(), current_user(cfg), "delete photo", f"{person.email} {image}")
         return done("Photo deleted.", "employee", employee_id=employee_id)
 
     @app.post("/employees/<employee_id>/delete")
     def delete_employee(employee_id: str):
         person = store.employee(employee_id) or abort(404)
-        if request.form.get("confirm") != employee_id:
-            return failed("Type the employee id to confirm.", "employee", employee_id=employee_id)
+        if not person.email or request.form.get("confirm", "").strip().lower() != person.email:
+            return failed("Type the employee email to confirm.", "employee", employee_id=employee_id)
         library.delete_employee(employee_id)
-        store.log(service.now(), current_user(cfg), "delete employee", f"{employee_id} {person.name}")
+        store.log(service.now(), current_user(cfg), "delete employee", f"{person.email} {person.name}")
         return done(f"{person.name} and their face data were deleted.", "employees")

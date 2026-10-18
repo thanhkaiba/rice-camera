@@ -14,13 +14,13 @@ and expects JSON like this:
   "holidays": [{"date": "2026-11-20", "name": "Teachers' Day"}],
   "workdays": [{"date": "2026-10-24", "name": "Make-up day"}],
   "leaves": [
-    {"employee_id": "NV001", "start": "2026-10-15", "end": "2026-10-16", "type": "leave", "note": "Family"},
-    {"employee_id": "NV002", "start": "2026-10-15", "type": "sick", "period": "morning"}
+    {"email": "alice@example.com", "start": "2026-10-15", "end": "2026-10-16", "type": "leave", "note": "Family"},
+    {"email": "bob@example.com", "start": "2026-10-15", "type": "sick", "period": "morning"}
   ]
 }
 ```
 
-- **`employee_id`** must match the id on the People page.
+- **`email`** must match the email on the People page. Surrounding spaces and letter case are ignored. Invalid or unknown employee emails are skipped and counted in the sync status.
 - **`end`** defaults to `start`.
 - **`type`** is free text. `leave`, `sick`, `business_trip` and `remote` get friendly labels; anything else is shown as sent.
 - **`period`** is `full` (default), `morning` or `afternoon`. Attendance is checked in the morning, so afternoon-only leave is ignored.

@@ -23,7 +23,7 @@
   <div>
     <h1>Evidence: {{ ev.name }}, {{ ev.day.strftime('%A %d %B %Y') }}</h1>
     <div class="chips">
-      <span class="chip" title="Employee id">{{ icon('employees') }}{{ ev.employee_id }}</span>
+      <span class="chip" title="Employee email">{{ icon('employees') }}{{ ev.email }}</span>
       <span class="chip" title="Camera hours">{{ icon('camera') }}{{ ev.start.strftime('%H:%M') }}–{{ ev.end.strftime('%H:%M') }}</span>
       <span class="chip" title="Seen at or after this time = late">{{ icon('clock') }}late from <strong>{{ ev.late_after.strftime('%H:%M') }}</strong></span>
     </div>

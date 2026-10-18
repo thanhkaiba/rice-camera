@@ -51,7 +51,7 @@
     <tbody>
     {% for p in rep.people %}
       <tr class="link" onclick="location.href='{{ url_for('employee', employee_id=p.employee_id) }}'">
-        <td><div class="cell-main">{{ p.name }}</div><div class="cell-sub">{{ p.employee_id }}</div></td>
+        <td><div class="cell-main">{{ p.name }}</div><div class="cell-sub">{{ employee_emails.get(p.employee_id, "") }}</div></td>
         <td class="num">{{ p.work_days }}</td><td class="num">{{ p.on_time }}</td>
         <td class="num">{% if p.late %}<span class="badge late">{{ p.late }}</span>{% else %}<span class="muted">0</span>{% endif %}</td>
         <td class="num">{{ p.late_minutes or 0 }}</td>

@@ -1,7 +1,7 @@
 # Copy to config.yaml and edit. Always quote times ("09:00"), otherwise YAML may misread them.
 timezone: Asia/Ho_Chi_Minh
 data_dir: data                 # database, face crops, logs
-employees_file: employees.csv  # columns: id,name; imported once when there are no employees yet
+employees_file: employees.csv  # columns: email,name; initial import or attaching emails to legacy employees
 healthcheck_url: ""            # e.g. https://hc-ping.com/<uuid>; pinged every minute so you get an alert if this PC stops
 retention_days: 90             # camera photos of arrivals and unknown faces are deleted after this many days
 late_evidence_days: 365        # photos of days on which a person was late are kept this long, as evidence

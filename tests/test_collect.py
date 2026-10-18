@@ -4,7 +4,7 @@ import datetime as dt
 import numpy as np
 import pytest
 
-from attendance.web import _next_id, create_app
+from attendance.web import create_app
 from conftest import DAY, at, person_vector
 from test_service import run_until
 
@@ -44,16 +44,17 @@ def test_new_employee_can_be_created_from_a_face(env):
     service, store, clock, _ = env
     uid = service.on_unknown(at(9, 5), None, near(40, 1), None, None)
     service.on_unknown(at(9, 6), None, near(40, 2), None, None)
-    service.add_employee_from_unknown(uid, "D", "Dana")
-    assert store.employee("D").name == "Dana"
-    assert service.gallery.counts()["D"] == 2
-    assert "D" in store.checkins(DAY)
+    service.add_employee_from_unknown(uid, "dana@example.com", "Dana")
+    dana = store.employee_by_email("dana@example.com")
+    assert dana.name == "Dana"
+    assert service.gallery.counts()[dana.id] == 2
+    assert dana.id in store.checkins(DAY)
     with pytest.raises(ValueError):
-        service.add_employee_from_unknown(uid, "E", "Eve")  # already handled
+        service.add_employee_from_unknown(uid, "eve@example.com", "Eve")  # already handled
     with pytest.raises(ValueError):
         u2 = service.on_unknown(at(9, 7), None, near(41, 1), None, None)
-        service.add_employee_from_unknown(u2, "A", "Duplicate id")
-    assert store.unknown(u2).status == "pending"  # nothing changed when the id was taken
+        service.add_employee_from_unknown(u2, "alice@example.com", "Duplicate email")
+    assert store.unknown(u2).status == "pending"  # nothing changed when the email was taken
 
 
 def test_ignoring_hides_the_whole_group(env):
@@ -74,18 +75,10 @@ def test_review_page_groups_and_new_employee_form(core):
     page = c.get("/unknowns").get_data(as_text=True)
     assert "Seen 3 times" in page and "New employee" in page and 'value="D"' not in page
     uid = app.store.pending_groups()[0][-1].id
-    resp = c.post(f"/unknowns/{uid}/new-employee", data={"id": "NV010", "name": "Linh"}, follow_redirects=True)
+    resp = c.post(f"/unknowns/{uid}/new-employee", data={"email": "linh@example.com", "name": "Linh"}, follow_redirects=True)
     assert "Linh added as a new employee" in resp.get_data(as_text=True)
-    assert app.store.employee("NV010") and app.store.pending_group_count() == 0
+    assert app.store.employee_by_email("linh@example.com") and app.store.pending_group_count() == 0
     assert '<span class="count">' not in c.get("/").get_data(as_text=True)
-
-
-def test_next_employee_id_suggestion():
-    from attendance.store import Employee
-
-    assert _next_id([Employee("NV007", "a", True), Employee("NV010", "b", True), Employee("boss", "c", True)]) == "NV011"
-    assert _next_id([Employee("12", "a", True)]) == "13"
-    assert _next_id([]) == ""
 
 
 def test_ignore_lasts_only_for_the_day_and_can_be_undone(env):

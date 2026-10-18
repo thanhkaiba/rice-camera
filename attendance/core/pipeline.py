@@ -38,9 +38,16 @@ class App:
         self.store = Store(self.data_dir / "attendance.db")
         settings.load(cfg, self.store)
         employees_file = cfg.path(cfg.employees_file)
-        if self.store.employee_count() == 0 and employees_file.exists():
-            n = self.store.import_employees(employees_file.read_text(encoding="utf-8-sig"))
-            log.info("Imported %d employees from %s", n, employees_file)
+        if employees_file.exists() and (self.store.employee_count() == 0
+                                       or (not self.store.get("employee_email_csv_imported")
+                                           and any(not p.email for p in self.store.all_employees()))):
+            try:
+                n = self.store.import_employees(employees_file.read_text(encoding="utf-8-sig"))
+            except ValueError as exc:
+                log.warning("Employee import skipped: %s. Update the CSV or assign emails in People.", exc)
+            else:
+                self.store.put("employee_email_csv_imported", "1")
+                log.info("Imported %d employees from %s", n, employees_file)
         self.gallery = Gallery(self.store.embeddings(cfg.recognition.model_id()), cfg.recognition.center_embeddings)
         self.chat = GoogleChat(lambda: cfg.google_chat.webhook_url, self.store)
         self.service = AttendanceService(cfg, self.store, self.chat, self.gallery, now=now)

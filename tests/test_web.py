@@ -5,7 +5,7 @@ import io
 import numpy as np
 
 from attendance.web import create_app
-from conftest import DAY, at
+from conftest import DAY, at, person_vector
 
 
 def client(core_app, password=""):
@@ -20,14 +20,15 @@ def test_pages_render_and_admin_can_assign_unknown(core):
     service, store = app.service, app.store
     clock.t = at(10, 30)
     service.on_identified("A", at(9, 5), 0.7, "crops/a.jpg")
-    uid = service.on_unknown(at(9, 20), "crops/u.jpg", np.ones(512, dtype=np.float32), "B", 0.4)
+    uid = service.on_unknown(at(9, 20), "crops/u.jpg", person_vector(2), "B", 0.4)
     c = client(app)
 
     page = c.get("/").get_data(as_text=True)
     assert "Alice" in page and "09:05" in page and page.count('data-status="not_seen"') == 2
 
     page = c.get("/unknowns").get_data(as_text=True)
-    assert "Looks like <strong>Bob</strong>" in page and 'data-guess-name="Bob"' in page
+    assert "Looks like <strong>Bob (bob@example.com)</strong>" in page
+    assert 'data-guess-name="Bob (bob@example.com)"' in page
     assert "openReview(first)" not in page  # nothing opens by itself
     page = c.get("/unknowns?review=first").get_data(as_text=True)  # the link posted in chat
     assert f'.face-card[data-id="{uid}"]' in page and "openReview(first)" in page
@@ -59,36 +60,37 @@ def test_employee_management_and_photo_upload(core):
 
     app, _, sent = core
     c = client(app)
-    resp = c.post("/employees", data={"id": "D", "name": "Dan"}, follow_redirects=True)
+    resp = c.post("/employees", data={"email": "dan@example.com", "name": "Dan"}, follow_redirects=True)
+    employee_id = app.store.employee_by_email("dan@example.com").id
     assert "Employee added" in resp.get_data(as_text=True)
     assert "No photos" in c.get("/employees").get_data(as_text=True)
 
-    resp = c.post("/employees/D/photos", data={"photos": [(io.BytesIO(png(face_image(4))), "d1.png"),
+    resp = c.post(f"/employees/{employee_id}/photos", data={"photos": [(io.BytesIO(png(face_image(4))), "d1.png"),
                                                           (io.BytesIO(png(face_image(0))), "empty.png"),
                                                           (io.BytesIO(b"not an image"), "x.txt")]},
                   content_type="multipart/form-data", follow_redirects=True)
     page = resp.get_data(as_text=True)
     assert "1 photo(s) added" in page and "empty.png: No face found" in page and "x.txt: not a readable image" in page
-    image = app.store.references(app.library.model_id, "D")[0].image
+    image = app.store.references(app.library.model_id, employee_id)[0].image
     assert c.get(f"/media/{image}").status_code == 200
 
     # A photo of Alice uploaded for Dan triggers the look-alike warning.
-    resp = c.post("/employees/D/photos", data={"photos": [(io.BytesIO(png(face_image(1))), "oops.png")]},
+    resp = c.post(f"/employees/{employee_id}/photos", data={"photos": [(io.BytesIO(png(face_image(1))), "oops.png")]},
                   content_type="multipart/form-data", follow_redirects=True)
     assert "looks like Alice" in resp.get_data(as_text=True)
     assert "have reference photos that look" in c.get("/employees").get_data(as_text=True)
 
-    c.post("/employees/D/photos/delete", data={"image": image})
+    c.post(f"/employees/{employee_id}/photos/delete", data={"image": image})
     assert not (app.data_dir / image).exists()
 
-    c.post("/employees/D", data={"name": "Daniel"})  # unticked "active"
-    assert app.store.employee("D").name == "Daniel" and not app.store.employee("D").active
-    c.post("/employees/D/delete", data={"confirm": "wrong"})
-    assert app.store.employee("D") is not None
-    c.post("/employees/D/delete", data={"confirm": "D"})
-    assert app.store.employee("D") is None
+    c.post(f"/employees/{employee_id}", data={"name": "Daniel"})  # unticked "active"
+    assert app.store.employee(employee_id).name == "Daniel" and not app.store.employee(employee_id).active
+    c.post(f"/employees/{employee_id}/delete", data={"confirm": "wrong"})
+    assert app.store.employee(employee_id) is not None
+    c.post(f"/employees/{employee_id}/delete", data={"confirm": "dan@example.com"})
+    assert app.store.employee(employee_id) is None
 
-    resp = c.post("/employees/import", data={"file": (io.BytesIO("id,name\nE,Eve\n".encode()), "e.csv")},
+    resp = c.post("/employees/import", data={"file": (io.BytesIO("email,name\neve@example.com,Eve\n".encode()), "e.csv")},
                   content_type="multipart/form-data", follow_redirects=True)
     assert "Imported 1 employees" in resp.get_data(as_text=True)
 
@@ -167,9 +169,9 @@ def test_report_page_and_csv_exports(core):
     assert "Late &amp; absence report" in page and "Alice" in page
     summary = c.get(f"/report/summary.csv?start={DAY}&end={DAY}")
     text = summary.get_data(as_text=True)
-    assert text.startswith("﻿employee_id,name,work_days") and "A,Alice,1,0,1,20,0,0" in text
+    assert text.startswith("﻿email,name,work_days") and "alice@example.com,Alice,1,0,1,20,0,0" in text
     details = c.get(f"/report/details.csv?start={DAY}&end={DAY}").get_data(as_text=True)
-    assert f"{DAY},A,Alice,late,10:20,20,Camera," in details and f"{DAY},B,Bob,not_seen" in details
+    assert f"{DAY},alice@example.com,Alice,late,10:20,20,Camera," in details and f"{DAY},bob@example.com,Bob,not_seen" in details
     assert c.get("/report?start=2026-10-14&end=2026-01-01").status_code == 400
 
 
@@ -179,7 +181,7 @@ def test_leave_refresh_button(core):
     resp = c.post("/leave/sync", follow_redirects=True)
     assert "Set the HR system API address" in resp.get_data(as_text=True)
     app.cfg.leave_api.url = "https://hr/api"
-    app.leave_sync._fetch = lambda url, token: {"leaves": [{"employee_id": "A", "start": str(DAY)}]}
+    app.leave_sync._fetch = lambda url, token: {"leaves": [{"email": "alice@example.com", "start": str(DAY)}]}
     page = c.post("/leave/sync", data={"back": f"/?day={DAY}"}, follow_redirects=True).get_data(as_text=True)
     assert "Leave data updated" in page and page.count('data-status="on_leave"') == 1
     assert c.post("/leave/sync", data={"back": "//evil.example"}).headers["Location"] == "/"

@@ -8,7 +8,7 @@
     {% if thumb %}<img class="avatar lg" src="{{ url_for('media', path=thumb.image) }}" alt="">{% else %}<span class="avatar lg empty">{{ person.name[:1] }}</span>{% endif %}
     <div>
       <h1>{{ person.name }}</h1>
-      <p class="subtitle row" style="gap:8px"><span class="tnum">{{ person.id }}</span>
+      <p class="subtitle row" style="gap:8px"><span>{{ person.email or "Add email" }}</span>
         {% if not person.active %}<span class="badge info">Not tracked</span>
         {% elif refs|length == 0 %}<span class="badge bad plain" title="Cannot be recognised yet">{{ icon('image') }}No photos</span>
         {% elif refs|length < 5 %}<span class="badge late plain" title="Add more: 5–10 recommended">{{ icon('image') }}{{ refs|length }} photos</span>
@@ -58,6 +58,7 @@
     <div class="card">
       <h2 class="row">{{ icon('edit') }}Details</h2>
       <form method="post" action="{{ url_for('update_employee', employee_id=person.id) }}" class="stack" style="margin:0">
+        <label class="field">Email<input type="email" name="email" value="{{ person.email }}" required autocomplete="email"></label>
         <label class="field">Name<input name="name" value="{{ person.name }}" required></label>
         <label class="field">Google Chat user ID<input name="chat_user" value="{{ person.chat_user }}" placeholder="e.g. 112233445566778899000" autocomplete="off">
           <span class="hint">For @mentions · the number at the end of the user's page address in Google Admin.</span></label>
@@ -85,7 +86,7 @@
       <div>
         <p class="small">Removes {{ person.name }}, their photos and face data. Past attendance records are kept.</p>
         <form method="post" action="{{ url_for('delete_employee', employee_id=person.id) }}" class="stack" style="margin:0; gap:8px">
-          <label class="field">Type <strong>{{ person.id }}</strong> to confirm<input name="confirm" required autocomplete="off"></label>
+          <label class="field">Type <strong>{{ person.email }}</strong> to confirm<input name="confirm" required autocomplete="off"></label>
           <div><button class="danger">{{ icon('trash') }}Delete</button></div>
         </form>
       </div>

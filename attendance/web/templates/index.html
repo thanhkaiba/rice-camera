@@ -3,11 +3,11 @@
 {% set SRC_ICON = {'camera': 'camera', 'admin': 'user-check', 'manual': 'edit', 'corrected': 'swap'} %}
 {% macro avatar(path, name) %}{% if path %}<a class="avatar-link" href="{{ url_for('media', path=path) }}" target="_blank"><img class="avatar" src="{{ url_for('media', path=path) }}" alt=""></a>{% else %}<span class="avatar empty">{{ name[:1] }}</span>{% endif %}{% endmacro %}
 {% macro row(status, emp_id, name, a=None, note='') %}
-  <tr data-status="{{ status }}" data-name="{{ name|lower }}" data-emp="{{ emp_id }}" data-display="{{ name }}"
+  <tr data-status="{{ status }}" data-name="{{ name|lower }} {{ employee_emails.get(emp_id, '') }}" data-emp="{{ emp_id }}" data-display="{{ name }}"
       data-time="{{ a.time if a else '' }}" data-has="{{ 1 if a else 0 }}"
       {% if status != 'on_leave' %}class="editable" title="Click to correct"{% endif %}>
     <td>{{ avatar(a.image if a else None, name) }}</td>
-    <td><div class="cell-main">{{ name }}</div><div class="cell-sub">{{ emp_id }}</div></td>
+    <td><div class="cell-main">{{ name }}</div><div class="cell-sub">{{ employee_emails.get(emp_id, '') }}</div></td>
     <td>
       {% if status == 'late' %}<span class="badge late">Late {{ late(a) }} min</span>
       {% elif status == 'on_time' %}<span class="badge ok">On time</span>
@@ -68,7 +68,7 @@
 </div>
 
 <div class="row between" style="margin-bottom:12px">
-  <div class="search" style="flex: 0 1 340px"><input type="search" id="search" placeholder="Search…" aria-label="Search by name or id"></div>
+  <div class="search" style="flex: 0 1 340px"><input type="search" id="search" placeholder="Search…" aria-label="Search by name or email"></div>
   {% if leave.enabled %}
   <form method="post" action="{{ url_for('leave_sync') }}" class="row" style="gap:6px">
     <input type="hidden" name="back" value="{{ request.full_path }}">
@@ -146,7 +146,7 @@
       <div class="form-row" style="flex-wrap:nowrap">
         <select name="to" id="edit-to" required style="flex:1; min-width:0">
           <option value="">Who was it?</option>
-          {% for id, name in employees.items() %}<option value="{{ id }}">{{ name }}</option>{% endfor %}
+          {% for id, name in employees.items() %}<option value="{{ id }}">{{ name }} ({{ employee_emails.get(id, '') }})</option>{% endfor %}
         </select>
         <button title="Move time and photo to them; the face is learned for them">{{ icon('swap') }}Move</button>
       </div>
@@ -162,7 +162,7 @@
     <div class="info"><strong class="time tnum"></strong><div class="small muted meta"></div></div>
     <form method="post" class="move">
       <select name="to" required title="Wrong person? Pick who it really was"><option value="">Really was…</option>
-        {% for id, name in employees.items() %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select>
+        {% for id, name in employees.items() %}<option value="{{ id }}">{{ name }} ({{ employee_emails.get(id, '') }})</option>{% endfor %}</select>
       <button class="btn-sm icon" title="Move to this person" aria-label="Move">{{ icon('swap') }}</button>
     </form>
     <form method="post" class="reject"><button class="btn-sm icon" title="Not them: nobody on the list, e.g. a visitor" aria-label="Not them">{{ icon('user-x') }}</button></form>

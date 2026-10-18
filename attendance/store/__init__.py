@@ -27,6 +27,7 @@ from .schema import (
     scene_photo,
     migrate,
     normalize_chat_user,
+    normalize_email,
 )
 from .system import SystemStoreMixin
 
@@ -86,4 +87,5 @@ __all__ = [
     "body_photo",
     "scene_photo",
     "normalize_chat_user",
+    "normalize_email",
 ]

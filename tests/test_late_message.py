@@ -91,9 +91,9 @@ def test_config_checks_send_time_and_placeholders(tmp_path):
 
 def test_chat_ids_from_csv_and_employee_page(core):
     app, clock, _ = core
-    app.store.import_employees("id,name,chat_user\nA,Alice,123\nD,Dan,\n")
-    assert app.store.employee("A").chat_user == "123" and app.store.employee("D").chat_user == ""
-    app.store.import_employees("id,name\nA,Alice Nguyen\n")
+    app.store.import_employees("email,name,chat_user\nalice@example.com,Alice,123\ndan@example.com,Dan,\n")
+    assert app.store.employee("A").chat_user == "123" and app.store.employee_by_email("dan@example.com").chat_user == ""
+    app.store.import_employees("email,name\nalice@example.com,Alice Nguyen\n")
     assert app.store.employee("A").chat_user == "123"  # not wiped by a CSV without the column
 
     flask_app = create_app(app)
@@ -176,9 +176,9 @@ def test_chat_ids_are_normalised_and_checked(core):
     with pytest.raises(ValueError, match="number"):
         app.store.update_employee("A", "Alice", True, "alice@example.com")
     assert app.store.employee("A").chat_user == "456"  # nothing changed
-    with pytest.raises(ValueError, match="row B"):
-        app.store.import_employees("id,name,chat_user\nB,Bob,bob\n")
-    app.store.import_employees("id,name,chat_user\nB,Bob,users/789\n")
+    with pytest.raises(ValueError, match="row 2"):
+        app.store.import_employees("email,name,chat_user\nbob@example.com,Bob,bob\n")
+    app.store.import_employees("email,name,chat_user\nbob@example.com,Bob,users/789\n")
     assert app.store.employee("B").chat_user == "789"
 
     flask_app = create_app(app)
