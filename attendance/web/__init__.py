@@ -174,6 +174,7 @@ def create_app(core: "App") -> "Flask":
                 "role": "admin" if request.endpoint in PUBLIC else role(cfg)}
 
     from . import attendance as attendance_routes
+    from . import capture as capture_routes
     from . import employees as employees_routes
     from . import leave as leave_routes
     from . import personal as personal_routes
@@ -182,6 +183,7 @@ def create_app(core: "App") -> "Flask":
     from . import status as status_routes
 
     attendance_routes.register(app, core)
+    capture_routes.register(app, core)
     employees_routes.register(app, core)
     leave_routes.register(app, core)
     personal_routes.register(app, core)
@@ -191,7 +193,7 @@ def create_app(core: "App") -> "Flask":
 
     @app.get("/media/<path:path>")
     def media(path: str):
-        if not path.startswith(("crops/", "faces/", "review-seed/")) or ".." in Path(path).parts:
+        if not path.startswith(("crops/", "faces/", "review-seed/", "captures/")) or ".." in Path(path).parts:
             abort(404)
         return send_from_directory(core.data_dir, path)
 

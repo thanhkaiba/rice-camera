@@ -25,6 +25,8 @@ log = logging.getLogger(__name__)
 MIN_FACE_PX = 40
 MIN_DET_SCORE = 0.5
 NEAR_DUPLICATE = 0.97  # a learned face this similar to a kept one is not stored again
+GOOD_PHOTOS = 5  # sharp, frontal reference photos a person needs; fewer is flagged on the People page
+BLURRED = "The face is blurred or turned away; a sharper, frontal photo works better."
 
 
 @dataclass
@@ -72,6 +74,8 @@ class FaceLibrary:
         self._alert = alert
         self._now = now or (lambda: dt.datetime.now(cfg.tz))
         self.data_dir = cfg.path(cfg.data_dir)
+        self.rate_in_background = False  # set by the running program: check new photos' quality in a thread
+        self._rating = threading.Lock()
 
     @property
     def model_id(self) -> str:
@@ -99,9 +103,10 @@ class FaceLibrary:
             return AddResult(False, f"The face is too small or unclear ({face.size:.0f}px). Use a closer photo.")
         warnings = []
         if not face.quality_ok:
-            warnings.append("The face is blurred or turned away; a sharper, frontal photo works better.")
+            warnings.append(BLURRED)
         image_rel = self._save(employee_id, encode_jpeg(crop_face(image, face.bbox)))
-        self.store.add_embedding(self.model_id, employee_id, face.embedding, source, self._now(), image_rel)
+        self.store.add_embedding(self.model_id, employee_id, face.embedding, source, self._now(), image_rel,
+                                 face.quality_ok)
         self.gallery.add(employee_id, face.embedding)
         for other, score in self.similar_to(employee_id, face.embedding):
             other_name = self.store.employees().get(other, other)
@@ -126,6 +131,8 @@ class FaceLibrary:
         self.store.add_embedding(model, employee_id, vector, "admin", self._now(), image_rel)
         if model == self.model_id:
             self.gallery.add(employee_id, vector)
+        if image_rel:
+            self.rate_soon()
         return True
 
     def delete_photo(self, image_rel: str) -> None:
@@ -158,12 +165,56 @@ class FaceLibrary:
             if face is None:
                 log.warning("No face found when re-embedding %s", image_rel)
                 continue
-            self.store.add_embedding(self.model_id, employee_id, face.embedding, source, self._now(), image_rel)
+            self.store.add_embedding(self.model_id, employee_id, face.embedding, source, self._now(), image_rel,
+                                     face.quality_ok)
             added += 1
         if added:
             log.info("Embedded %d reference photos for model %s", added, self.model_id)
             self.reload()
         return added
+
+    def rate_soon(self) -> None:
+        if self.rate_in_background and not self._rating.locked():
+            threading.Thread(target=self.rate_missing, name="photo-quality", daemon=True).start()
+
+    def rate_missing(self) -> int:
+        """Check the sharpness and pose of reference photos saved before that was recorded (or
+        learned from the camera), once, so the People page can count the good ones. Returns how many."""
+        from ..cli.enroll import read_image
+
+        if not self._rating.acquire(blocking=False):
+            return 0
+        rated = 0
+        try:
+            for image_rel in sorted({r.image for r in self.store.references(self.model_id)
+                                     if r.image and r.quality_ok is None}):
+                path = self.data_dir / image_rel
+                image = read_image(path) if path.exists() else None
+                if image is None:
+                    continue
+                face = self._largest_face(image)  # no face found any more: not a good photo either
+                self.store.set_reference_quality(image_rel, face is not None and face.quality_ok)
+                rated += 1
+        finally:
+            self._rating.release()
+        if rated:
+            log.info("Checked the quality of %d reference photos", rated)
+        return rated
+
+    def quality(self, employee_id: str | None = None) -> dict[str, tuple[int, int, int]]:
+        """employee_id -> (photos, good, not checked yet) for the current model."""
+        out: dict[str, list[int]] = {}
+        for r in self.store.references(self.model_id, employee_id):
+            n = out.setdefault(r.employee_id, [0, 0, 0])
+            n[0] += 1
+            n[1] += r.quality_ok is True
+            n[2] += r.quality_ok is None and r.image is not None  # without a photo it cannot be checked
+        return {k: (a, b, c) for k, (a, b, c) in out.items()}
+
+    def look_alikes_of(self, employee_id: str) -> list[tuple[str, float]]:
+        """(other employee, score) whose reference photos match this person's at the acceptance threshold."""
+        return [(p.b if p.a == employee_id else p.a, p.score) for p in self.look_alikes()
+                if employee_id in (p.a, p.b)]
 
     def similar_to(self, employee_id: str, vector: np.ndarray) -> list[tuple[str, float]]:
         threshold = self.cfg.recognition.accept_score

@@ -96,10 +96,10 @@ def photo_summary(app: "App") -> dict:
     people = app.store.all_employees()
     active = [p for p in people if getattr(p, "active", True)]
     counts = app.gallery.counts()
-    good = getattr(app.library, "good_photo_counts", None)  # photo quality, when the program records it
+    good = getattr(app.library, "quality", None)  # employee_id -> (photos, good, not checked yet)
     if callable(good):
         try:
-            counts = good()
+            counts = {k: q[1] for k, q in good().items()}
         except Exception:
             pass
     few = sorted((p for p in active if counts.get(p.id, 0) < FEW_PHOTOS), key=lambda p: counts.get(p.id, 0))

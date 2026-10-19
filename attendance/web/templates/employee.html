@@ -11,17 +11,24 @@
       <p class="subtitle row" style="gap:8px"><span>{{ person.email or "Add email" }}</span>
         {% if not person.active %}<span class="badge info">Not tracked</span>
         {% elif refs|length == 0 %}<span class="badge bad plain" title="Cannot be recognised yet">{{ icon('image') }}No photos</span>
-        {% elif refs|length < 5 %}<span class="badge late plain" title="Add more: 5–10 recommended">{{ icon('image') }}{{ refs|length }} photos</span>
-        {% else %}<span class="badge ok plain" title="Ready">{{ icon('image') }}{{ refs|length }} photos</span>{% endif %}
+        {% elif good < good_photos %}<span class="badge late plain" title="{{ good }} of {{ refs|length }} photos are sharp and frontal · add {{ good_photos - good }} more good ones">{{ icon('image') }}{{ good }}/{{ refs|length }} good photos</span>
+        {% else %}<span class="badge ok plain" title="Ready">{{ icon('image') }}{{ good }}/{{ refs|length }} good photos</span>{% endif %}
         {% if person.exempt %}<span class="badge brand plain" title="Never counted as late or absent">{{ icon('crown') }}Not counted</span>{% endif %}</p>
     </div>
   </div>
 </div>
 
+{% for other, score in look_alikes %}
+  <div class="alert warn"><span class="ico">{{ icon('alert') }}</span><span>Reference photos of {{ person.name }} look like
+    <a href="{{ url_for('employee', employee_id=other) }}">{{ names.get(other, other) }}</a> ({{ '%.0f'|format(score * 100) }}%), so the camera may confuse them:
+    check for a misplaced photo and add clearer ones.</span></div>
+{% endfor %}
+
 <div class="grid-2">
   <div>
     <div class="card">
-      <div class="card-head"><h2 class="row">{{ icon('image') }}Reference photos</h2></div>
+      <div class="card-head"><h2 class="row">{{ icon('image') }}Reference photos</h2>
+        <a class="btn btn-sm" href="{{ url_for('live_page') }}" title="Take a photo with the door camera: open the camera page and use Capture faces">{{ icon('camera') }}From camera</a></div>
       <form method="post" action="{{ url_for('upload_photos', employee_id=person.id) }}" enctype="multipart/form-data" id="upload">
         <label id="drop" class="dropzone">
           <input type="file" name="photos" id="photos" accept="image/*" multiple required hidden>
@@ -42,7 +49,7 @@
         {% if r.image %}<img src="{{ url_for('media', path=r.image) }}" alt="" loading="lazy">
         {% else %}<div class="empty-state" style="height:100%">No image</div>{% endif %}
         <div class="meta">
-          <span>{{ {'upload': 'Uploaded', 'enroll': 'From folder', 'admin': 'Confirmed'}.get(r.source.split(':')[0], r.source) }}</span>
+          <span>{{ {'upload': 'Uploaded', 'enroll': 'From folder', 'admin': 'Confirmed', 'capture': 'From camera'}.get(r.source.split(':')[0], r.source) }}{% if r.quality_ok is false %} · <span title="Blurred or turned away: a weaker reference">blurred</span>{% endif %}</span>
           <form method="post" action="{{ url_for('delete_photo', employee_id=person.id) }}" data-confirm="Delete this photo?">
             <input type="hidden" name="{{ 'image' if r.image else 'ref_id' }}" value="{{ r.image or r.id }}">
             <button title="Delete photo" aria-label="Delete photo">{{ icon('trash') }}</button>

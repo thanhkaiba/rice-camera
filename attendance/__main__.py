@@ -65,6 +65,10 @@ def main() -> None:
     p.add_argument("file")
     p = sub.add_parser("import-config", help="set this install up from an exported configuration file")
     p.add_argument("file")
+    p = sub.add_parser("import-seed", help="import employees, reference photos and review samples from a seed "
+                                           "folder or .zip (stop the program first, or use the People page)")
+    p.add_argument("seed")
+    p.add_argument("--review-only", action="store_true", help="only add review samples; keep employees and photos")
     args = parser.parse_args()
 
     cfg = config_module.load(args.config)
@@ -153,6 +157,29 @@ def main() -> None:
                       "Restart the program to apply all of it (the installed program does this by itself).")
         finally:
             store.close()
+    elif args.command == "import-seed":
+        import tempfile
+
+        from .cli.launcher import Instance
+        from .cli.seed import find_seed, import_seed, unpack
+        from .core.pipeline import App
+
+        instance = Instance(Path(args.config).resolve().parent)
+        if not instance.acquire():  # also keeps the launcher from starting the program meanwhile
+            raise SystemExit("The program is running: stop it first, or import the seed on the People page.")
+        source = Path(args.seed)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                seed = unpack(source, Path(tmp)) if source.is_file() else find_seed(source)
+                app = App(cfg)
+                try:
+                    import_seed(app, seed, args.review_only)
+                finally:
+                    app.store.close()
+        except (ValueError, RuntimeError) as exc:
+            raise SystemExit(f"Seed import failed: {exc}")
+        finally:
+            instance.release()
     elif args.command == "self-test":
         import numpy as np
 

@@ -107,6 +107,8 @@ main > *:nth-child(5) { animation-delay: 160ms; } main > *:nth-child(6) { animat
 .chip svg { width: 15px; height: 15px; flex: none; }
 .chip strong { color: var(--text); font-weight: 600; }
 .chip.ok { color: var(--ok); } .chip.late { color: var(--late); } .chip.bad { color: var(--bad); }
+button.chip { padding: 0 8px; border-radius: 999px; background: none; box-shadow: none; color: var(--late); cursor: pointer; }
+button.chip[aria-pressed="true"] { background: var(--soft-2); border-color: var(--late); }
 a.chip { color: var(--brand-text); cursor: pointer; } a.chip:hover { text-decoration: none; color: var(--brand); }
 .src { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: .88em; cursor: default; }
 .src svg { width: 15px; height: 15px; }
