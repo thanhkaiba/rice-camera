@@ -448,3 +448,18 @@ details.help p { margin: 8px 0 0; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   html { scroll-behavior: auto; }
 }
+
+/* status page, setup banner, settings overrides ----------------------------- */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat-grid .card { margin: 0; padding: 16px; }
+.stat-tile .k { font-size: .76em; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.stat-tile .v { font-weight: 700; font-size: 1.35em; margin: 2px 0; }
+.stat-tile.ok .v { color: var(--ok); } .stat-tile.late .v { color: var(--late); } .stat-tile.bad .v { color: var(--bad); }
+.meter { height: 8px; border-radius: 999px; background: var(--soft-2); overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--ok); }
+.meter span.late { background: var(--late-dot); } .meter span.bad { background: var(--bad); }
+table.uptime td { padding: 8px 6px; }
+ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.hint.override { display: block; color: var(--late-text); }
+button.link { background: none; border: 0; padding: 0; box-shadow: none; color: inherit; text-decoration: underline; font-size: inherit; }
+.setup-warning[hidden] { display: none; }

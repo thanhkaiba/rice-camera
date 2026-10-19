@@ -28,6 +28,7 @@
     <a href="{{ url_for('employees') }}" class="{{ 'on' if nav in ('employees', 'employee') }}">{{ icon('employees', 'i') }}People</a>
     <a href="{{ url_for('report') }}" class="{{ 'on' if reports }}">{{ icon('report', 'i') }}Reports</a>
     <a href="{{ url_for('live_page') }}" class="{{ 'on' if nav == 'live_page' }}">{{ icon('live', 'i') }}Camera</a>
+    <a href="{{ url_for('status_page') }}" class="{{ 'on' if nav == 'status_page' }}">{{ icon('activity', 'i') }}Status</a>
   </nav>
   <div class="topbar-actions">
     <button class="icon-link" id="theme-toggle" type="button" aria-label="Switch light/dark theme" title="Light / dark"><span class="only-light">{{ icon('moon') }}</span><span class="only-dark">{{ icon('sun') }}</span></button>
@@ -54,6 +55,11 @@
   <div class="alert warn"><span>macOS is running Face Attendance from a temporary copy because it was opened straight from
     Downloads, so it cannot start at login. Quit it, drag <b>FaceAttendance</b> into <b>Applications</b> and open it from there.</span></div>
   {% endif %}
+  {% if nav != 'setup_page' %}{% for w in config_warnings %}
+  <div class="alert error setup-warning" data-dismiss="{{ w.id }}"><span class="ico">{{ icon('alert') }}</span>
+    <span>{{ w.text }} <a href="{{ url_for('settings_page') }}#{{ w.anchor }}">Set it up</a></span>
+    <button class="close" type="button" aria-label="Hide for a day" title="Hide for a day">{{ icon('close') }}</button></div>
+  {% endfor %}{% endif %}
   {% if models_status %}
   <div class="alert warn" id="models-status"><span class="spin"></span><span>{{ models_status }} · faces are recognised once done; everything else already works.</span></div>
   {% endif %}
@@ -66,6 +72,17 @@
   {% endif %}
   {% block body %}{% endblock %}
 </main>
+<script>
+  // Setup warnings: hidden for a day once closed in this browser.
+  document.querySelectorAll('.setup-warning').forEach(el => {
+    const key = 'dismiss-' + el.dataset.dismiss;
+    try { el.hidden = Date.now() - Number(localStorage.getItem(key) || 0) < 864e5; } catch (e) {}
+    el.querySelector('.close').addEventListener('click', () => {
+      el.hidden = true;
+      try { localStorage.setItem(key, String(Date.now())); } catch (e) {}
+    });
+  });
+</script>
 <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}"></script>
 {% block scripts %}{% endblock %}
 </body>

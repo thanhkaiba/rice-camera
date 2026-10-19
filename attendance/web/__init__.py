@@ -108,6 +108,7 @@ def failed(message: str, endpoint: str, **kwargs):
 def create_app(core: "App") -> "Flask":
     from flask import Flask, Response, abort, request, send_from_directory
 
+    from ..core import health
     from ..core.service import SOURCES
     from ..store import LEAVE_KINDS
 
@@ -144,17 +145,19 @@ def create_app(core: "App") -> "Flask":
                 "setup_open": first_setup.open_count(core), "models_status": core.live.models,
                 "translocated": sys.platform == "darwin" and "/AppTranslocation/" in sys.executable,
                 "leave_label": lambda kind: LEAVE_KINDS.get(kind, kind), "WEEKDAYS": WEEKDAYS,
-                "employee_emails": store.employee_emails()}
+                "employee_emails": store.employee_emails(), "config_warnings": health.config_warnings(cfg)}
 
     from . import attendance as attendance_routes
     from . import employees as employees_routes
     from . import reports as reports_routes
     from . import settings as settings_routes
+    from . import status as status_routes
 
     attendance_routes.register(app, core)
     employees_routes.register(app, core)
     reports_routes.register(app, core)
     settings_routes.register(app, core)
+    status_routes.register(app, core)
 
     @app.get("/media/<path:path>")
     def media(path: str):
