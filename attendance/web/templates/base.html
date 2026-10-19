@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ asset_version }}">
 <style>:root[data-theme="dark"] .only-light, :root:not([data-theme="dark"]) .only-dark { display: none; }</style>
 </head>
-<body data-camera-check-url="{{ url_for('camera_check') }}" data-models-url="{{ url_for('models_json') }}">
+<body {% if role == 'viewer' %}class="viewer" {% endif %}data-camera-check-url="{{ url_for('camera_check') }}" data-models-url="{{ url_for('models_json') }}">
 {% set reports = nav in ('report', 'accuracy', 'audit') %}
 <header class="topbar"><div class="topbar-inner">
   <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark"></span>Attendance</a>
@@ -25,18 +25,19 @@
     {% if pending or nav == 'unknowns' %}
     <a href="{{ url_for('unknowns') }}" class="{{ 'on' if nav == 'unknowns' }}">{{ icon('review', 'i') }}Review{% if pending %} <span class="count">{{ pending }}</span>{% endif %}</a>
     {% endif %}
-    <a href="{{ url_for('employees') }}" class="{{ 'on' if nav in ('employees', 'employee') }}">{{ icon('employees', 'i') }}People</a>
+    {% if role != 'viewer' %}<a href="{{ url_for('employees') }}" class="{{ 'on' if nav in ('employees', 'employee', 'calendar_page') }}">{{ icon('employees', 'i') }}People</a>{% endif %}
     <a href="{{ url_for('report') }}" class="{{ 'on' if reports }}">{{ icon('report', 'i') }}Reports</a>
-    <a href="{{ url_for('live_page') }}" class="{{ 'on' if nav == 'live_page' }}">{{ icon('live', 'i') }}Camera</a>
-    <a href="{{ url_for('status_page') }}" class="{{ 'on' if nav == 'status_page' }}">{{ icon('activity', 'i') }}Status</a>
+    {% if role != 'viewer' %}<a href="{{ url_for('live_page') }}" class="{{ 'on' if nav == 'live_page' }}">{{ icon('live', 'i') }}Camera</a>{% endif %}
+    {% if role != 'viewer' %}<a href="{{ url_for('status_page') }}" class="{{ 'on' if nav == 'status_page' }}">{{ icon('activity', 'i') }}Status</a>{% endif %}
   </nav>
   <div class="topbar-actions">
+    {% if role == 'viewer' %}<span class="badge info" title="This login can look but not change anything">{{ icon('eye') }}Read-only</span>{% endif %}
     <button class="icon-link" id="theme-toggle" type="button" aria-label="Switch light/dark theme" title="Light / dark"><span class="only-light">{{ icon('moon') }}</span><span class="only-dark">{{ icon('sun') }}</span></button>
-    <a href="{{ url_for('settings_page') }}" class="icon-link {{ 'on' if nav in ('settings_page', 'setup_page') }}"
+    {% if role != 'viewer' %}<a href="{{ url_for('settings_page') }}" class="icon-link {{ 'on' if nav in ('settings_page', 'setup_page') }}"
        title="Settings{% if setup_open %} ({{ setup_open }} setup step{{ 's' if setup_open > 1 }} left){% endif %}" aria-label="Settings">
       {{ icon('settings') }}
       {% if setup_open %}<span class="dot setup-count"></span>{% endif %}
-    </a>
+    </a>{% endif %}
   </div>
 </div></header>
 <div class="toasts" id="toasts">
@@ -55,7 +56,7 @@
   <div class="alert warn"><span>macOS is running Face Attendance from a temporary copy because it was opened straight from
     Downloads, so it cannot start at login. Quit it, drag <b>FaceAttendance</b> into <b>Applications</b> and open it from there.</span></div>
   {% endif %}
-  {% if nav != 'setup_page' %}{% for w in config_warnings %}
+  {% if nav != 'setup_page' and role != 'viewer' %}{% for w in config_warnings %}
   <div class="alert error setup-warning" data-dismiss="{{ w.id }}"><span class="ico">{{ icon('alert') }}</span>
     <span>{{ w.text }} <a href="{{ url_for('settings_page') }}#{{ w.anchor }}">Set it up</a></span>
     <button class="close" type="button" aria-label="Hide for a day" title="Hide for a day">{{ icon('close') }}</button></div>

@@ -50,6 +50,7 @@ def register(app: Flask, core: "App") -> None:
                                prev_day=day - dt.timedelta(days=1), next_day=day + dt.timedelta(days=1),
                                leave=leave_status(core), started=service.now() >= rep.window.start,
                                late_msg=late_message_status(core, day), deadline=deadline_status(core, day),
+                               notes=store.day_notes(day),
                                backup_warning=core.backup.warning(service.now()))
 
     @app.post("/day/<day>/<employee_id>/set")

@@ -5,9 +5,10 @@
 {% macro row(status, emp_id, name, a=None, note='') %}
   <tr data-status="{{ status }}" data-name="{{ name|lower }} {{ employee_emails.get(emp_id, '') }}" data-emp="{{ emp_id }}" data-display="{{ name }}"
       data-time="{{ a.time if a else '' }}" data-has="{{ 1 if a else 0 }}"
-      {% if status != 'on_leave' %}class="editable" title="Click to correct"{% endif %}>
+      {% if status != 'on_leave' and role != 'viewer' %}class="editable" title="Click to correct"{% endif %}>
     <td>{{ avatar(a.image if a else None, name) }}</td>
-    <td><div class="cell-main">{{ name }}</div><div class="cell-sub">{{ employee_emails.get(emp_id, '') }}</div></td>
+    <td><div class="cell-main">{{ name }}</div><div class="cell-sub">{{ employee_emails.get(emp_id, '') }}</div>
+      {% if notes.get(emp_id) %}<div class="cell-sub day-note" title="Written by {{ name }} on their personal page">{{ icon('edit') }} {{ notes[emp_id] }}</div>{% endif %}</td>
     <td>
       {% if status == 'late' %}<span class="badge late">Late {{ late(a) }} min</span>
       {% elif status == 'on_time' %}<span class="badge ok">On time</span>
@@ -18,7 +19,7 @@
     </td>
     <td class="num tnum">{{ a.time if a else '–' }}</td>
     <td class="hide-sm">{% if a %}<span class="src" title="{{ SOURCES.get(a.source, a.source) }}">{{ icon(SRC_ICON.get(a.source, 'info')) }}{% if a.score %}<span class="tnum">{{ '%.0f'|format(a.score * 100) }}%</span>{% endif %}</span>{% endif %}</td>
-    <td class="num">{% if status != 'on_leave' %}<button class="btn-sm ghost icon" type="button" title="Correct" aria-label="Correct">{{ icon('edit') }}</button>{% endif %}</td>
+    <td class="num">{% if status != 'on_leave' and role != 'viewer' %}<button class="btn-sm ghost icon" type="button" title="Correct" aria-label="Correct">{{ icon('edit') }}</button>{% endif %}</td>
   </tr>
 {% endmacro %}
 {% block body %}
@@ -75,9 +76,10 @@
     <span class="chip" title="Leave &amp; holidays from the HR system{% if leave.last_success %}, updated {{ leave.last_success.strftime('%H:%M') }}{% endif %}">{{ icon('hr') }}HR{% if leave.last_success %} · {{ leave.last_success.strftime('%H:%M') }}{% endif %}</span>
     <button class="btn-sm icon" title="Refresh leave &amp; holidays" aria-label="Refresh leave and holidays">{{ icon('refresh') }}</button>
   </form>
-  {% else %}
+  {% elif role != 'viewer' %}
   <a class="chip" href="{{ url_for('settings_page') }}#hr" title="Leave and holidays are not connected · Settings → HR system">{{ icon('hr') }}HR not connected</a>
   {% endif %}
+  {% if role != 'viewer' %}<a class="chip" href="{{ url_for('calendar_page') }}" title="Enter leave, holidays and extra work days">{{ icon('calendar') }}Leave &amp; holidays</a>{% endif %}
 </div>
 
 <div class="table-wrap">
@@ -154,6 +156,20 @@
     <form method="post" id="form-delete" data-confirm="Delete this arrival? If the person really comes later, the camera records them again.">
       <div class="form-row"><button class="danger">{{ icon('trash') }}Delete arrival</button></div>
     </form>
+    <details class="inline" id="leave-box">
+      <summary>{{ icon('calendar') }} On leave</summary>
+      <form method="post" action="{{ url_for('add_leave') }}" id="form-leave" style="margin-top:8px">
+        <input type="hidden" name="employee_id" id="leave-emp">
+        <input type="hidden" name="back" value="{{ request.full_path }}">
+        <input type="hidden" name="start" value="{{ rep.day.isoformat() }}">
+        <div class="form-row">
+          <select name="kind" aria-label="Kind of leave">{% for k, label in leave_kinds.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select>
+          <label class="row small" style="gap:6px">until<input type="date" name="end" value="{{ rep.day.isoformat() }}" min="{{ rep.day.isoformat() }}" aria-label="Last day of leave"></label>
+        </div>
+        <div class="form-row"><input name="note" maxlength="200" placeholder="Note (optional)" aria-label="Note" style="flex:1; min-width:0">
+          <button title="Never counted late or missing on these days">{{ icon('check') }}Save</button></div>
+      </form>
+    </details>
   </div>
 </dialog>
 <template id="sighting-tpl">
@@ -217,6 +233,8 @@
     document.getElementById('edit-evidence').href = urls.evidence.replace('__EMP__', emp);
     document.getElementById('form-move').hidden = !has;
     document.getElementById('form-delete').hidden = !has;
+    document.getElementById('leave-emp').value = row.dataset.emp;
+    document.getElementById('leave-box').open = false;
     for (const o of document.getElementById('edit-to').options) o.hidden = o.value === row.dataset.emp;
     document.getElementById('edit-to').value = '';
     showSightings(row.dataset.emp);

@@ -182,6 +182,8 @@ class WebConfig:
     public_url: str = "http://localhost:8000"  # link put into Google Chat messages
     username: str = "admin"
     password: str = ""  # empty disables login
+    viewer_username: str = "viewer"  # a second, read-only login (Today, Review, Reports); needs `password` set
+    viewer_password: str = ""  # empty: no read-only login
 
 
 @dataclass
@@ -258,6 +260,9 @@ class Config:
             raise ValueError("retention_days must be at least 1")
         if self.late_evidence_days < 1:
             raise ValueError("late_evidence_days must be at least 1")
+        self.web.viewer_username = self.web.viewer_username.strip()
+        if self.web.viewer_password and (not self.web.viewer_username or self.web.viewer_username == self.web.username):
+            raise ValueError("the read-only login needs its own user name, different from the admin's")
         self.backup.folder = self.backup.folder.strip()
         self.backup.time = parse_clock(self.backup.time).strftime("%H:%M")
         if self.backup.keep_days < 1:

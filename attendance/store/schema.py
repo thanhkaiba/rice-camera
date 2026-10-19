@@ -73,7 +73,8 @@ CREATE TABLE IF NOT EXISTS unknowns (
 CREATE TABLE IF NOT EXISTS calendar (
     day TEXT PRIMARY KEY,
     kind TEXT NOT NULL,  -- 'holiday' (nobody works) or 'workday' (extra working day)
-    note TEXT NOT NULL DEFAULT ''
+    note TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'hr'  -- hr (replaced by each HR sync) or manual (entered on the admin page)
 );
 CREATE TABLE IF NOT EXISTS leaves (
     id INTEGER PRIMARY KEY,
@@ -81,7 +82,16 @@ CREATE TABLE IF NOT EXISTS leaves (
     start_day TEXT NOT NULL,
     end_day TEXT NOT NULL,
     kind TEXT NOT NULL,
-    note TEXT NOT NULL DEFAULT ''
+    note TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'hr'  -- hr or manual, as for calendar
+);
+-- A person's own remark about a day ("business trip"), written on their personal page.
+CREATE TABLE IF NOT EXISTS day_notes (
+    day TEXT NOT NULL,
+    employee_id TEXT NOT NULL,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (day, employee_id)
 );
 CREATE TABLE IF NOT EXISTS audit (
     id INTEGER PRIMARY KEY,
@@ -186,6 +196,7 @@ class Leave:
     end: dt.date
     kind: str
     note: str
+    source: str = "hr"  # hr or manual
 
 
 # Accepted CSV column names for the Google Chat user ID.
@@ -235,7 +246,8 @@ def migrate(db: sqlite3.Connection) -> None:
     """Add columns introduced after a database was created."""
     added = {"embeddings": [("image", "TEXT")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'")],
              "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT")],
-             "sightings": [("camera_id", "TEXT"), ("model", "TEXT"), ("vector", "BLOB"), ("sha256", "TEXT")]}
+             "sightings": [("camera_id", "TEXT"), ("model", "TEXT"), ("vector", "BLOB"), ("sha256", "TEXT")],
+             "calendar": [("source", "TEXT NOT NULL DEFAULT 'hr'")], "leaves": [("source", "TEXT NOT NULL DEFAULT 'hr'")]}
     for table, columns in added.items():
         have = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
         for name, kind in columns:

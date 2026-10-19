@@ -11,6 +11,7 @@
   </div>
   <div class="actions">
     <div class="search" style="width:240px"><input type="search" id="search" placeholder="Search…" aria-label="Search by name or email"></div>
+    <a class="btn" href="{{ url_for('calendar_page') }}" title="Leave, holidays and extra work days">{{ icon('calendar') }}Leave &amp; holidays</a>
     <button class="primary" type="button" onclick="document.getElementById('add').showModal(); document.getElementById('new-email').focus()">{{ icon('user-plus') }}Add</button>
   </div>
 </div>

@@ -9,6 +9,7 @@
   <div class="actions">
     {% if groups %}<span class="badge bad" title="{{ groups|length }} to review">{{ groups|length }}</span>{% endif %}
     {% if groups %}
+    <button type="button" id="focus-toggle" title="Show one face at a time, with large buttons (handy on a phone)">{{ icon('eye') }}<span>One at a time</span></button>
     <form method="post" id="bulk-delete" action="{{ url_for('delete_unknowns') }}" data-confirm="Remove the selected cards from review?">
       <button class="danger" id="delete-selected" disabled>{{ icon('trash') }}Delete selected (<span id="selected-count" aria-live="polite">0</span>)</button>
     </form>
@@ -20,7 +21,7 @@
   <div class="alert info"><span class="ico">{{ icon('sparkles') }}</span><span><strong>No photos yet?</strong> Let the camera run; name each person here once and it recognises them from then on.</span></div>
 {% endif %}
 {% if groups %}
-<div class="face-grid">
+<div class="face-grid" id="review-grid">
   {% for g in groups %}
   {% set first, last = g.members[0], g.latest %}
   {% set guess = employees.get(g.guess) if g.guess else None %}
@@ -60,12 +61,20 @@
       </form>
       {% endif %}
       <button type="button" class="{{ 'primary' if not guess }} btn-sm btn-block" onclick="openReview(this.closest('.face-card'))">{{ icon('help') }}{{ 'Someone else?' if guess else 'Who is this?' }}</button>
+      <form method="post" action="{{ url_for('ignore', unknown_id=g.id) }}" class="focus-only">
+        <button class="btn-sm btn-block" title="Hidden for the rest of today; shown again if seen another day">{{ icon('user-x') }}Skip · not an employee</button>
+      </form>
       <form method="post" action="{{ url_for('delete_unknown', unknown_id=g.id) }}" data-confirm="Remove all {{ g.members|length }} photo(s) on this card from review?">
         <button class="danger btn-sm btn-block" title="Remove blurry or unusable photos from review">{{ icon('trash') }}Delete from review</button>
       </form>
     </div>
   </div>
   {% endfor %}
+</div>
+<div class="focus-bar" id="focus-bar" hidden>
+  <button type="button" id="focus-prev" aria-label="Previous face">{{ icon('chevron-left') }}Back</button>
+  <span class="tnum muted" id="focus-pos" aria-live="polite"></span>
+  <button type="button" id="focus-next" aria-label="Next face">Next{{ icon('chevron-right') }}</button>
 </div>
 {% else %}
 <div class="card empty-state"><span class="ico">{{ icon('smile') }}</span><strong>Nothing to review.</strong></div>
@@ -213,6 +222,41 @@
     remove.action = url(urls.delete);
     remove.dataset.confirm = 'Remove all ' + d.count + ' photo(s) on this card from review?';
     review.showModal();
+  }
+  // One at a time: a single large card with Back / Next. On by default on phones; the choice and the
+  // position are kept in this browser, so after naming a face the next one is shown.
+  const grid = document.getElementById('review-grid');
+  if (grid) {
+    const cards = [...grid.querySelectorAll('.face-card')], bar = document.getElementById('focus-bar');
+    const toggle = document.getElementById('focus-toggle');
+    const stored = (k, v) => { try { if (v === undefined) return sessionStorage.getItem(k); sessionStorage.setItem(k, v); } catch (e) {} };
+    let focus = stored('review-focus') ? stored('review-focus') === '1' : matchMedia('(max-width: 640px)').matches;
+    let pos = Number(stored('review-pos')) || 0;
+    function show() {
+      pos = Math.max(0, Math.min(pos, cards.length - 1));
+      grid.classList.toggle('focus', focus);
+      bar.hidden = !focus;
+      cards.forEach((c, i) => c.classList.toggle('current', i === pos));
+      document.getElementById('focus-pos').textContent = (pos + 1) + ' / ' + cards.length;
+      document.getElementById('focus-prev').disabled = pos === 0;
+      document.getElementById('focus-next').disabled = pos === cards.length - 1;
+      toggle.querySelector('span').textContent = focus ? 'Show all' : 'One at a time';
+      stored('review-focus', focus ? '1' : '0');
+      stored('review-pos', pos);
+    }
+    const go = by => { pos += by; show(); if (focus) cards[pos].scrollIntoView({ block: 'nearest' }); };
+    document.getElementById('focus-prev').addEventListener('click', () => go(-1));
+    document.getElementById('focus-next').addEventListener('click', () => go(1));
+    toggle.addEventListener('click', () => { focus = !focus; show(); });
+    document.addEventListener('keydown', e => {
+      if (!focus || review.open || e.target.closest('input, textarea, select')) return;
+      if (e.key === 'ArrowLeft') go(-1);
+      if (e.key === 'ArrowRight') go(1);
+    });
+    // Opening a card (also from the chat link) makes it the current one.
+    const open = openReview;
+    openReview = card => { pos = cards.indexOf(card); show(); open(card); };
+    show();
   }
   {% if open_id %}
   const first = document.querySelector('.face-card[data-id="{{ open_id }}"]');

@@ -103,7 +103,7 @@ def register(app: Flask, core: "App") -> None:
             for name in names:
                 key = f"{section}.{name}" if section else name
                 value = current[section][name]
-                if name in ("password", "token"):
+                if name in ("password", "token", "viewer_password"):
                     if form.get(key):
                         changes.setdefault(section, {})[name] = form[key]
                 elif name == "work_days":
@@ -112,6 +112,8 @@ def register(app: Flask, core: "App") -> None:
                     changes.setdefault(section, {})[name] = form.get(key) == "on"
                 elif key in form:
                     changes.setdefault(section, {})[name] = form[key]
+        if form.get("web.viewer_off") == "on":
+            changes.setdefault("web", {})["viewer_password"] = ""
         try:
             settings.save(cfg, store, changes)
         except ValueError as exc:

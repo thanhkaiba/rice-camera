@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% set title = 'Leave & holidays' %}
+{% macro src(source) %}{% if source == 'manual' %}<span class="badge brand plain" title="Entered here">Manual</span>{% else %}<span class="badge plain" title="From the HR system; change it there">{{ icon('hr') }}HR</span>{% endif %}{% endmacro %}
+{% block body %}
+<div class="crumbs"><a href="{{ url_for('employees') }}">People</a> {{ icon('chevron-right') }} <span>Leave &amp; holidays</span></div>
+<div class="page-head">
+  <div>
+    <h1>Leave &amp; holidays</h1>
+    <p class="subtitle">People on leave are never late or missing; nothing is posted on holidays.
+      {% if leave.enabled %}Entries made here are kept when the HR system updates, and win over its days.{% else %}The HR system is not connected, so enter them here.{% endif %}</p>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div>
+    <div class="card">
+      <div class="card-head"><h2 class="row">{{ icon('calendar') }}Leave</h2></div>
+      <form method="post" action="{{ url_for('add_leave') }}" class="stack" style="margin:0 0 14px">
+        <div class="form-row">
+          <label class="field grow">Person
+            <select name="employee_id" required><option value="">Choose…</option>
+              {% for id, name in names.items() %}<option value="{{ id }}">{{ name }} ({{ employee_emails.get(id, '') }})</option>{% endfor %}
+            </select></label>
+          <label class="field">Kind
+            <select name="kind">{% for k, label in leave_kinds.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select></label>
+        </div>
+        <div class="form-row">
+          <label class="field">From<input type="date" name="start" value="{{ today.isoformat() }}" required></label>
+          <label class="field">Until<input type="date" name="end" value="{{ today.isoformat() }}"><span class="hint">Last day, included</span></label>
+          <label class="field grow">Note<input name="note" maxlength="200" placeholder="optional"></label>
+        </div>
+        <div><button class="primary">{{ icon('plus') }}Add leave</button></div>
+        <span class="hint">Attendance is checked in the morning: enter half-day leave only when it covers the morning.</span>
+      </form>
+      <div class="list">
+      {% for l in leaves %}
+        <div>
+          <span><a href="{{ url_for('employee', employee_id=l.employee_id) }}">{{ names.get(l.employee_id, l.employee_id) }}</a>
+            <span class="tnum muted">· {{ l.start.strftime('%d %b') }}{% if l.end != l.start %} – {{ l.end.strftime('%d %b') }}{% endif %}</span>
+            {% if l.note %}<span class="small muted">· {{ l.note }}</span>{% endif %}</span>
+          <span class="row" style="gap:6px"><span class="badge info">{{ leave_label(l.kind) }}</span>{{ src(l.source) }}
+            {% if l.source == 'manual' %}<form method="post" action="{{ url_for('delete_leave', leave_id=l.id) }}" data-confirm="Remove this leave?">
+              <button class="btn-sm icon ghost" title="Remove" aria-label="Remove leave">{{ icon('trash') }}</button></form>{% endif %}</span>
+        </div>
+      {% else %}<p class="muted" style="margin:0">No leave from last week on.</p>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card-head"><h2 class="row">{{ icon('calendar-off') }}Holidays &amp; extra work days</h2></div>
+      <form method="post" action="{{ url_for('add_calendar_day') }}" class="stack" style="margin:0 0 14px">
+        <div class="form-row">
+          <label class="field">Day<input type="date" name="day" required></label>
+          <label class="field">Kind
+            <select name="kind">{% for k, label in kinds.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select></label>
+        </div>
+        <label class="field">Name<input name="note" maxlength="100" placeholder="e.g. National Day, make-up day"></label>
+        <div><button class="primary">{{ icon('plus') }}Add day</button></div>
+        <span class="hint">An extra work day makes a weekend day count; a holiday makes a work day free.</span>
+      </form>
+      <div class="list">
+      {% for day, kind, note, source in days %}
+        <div>
+          <span><span class="tnum">{{ WEEKDAYS[day.weekday()] }} {{ day.strftime('%d %b %Y') }}</span>
+            {% if note %}<span class="small muted">· {{ note }}</span>{% endif %}</span>
+          <span class="row" style="gap:6px"><span class="badge {{ 'info' if kind == 'holiday' else 'late' }}">{{ kinds.get(kind, kind) }}</span>{{ src(source) }}
+            {% if source == 'manual' %}<form method="post" action="{{ url_for('delete_calendar_day', day=day.isoformat()) }}" data-confirm="Remove this day?">
+              <button class="btn-sm icon ghost" title="Remove" aria-label="Remove day">{{ icon('trash') }}</button></form>{% endif %}</span>
+        </div>
+      {% else %}<p class="muted" style="margin:0">None.</p>{% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
