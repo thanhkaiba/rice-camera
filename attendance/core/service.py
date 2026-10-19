@@ -383,6 +383,22 @@ class AttendanceService:
         self.store.log(self.now(), user, "ignore face (today)",
                        f"{len(members)} photo(s) from {self._local(members[0].ts):%Y-%m-%d %H:%M}")
 
+    def delete_unknown(self, unknown_id: int, user: str = "admin") -> None:
+        """Discard unusable review photos without labelling a person or deleting source files."""
+        self.delete_unknowns([unknown_id], user)
+
+    def delete_unknowns(self, unknown_ids: list[int], user: str = "admin") -> None:
+        if not unknown_ids:
+            raise ValueError("Choose at least one review card to delete")
+        groups = {}
+        for unknown_id in unknown_ids:
+            members = self._pending_group(unknown_id)
+            groups[members[0].group_id] = members
+        for group_id, members in groups.items():
+            self.store.resolve_group(group_id, "discarded", None)
+            self.store.log(self.now(), user, "delete review",
+                           f"group {group_id}: {len(members)} photo(s) removed from review")
+
     def restore_unknown(self, unknown_id: int, user: str = "admin") -> None:
         """Undo today's ignore."""
         u = self.store.unknown(unknown_id)

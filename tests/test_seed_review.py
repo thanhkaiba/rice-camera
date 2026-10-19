@@ -188,7 +188,7 @@ def test_seed_rejects_conflicting_auto_email_before_writing_anything(core, tmp_p
     assert app.store.unknowns(status=None) == []
 
 
-@pytest.mark.parametrize('handled', ['assigned', 'ignored', 'camera'])
+@pytest.mark.parametrize('handled', ['assigned', 'ignored', 'discarded', 'camera'])
 def test_seed_auto_resolution_preserves_handled_labels_and_camera(core, tmp_path, handled):
     from attendance.cli.seed import import_review_samples
     from attendance.vision.faces import encode_jpeg

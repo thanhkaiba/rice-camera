@@ -6,7 +6,15 @@
     <h1>Review</h1>
     <p class="subtitle">Camera faces and seed samples awaiting review. Click one to name it.</p>
   </div>
-  {% if groups %}<div class="actions"><span class="badge bad" title="{{ groups|length }} to review">{{ groups|length }}</span></div>{% endif %}
+  <div class="actions">
+    {% if groups %}<span class="badge bad" title="{{ groups|length }} to review">{{ groups|length }}</span>{% endif %}
+    {% if groups %}
+    <form method="post" id="bulk-delete" action="{{ url_for('delete_unknowns') }}" data-confirm="Remove the selected cards from review?">
+      <button class="danger" id="delete-selected" disabled>{{ icon('trash') }}Delete selected (<span id="selected-count" aria-live="polite">0</span>)</button>
+    </form>
+    {% endif %}
+    <a class="btn" href="{{ url_for('unknowns') }}">{{ icon('refresh') }}Reload</a>
+  </div>
 </div>
 {% if no_photos %}
   <div class="alert info"><span class="ico">{{ icon('sparkles') }}</span><span><strong>No photos yet?</strong> Let the camera run; name each person here once and it recognises them from then on.</span></div>
@@ -19,7 +27,7 @@
   {% set guess_label = guess ~ ' (' ~ employee_emails.get(g.guess, '') ~ ')' if guess else '' %}
   {% set when = local(last.ts).strftime('%a %d %b %H:%M') if g.members|length == 1
      else 'First ' ~ local(first.ts).strftime('%a %d %b %H:%M') ~ ' · last ' ~ local(last.ts).strftime('%a %d %b %H:%M') %}
-  <div class="face-card" role="button" tabindex="0" style="animation-delay: {{ (loop.index0 % 8) * 40 }}ms"
+  <div class="face-card" style="animation-delay: {{ (loop.index0 % 8) * 40 }}ms"
        data-id="{{ g.id }}" data-count="{{ g.members|length }}" data-when="{{ when }}"
        data-seed="{{ 1 if g.source == 'seed' else 0 }}"
        data-source-id="{{ g.expected_id or '' }}" data-source-name="{{ g.expected_name or '' }}"
@@ -27,7 +35,10 @@
        data-score="{{ '%.2f'|format(g.guess_score) if guess else '' }}"
        data-body="{{ url_for('media', path=g.body) if g.body else '' }}"
        data-photos='{{ g.photo_urls|tojson|forceescape }}'
-       onclick="openReview(this)" onkeydown="if(event.key==='Enter')openReview(this)">
+       onclick="if (!event.target.closest('form, button, input, label')) openReview(this)">
+    <label class="face-select" title="Select this card for bulk deletion">
+      <input type="checkbox" class="review-select" name="unknown_id" value="{{ g.id }}" form="bulk-delete" aria-label="Select {{ g.members|length }} photo(s) from {{ when }}">
+    </label>
     <div class="pic">
       {% if g.body %}<img class="body" src="{{ url_for('media', path=g.body) }}" alt="" loading="lazy">
       {% elif g.photos %}<img class="face" src="{{ url_for('media', path=g.photos[0]) }}" alt="" loading="lazy">{% endif %}
@@ -42,7 +53,16 @@
       {% else %}<div class="small muted">No clear suggestion · choose a person manually</div>{% endif %}
       {% if g.expected_name %}<div class="small">Source label: <strong>{{ g.expected_name }}</strong> · check the photo</div>{% endif %}
       {% if guess and g.expected_id and g.expected_id != g.guess %}<div class="small">Model and source disagree · manual review required</div>{% endif %}
-      <button type="button" class="primary btn-sm btn-block">{{ icon('help') }}Who is this?</button>
+      {% if guess %}
+      <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
+        <input type="hidden" name="employee_id" value="{{ g.guess }}">
+        <button class="primary btn-sm btn-block" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ guess }}</button>
+      </form>
+      {% endif %}
+      <button type="button" class="{{ 'primary' if not guess }} btn-sm btn-block" onclick="openReview(this.closest('.face-card'))">{{ icon('help') }}{{ 'Someone else?' if guess else 'Who is this?' }}</button>
+      <form method="post" action="{{ url_for('delete_unknown', unknown_id=g.id) }}" data-confirm="Remove all {{ g.members|length }} photo(s) on this card from review?">
+        <button class="danger btn-sm btn-block" title="Remove blurry or unusable photos from review">{{ icon('trash') }}Delete from review</button>
+      </form>
     </div>
   </div>
   {% endfor %}
@@ -99,11 +119,6 @@
       <div class="strip" id="review-photos" style="margin-top:6px"></div>
       <div class="small muted" id="review-when" style="margin-top:8px"></div>
     </div>
-    <form method="post" id="form-guess">
-      <input type="hidden" name="employee_id" id="guess-id">
-      <button class="primary btn-lg btn-block" id="guess-button"></button>
-      <span class="hint" id="guess-hint"></span>
-    </form>
     <form method="post" id="form-source" hidden>
       <strong id="source-name"></strong>
       <input type="hidden" name="employee_id" id="source-id">
@@ -114,10 +129,11 @@
     <form method="post" id="form-pick">
       <strong id="pick-label">Someone else?</strong>
       <div class="form-row" style="flex-wrap:nowrap">
-        <select name="employee_id" id="pick-id" required style="flex:1; min-width:0">
-          <option value="">Choose a person…</option>
-          {% for id, name in employees.items() %}<option value="{{ id }}">{{ name }} ({{ employee_emails.get(id, "") }})</option>{% endfor %}
-        </select>
+        <input id="pick-search" list="employee-options" required autocomplete="off" placeholder="Search by name or email…" aria-label="Choose an employee by name or email" style="flex:1; min-width:0">
+        <input type="hidden" name="employee_id" id="pick-id">
+        <datalist id="employee-options">
+          {% for id, name in employees.items() %}<option value="{{ name }} ({{ employee_emails.get(id, '') }})" data-id="{{ id }}"></option>{% endfor %}
+        </datalist>
         <button title="Records their arrival on every day seen and learns the face">{{ icon('check') }}Confirm</button>
       </div>
     </form>
@@ -136,16 +152,34 @@
     <form method="post" id="form-skip">
       <button class="btn-block" title="Hidden for the rest of today; shown again if seen another day">{{ icon('user-x') }}Skip · not an employee</button>
     </form>
+    <form method="post" id="form-delete" data-confirm="Remove these photos from review?">
+      <button class="danger btn-block" title="Remove blurry or unusable photos from review">{{ icon('trash') }}Delete from review</button>
+    </form>
   </div>
 </dialog>
 {% endblock %}
 {% block scripts %}
 <script>
   const review = document.getElementById('review');
+  const selections = [...document.querySelectorAll('.review-select')];
+  selections.forEach(box => box.addEventListener('change', () => {
+    const selected = selections.filter(input => input.checked);
+    document.getElementById('delete-selected').disabled = !selected.length;
+    document.getElementById('selected-count').textContent = selected.length;
+    const photos = selected.reduce((total, input) => total + Number(input.closest('.face-card').dataset.count), 0);
+    document.getElementById('bulk-delete').dataset.confirm = 'Remove all ' + photos + ' photo(s) on ' + selected.length + ' selected card(s) from review?';
+  }));
+  const pickSearch = document.getElementById('pick-search');
+  pickSearch?.addEventListener('input', () => {
+    const selected = [...document.getElementById('employee-options').options].find(o => o.value === pickSearch.value);
+    document.getElementById('pick-id').value = selected ? selected.dataset.id : '';
+    pickSearch.setCustomValidity(selected ? '' : 'Choose an employee from the suggestions.');
+  });
   const urls = {
     assign: "{{ url_for('assign', unknown_id=0) }}",
     add: "{{ url_for('new_employee_from_face', unknown_id=0) }}",
     skip: "{{ url_for('ignore', unknown_id=0) }}",
+    delete: "{{ url_for('delete_unknown', unknown_id=0) }}",
   };
   function openReview(card) {
     const d = card.dataset, url = u => u.replace('/0/', '/' + d.id + '/');
@@ -160,12 +194,6 @@
     }));
     document.getElementById('review-when').textContent = d.when + (d.count > 1 ? ' · seen ' + d.count + ' times' : '') +
       (d.seed === '1' ? ' · Seed sample · No attendance will be recorded' : '');
-    const guess = document.getElementById('form-guess');
-    guess.hidden = !d.guess;
-    guess.action = url(urls.assign);
-    document.getElementById('guess-id').value = d.guess;
-    document.getElementById('guess-button').textContent = 'Confirm: ' + d.guessName;
-    document.getElementById('guess-hint').textContent = 'Similarity ' + d.score + ' · check the photos before confirming';
     const source = document.getElementById('form-source');
     source.hidden = !d.sourceId || d.sourceId === d.guess;
     source.action = url(urls.assign);
@@ -176,11 +204,14 @@
       pick.action = url(urls.assign);
       pick.querySelector('button').title = d.seed === '1' ? 'Label this sample; no attendance is recorded' : 'Confirm this person and learn the face';
       document.getElementById('pick-label').textContent = d.guess ? 'Someone else?' : 'Which person?';
-      for (const o of document.getElementById('pick-id').options) o.hidden = o.value && o.value === d.guess;
-      document.getElementById('pick-id').value = '';
+      pick.reset();
+      pickSearch.setCustomValidity('');
     }
     document.getElementById('form-new').action = url(urls.add);
     document.getElementById('form-skip').action = url(urls.skip);
+    const remove = document.getElementById('form-delete');
+    remove.action = url(urls.delete);
+    remove.dataset.confirm = 'Remove all ' + d.count + ' photo(s) on this card from review?';
     review.showModal();
   }
   {% if open_id %}

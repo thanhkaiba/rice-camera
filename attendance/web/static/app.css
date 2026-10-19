@@ -342,10 +342,13 @@ details.help p { margin: 8px 0 0; }
 .dropzone.over { transform: scale(1.01); }
 .dropzone .ico { width: 34px; height: 34px; color: var(--brand); margin: 0 auto 6px; }
 .face-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
-.face-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; cursor: pointer; box-shadow: var(--shadow); display: flex; flex-direction: column;
+.face-card { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; cursor: pointer; box-shadow: var(--shadow); display: flex; flex-direction: column;
              transition: transform var(--normal) var(--spring), box-shadow var(--fast), border-color var(--fast); animation: fade-up .45s var(--ease) both; }
 .face-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--line-strong); }
 .face-card:focus-visible { box-shadow: 0 0 0 4px var(--ring), var(--shadow-md); }
+.face-card .face-select { position: absolute; top: 8px; left: 8px; z-index: 1; width: 32px; height: 32px; display: grid; place-items: center; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-xs); cursor: pointer; }
+.face-card[data-id] .pic { min-height: 48px; }
+.face-card[data-id] .pic .badge { left: auto; right: 8px; }
 .face-card .pic { background: var(--stage); position: relative; }
 .face-card .pic img { width: 100%; display: block; }
 .face-card .pic img.body { height: 300px; object-fit: contain; }

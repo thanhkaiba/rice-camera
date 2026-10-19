@@ -208,6 +208,26 @@ def register(app: Flask, core: "App") -> None:
         return done("Ignored for today. If this person comes back on another day, they will be shown again.",
                     "unknowns")
 
+    @app.post("/unknowns/delete")
+    def delete_unknowns():
+        try:
+            ids = [int(value) for value in request.form.getlist("unknown_id")]
+        except ValueError:
+            return failed("Invalid review selection.", "unknowns")
+        try:
+            service.delete_unknowns(ids, current_user(cfg))
+        except ValueError as exc:
+            return failed(str(exc), "unknowns")
+        return done("Selected cards removed from review. No attendance recorded or faces learned.", "unknowns")
+
+    @app.post("/unknowns/<int:unknown_id>/delete")
+    def delete_unknown(unknown_id: int):
+        try:
+            service.delete_unknown(unknown_id, current_user(cfg))
+        except ValueError as exc:
+            return failed(str(exc), "unknowns")
+        return done("Removed from review. No attendance recorded or faces learned.", "unknowns")
+
     @app.post("/unknowns/<int:unknown_id>/restore")
     def restore(unknown_id: int):
         try:
