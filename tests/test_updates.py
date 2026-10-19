@@ -158,3 +158,98 @@ def test_mac_app_opened_from_finder_runs_as_a_separate_process(tmp_path, monkeyp
     monkeypatch.setattr(launcher, "supervise", lambda *a: pytest.fail("the Finder-started process must end"))
     launcher.main([])
     assert started == [[sys.executable, "--detached"]]
+
+
+def test_updates_are_on_by_default_only_in_the_packaged_program(monkeypatch):
+    assert config.UpdatesConfig().enabled is False
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert config.UpdatesConfig().enabled is True
+
+
+def two_versions(tmp_path, monkeypatch):
+    """Versions 1.0.0 and 2.0.0 unpacked, the installed program 0.5.0; running 2.0.0."""
+    home = tmp_path / "home"
+    archive = tmp_path / updater.asset_name()
+    make_package(archive)
+    old, new = (updater.unpack(archive.as_uri(), v, home) for v in ("1.0.0", "2.0.0"))
+    base = tmp_path / "install" / "FaceAttendance"
+    base.parent.mkdir()
+    base.write_bytes(b"program")
+    monkeypatch.setattr(sys, "executable", str(base))
+    monkeypatch.setattr(updater, "__version__", "0.5.0")
+    updater.note_base(home)
+    monkeypatch.setattr(sys, "executable", str(new))
+    monkeypatch.setattr(updater, "__version__", "2.0.0")
+    return home, base, old, new
+
+
+def test_going_back_pins_the_earlier_version_and_skips_the_newer_one(tmp_path, monkeypatch):
+    home, base, old, new = two_versions(tmp_path, monkeypatch)
+    assert [v for v, _ in updater.programs(home)] == ["2.0.0", "1.0.0", "0.5.0"]
+    assert [v for v, _ in updater.rollback_targets(home)] == ["1.0.0", "0.5.0"]
+    up = updater.Updater(home, write_config(home))
+    (up.data / updater.ROLLBACK_FILE).write_text('{"version": "1.0.0"}')
+    up.requests()
+    assert up.ready == old and updater.pinned(home) == old
+    status = updater.read_status(up.data)
+    assert status["skip"] == "2.0.0" and "1.0.0" in status["rolled_back"]
+
+    # Started at login, the installed program hands over to the version gone back to, which stays there.
+    monkeypatch.setattr(sys, "executable", str(base))
+    assert updater.newer_installed(home) == old
+    monkeypatch.setattr(sys, "executable", str(old))
+    monkeypatch.setattr(updater, "__version__", "1.0.0")
+    assert updater.newer_installed(home) is None
+    updater.remove_old(home, old)
+    assert old.exists()
+
+    # The version gone back from is not installed again; a newer one is, and ends the rollback.
+    up = updater.Updater(home, write_config(home))
+    archive = tmp_path / updater.asset_name()
+    monkeypatch.setattr(updater, "latest_release", lambda repo: ("2.0.0", archive.as_uri()))
+    up.check()
+    assert up.waiting is None and "skipped" in updater.read_status(up.data)["state"]
+    monkeypatch.setattr(updater, "latest_release", lambda repo: ("3.0.0", archive.as_uri()))
+    up.check()
+    assert up.waiting is not None and updater.pinned(home) is None
+    assert not updater.read_status(up.data)["skip"]
+
+
+def test_going_back_to_the_installed_program_and_forward_again(tmp_path, monkeypatch):
+    home, base, old, new = two_versions(tmp_path, monkeypatch)
+    up = updater.Updater(home, write_config(home))
+    (up.data / updater.ROLLBACK_FILE).write_text('{"version": "0.5.0"}')
+    up.requests()
+    assert up.ready == base
+    monkeypatch.setattr(sys, "executable", str(base))
+    monkeypatch.setattr(updater, "__version__", "0.5.0")
+    assert updater.newer_installed(home) is None  # the installed program runs itself
+
+    up = updater.Updater(home, write_config(home))
+    (up.data / updater.ROLLBACK_FILE).write_text('{"version": ""}')
+    up.requests()
+    assert up.ready == new and updater.pinned(home) is None and not updater.read_status(up.data)["skip"]
+
+    up = updater.Updater(home, write_config(home))
+    (up.data / updater.ROLLBACK_FILE).write_text('{"version": "9.9.9"}')
+    up.requests()
+    assert up.ready is None and "no longer" in updater.read_status(up.data)["error"]
+    (up.data / updater.RESTART_FILE).touch()
+    up.requests()
+    assert up.ready == base
+
+
+def test_go_back_button_on_settings_page(core, monkeypatch):
+    from attendance.web import create_app
+
+    app, _, _ = core
+    archive = app.cfg.base_dir / updater.asset_name()
+    make_package(archive)
+    updater.unpack(archive.as_uri(), "0.1.0", app.cfg.base_dir)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    c = create_app(app).test_client()
+    assert "Go back to version 0.1.0" in c.get("/settings").get_data(as_text=True)
+    c.post("/settings/go-back", data={"rollback.version": "9.9.9"})
+    assert not (app.data_dir / updater.ROLLBACK_FILE).exists()
+    c.post("/settings/go-back", data={"rollback.version": "0.1.0"})
+    assert '"0.1.0"' in (app.data_dir / updater.ROLLBACK_FILE).read_text()

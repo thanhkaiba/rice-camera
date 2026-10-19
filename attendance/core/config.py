@@ -4,6 +4,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import string
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -185,7 +186,8 @@ class WebConfig:
 
 @dataclass
 class UpdatesConfig:
-    enabled: bool = False    # packaged program only: install new releases by itself, outside camera hours
+    # Packaged program only (on by default there): install new releases by itself, outside camera hours.
+    enabled: bool = field(default_factory=lambda: getattr(sys, "frozen", False))
     check_hours: float = 6
 
 
