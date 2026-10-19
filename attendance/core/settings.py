@@ -12,6 +12,8 @@ from .config import Config
 from ..store import Store
 
 KEY = "settings"
+BASELINE = "_file_settings"  # attribute on the Config: the values from config.yaml, before overrides
+SECRET = {"password", "token"}
 
 # section ("" = top level) -> editable fields
 EDITABLE: dict[str, list[str]] = {
@@ -70,6 +72,8 @@ def apply(cfg: Config, overrides: dict) -> None:
 
 def load(cfg: Config, store: Store) -> None:
     """Apply saved overrides at startup; a saved value that no longer validates is ignored."""
+    if not hasattr(cfg, BASELINE):  # remembered so the Settings page can say what config.yaml has
+        setattr(cfg, BASELINE, copy.deepcopy(current(cfg)))
     saved = json.loads(store.get(KEY) or "{}")
     try:
         apply(cfg, saved)
@@ -88,7 +92,54 @@ def save(cfg: Config, store: Store, changes: dict) -> None:
     saved = json.loads(store.get(KEY) or "{}")
     for section, fields in changes.items():
         saved.setdefault(section, {}).update(fields)
+    # A value equal to config.yaml is not stored: the Settings form posts every field, and storing
+    # them all would make the database silently win over a later edit of config.yaml.
+    file_values = getattr(cfg, BASELINE, None)
+    if file_values is not None:
+        for section, fields in changes.items():
+            for name in fields:
+                if getattr(_section(cfg, section), name) == file_values.get(section, {}).get(name, object()):
+                    saved.get(section, {}).pop(name, None)
+        saved = {s: f for s, f in saved.items() if f}
     store.put(KEY, json.dumps(saved))
+
+
+def overrides(cfg: Config, store: Store) -> dict[str, str]:
+    """Saved values that differ from config.yaml: {"section.name": what config.yaml has}, shown next
+    to the field. Secrets are not shown."""
+    file_values = getattr(cfg, BASELINE, None)
+    if file_values is None:
+        return {}
+    found = {}
+    for section, fields in json.loads(store.get(KEY) or "{}").items():
+        for name in fields:
+            if section not in EDITABLE or name not in EDITABLE[section]:
+                continue
+            original = file_values[section][name]
+            if getattr(_section(cfg, section), name) != original:
+                shown = ("set" if original else "empty") if name in SECRET else _display(original)
+                found[f"{section}.{name}" if section else name] = shown
+    return found
+
+
+def _display(value) -> str:
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value) or "none"
+    return str(value) if value != "" else "empty"
+
+
+def reset(cfg: Config, store: Store, key: str) -> None:
+    """Forget the saved value of one field ("section.name"), so config.yaml applies again."""
+    section, _, name = key.rpartition(".")
+    file_values = getattr(cfg, BASELINE, None)
+    if section not in EDITABLE or name not in EDITABLE[section] or file_values is None:
+        raise ValueError(f"unknown setting {key!r}")
+    saved = json.loads(store.get(KEY) or "{}")
+    saved.get(section, {}).pop(name, None)
+    apply(cfg, {section: {name: file_values[section][name]}})
+    store.put(KEY, json.dumps({s: f for s, f in saved.items() if f}))
 
 
 def current(cfg: Config) -> dict:

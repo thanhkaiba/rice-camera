@@ -56,6 +56,8 @@ def main() -> None:
     sub.add_parser("self-test", help="check that the libraries and the models load (used after building the packages)")
     p = sub.add_parser("backup", help="copy the database, settings and photos to the backup folder now")
     p.add_argument("folder", nargs="?", default=None, help="default: the folder set in Settings")
+    p = sub.add_parser("diagnostics", help="write logs, settings and state (secrets removed) to a zip to send for help")
+    p.add_argument("out", nargs="?", default=None, help="default: attendance-diagnostics-<computer>-<time>.zip here")
     p = sub.add_parser("restore", help="put a backup back into this install (stop the program first)")
     p.add_argument("folder")
     p.add_argument("--snapshot", default=None, help="which database copy, YYYY-MM-DD (default: the newest)")
@@ -109,6 +111,18 @@ def main() -> None:
         print(result.message)
         if not result.ok:
             raise SystemExit(1)
+    elif args.command == "diagnostics":
+        from .core import diagnostics, settings
+        from .store import Store
+
+        store = Store(cfg.path(cfg.data_dir) / "attendance.db")
+        try:
+            settings.load(cfg, store)
+            out = Path(args.out or diagnostics.file_name(dt.datetime.now(cfg.tz)))
+            out.write_bytes(diagnostics.build(cfg, store, Path(args.config)))
+        finally:
+            store.close()
+        print(f"Written {out.resolve()}")
     elif args.command == "restore":
         from .core.backup import restore
 

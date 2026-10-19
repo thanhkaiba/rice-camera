@@ -1,25 +1,30 @@
 {% extends "base.html" %}
 {% set title = 'Settings' %}
+{% macro src(key) %}
+  {%- if key in overrides %}<span class="hint override" title="Saved on this page; it wins over config.yaml">Overrides config.yaml ({{ overrides[key] }})
+    <button class="link" formaction="{{ url_for('reset_setting') }}" formnovalidate name="reset" value="{{ key }}">Use config.yaml</button></span>{% endif -%}
+{% endmacro %}
 {% macro field(section, name, label, help='', type='text', step='', cls='') %}
   {% set key = section ~ '.' ~ name if section else name %}
   <label class="field {{ cls }}">{{ label }}
     <input name="{{ key }}" type="{{ type }}" value="{{ s[section][name] }}" {% if step %}step="{{ step }}"{% endif %}>
-    {% if help %}<span class="hint">{{ help }}</span>{% endif %}
+    {% if help %}<span class="hint">{{ help }}</span>{% endif %}{{ src(key) }}
   </label>
 {% endmacro %}
 {% macro time24(section, name, label, help='', required=true) %}
   <label class="field">{{ label }}
     <input name="{{ section }}.{{ name }}" value="{{ s[section][name] }}" class="time24" inputmode="numeric" maxlength="5"
            placeholder="HH:MM" pattern="([01]\d|2[0-3]):[0-5]\d" autocomplete="off" {{ 'required' if required }}>
-    {% if help %}<span class="hint">{{ help }}</span>{% endif %}
+    {% if help %}<span class="hint">{{ help }}</span>{% endif %}{{ src(section ~ '.' ~ name) }}
   </label>
 {% endmacro %}
 {% macro check(section, name, label, help='') %}
-  <label class="switch"><input type="checkbox" name="{{ section }}.{{ name }}" {{ 'checked' if s[section][name] }}><span>{{ label }}{% if help %}<span class="hint">{{ help }}</span>{% endif %}</span></label>
+  <label class="switch"><input type="checkbox" name="{{ section }}.{{ name }}" {{ 'checked' if s[section][name] }}><span>{{ label }}{% if help %}<span class="hint">{{ help }}</span>{% endif %}{{ src(section ~ '.' ~ name) }}</span></label>
 {% endmacro %}
 {% block body %}
 <div class="page-head">
-  <div><h1>Settings</h1><div class="chips"><span class="chip" title="Changes apply as soon as you save; no restart needed">{{ icon('check-circle') }}applied on save</span></div></div>
+  <div><h1>Settings</h1><div class="chips"><span class="chip" title="Changes apply as soon as you save; no restart needed">{{ icon('check-circle') }}applied on save</span>
+    {% if overrides %}<span class="chip" title="Values saved here win over config.yaml; each one is marked next to its field">{{ icon('info') }}{{ overrides|length }} override{{ 's' if overrides|length > 1 }} config.yaml</span>{% endif %}</div></div>
 </div>
 
 {% if setup_open %}
@@ -56,6 +61,7 @@
     <div class="days">
       {% for d in range(7) %}<label><input type="checkbox" name="schedule.work_days" value="{{ d }}" {{ 'checked' if d in s.schedule.work_days }}><span>{{ WEEKDAYS[d] }}</span></label>{% endfor %}
     </div>
+    {{ src('schedule.work_days') }}
     <p class="hint" style="margin:14px 0 0">Holidays and leave come from the HR system. Arrivals before the camera starts count only if the person passes again.</p>
   </section>
 
@@ -63,7 +69,7 @@
     <h2 class="row">{{ icon('chat') }}Google Chat</h2>
     <div class="form-row">
       <label class="field grow">Webhook URL<input name="google_chat.webhook_url" value="{{ s.google_chat.webhook_url }}" placeholder="https://chat.googleapis.com/v1/spaces/…">
-        <span class="hint">Space name → Apps &amp; integrations → Webhooks → Add</span></label>
+        <span class="hint">Space name → Apps &amp; integrations → Webhooks → Add</span>{{ src('google_chat.webhook_url') }}</label>
       <button formaction="{{ url_for('test_chat') }}" title="Send a test message to the space">{{ icon('send') }}Test</button>
     </div>
     <div class="stack">
@@ -77,9 +83,9 @@
     <p class="hint" style="margin-top:0">E.g. "Morning, coming late today: @Jennie Luu (10:15)". Mentions need each person's Chat ID (People page).</p>
     <div class="stack">{{ check('late_message', 'enabled', 'Post the daily late message') }}</div>
     <div class="form-row">
-      <label class="field grow">Intro<input name="late_message.intro" value="{{ s.late_message.intro }}"></label>
+      <label class="field grow">Intro<input name="late_message.intro" value="{{ s.late_message.intro }}">{{ src('late_message.intro') }}</label>
       <label class="field grow">Per person<input name="late_message.item" value="{{ s.late_message.item }}">
-        <span class="hint">{mention} {name} {time} {minutes}</span></label>
+        <span class="hint">{mention} {name} {time} {minutes}</span>{{ src('late_message.item') }}</label>
     </div>
     <div class="form-row" style="margin-top:14px; align-items:center">
       {{ check('late_message', 'auto_send', 'Send automatically at') }}
@@ -93,7 +99,7 @@
     <div class="form-row">
       <label class="field grow">RTSP address
         <input name="camera.url" value="{{ s.camera.url }}" placeholder="rtsp://admin:CODE@192.168.1.64:554/Streaming/Channels/101" data-camera-check="auto">
-        <span class="hint">Ezviz: rtsp://admin:&lt;6-letter code on the label&gt;@&lt;camera IP&gt;:554/Streaming/Channels/101</span></label>
+        <span class="hint">Ezviz: rtsp://admin:&lt;6-letter code on the label&gt;@&lt;camera IP&gt;:554/Streaming/Channels/101</span>{{ src('camera.url') }}</label>
       {{ field('camera', 'process_fps', 'Frames / second', 'Lower on a slow computer', type='number', step='0.5') }}
     </div>
     <div class="form-row" style="margin-top:14px">
@@ -109,7 +115,7 @@
           <option value="person" {{ 'selected' if s.tracking.mode == 'person' }}>Whole people (better for groups)</option>
         </select>
         <span class="hint">{% if not cfg.path(cfg.tracking.person_model).exists() %}<b>Model missing:</b> run
-          <code>python -m attendance download-models --person</code>{% else %}Whole people needs a faster computer{% endif %}</span></label>
+          <code>python -m attendance download-models --person</code>{% else %}Whole people needs a faster computer{% endif %}</span>{{ src('tracking.mode') }}</label>
       {{ field('tracking', 'person_conf', 'Person confidence', 'Raise if bags or chairs get followed', type='number', step='0.05') }}
       {{ field('tracking', 'full_frame_every', 'Full frame every N frames', 'Higher = faster', type='number') }}
     </div>
@@ -118,13 +124,14 @@
   <section class="card tab" id="admin">
     <h2 class="row">{{ icon('shield') }}Access &amp; privacy</h2>
     <div class="form-row">
-      <label class="field grow">Address of this page<input name="web.public_url" value="{{ s.web.public_url }}"><span class="hint">Used in chat links</span></label>
-      <label class="field">New password<input name="web.password" type="password" autocomplete="new-password" placeholder="leave empty to keep"><span class="hint">User: {{ cfg.web.username }}</span></label>
+      <label class="field grow">Address of this page<input name="web.public_url" value="{{ s.web.public_url }}"><span class="hint">Used in chat links</span>{{ src('web.public_url') }}</label>
+      <label class="field">New password<input name="web.password" type="password" autocomplete="new-password" placeholder="leave empty to keep"><span class="hint">User: {{ cfg.web.username }}</span>{{ src('web.password') }}</label>
     </div>
     <div class="form-row" style="margin-top:14px">
       {{ field('', 'retention_days', 'Delete camera photos after (days)', 'Reference photos are kept', type='number') }}
       {{ field('', 'late_evidence_days', 'Keep late-day photos (days)', 'Evidence if someone disputes being late', type='number') }}
-      <label class="field grow">Healthchecks.io ping URL<input name="healthcheck_url" value="{{ s['']['healthcheck_url'] }}"><span class="hint">Alerts if this computer stops</span></label>
+      <label class="field grow">Healthchecks.io ping URL<input name="healthcheck_url" value="{{ s['']['healthcheck_url'] }}" placeholder="https://hc-ping.com/…">
+        <span class="hint">Alerts when this whole computer is off or asleep, which it cannot report itself: create a free check at healthchecks.io (period 1 minute), paste its ping URL here and add Google Chat or e-mail there</span>{{ src('healthcheck_url') }}</label>
     </div>
     <hr>
     <h2 class="row">{{ icon('database') }}Backup</h2>
@@ -135,7 +142,7 @@
       {% elif s.backup.folder %}<br>No backup yet · first one at {{ s.backup.time }}.{% endif %}</p>
     <div class="form-row">
       <label class="field grow">Backup folder<input name="backup.folder" value="{{ s.backup.folder }}" placeholder="/Volumes/Backup · D:\Backup · ~/Google Drive/Attendance">
-        <span class="hint">Empty = no backups · the folder must exist</span></label>
+        <span class="hint">Empty = no backups · the folder must exist</span>{{ src('backup.folder') }}</label>
       {{ field('backup', 'time', 'Every day at', 'After camera hours', type='time') }}
       {{ field('backup', 'keep_days', 'Keep copies (days)', type='number') }}
     </div>
@@ -192,9 +199,9 @@
     <h2 class="row">{{ icon('hr') }}HR system</h2>
     <p class="hint" style="margin-top:0">Holidays, make-up days and leave. API format: docs/hr-api.md</p>
     <div class="form-row">
-      <label class="field grow">API address<input name="leave_api.url" value="{{ s.leave_api.url }}" placeholder="https://hr.example.com/api/attendance-calendar"></label>
+      <label class="field grow">API address<input name="leave_api.url" value="{{ s.leave_api.url }}" placeholder="https://hr.example.com/api/attendance-calendar">{{ src('leave_api.url') }}</label>
       <label class="field">Token<input name="leave_api.token" type="password" autocomplete="off"
-        placeholder="{{ 'saved · leave empty to keep' if s.leave_api.token else 'none' }}"></label>
+        placeholder="{{ 'saved · leave empty to keep' if s.leave_api.token else 'none' }}">{{ src('leave_api.token') }}</label>
       {{ field('leave_api', 'refresh_minutes', 'Refresh every (min)', type='number') }}
     </div>
     <div class="row between" style="margin-top:14px">

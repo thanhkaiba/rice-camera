@@ -81,6 +81,7 @@ def register(app: Flask, core: "App") -> None:
     @app.get("/settings")
     def settings_page():
         return render_template("settings.html", s=settings.current(cfg), cfg=cfg, leave=leave_status(core),
+                               overrides=settings.overrides(cfg, store),
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
                                update=updater.read_status(core.data_dir), backup=core.backup.status(),
                                versions=versions())
@@ -118,6 +119,17 @@ def register(app: Flask, core: "App") -> None:
         store.log(service.now(), current_user(cfg), "change settings",
                   ", ".join(f"{s}.{n}" if s else n for s, f in changes.items() for n in f))
         return done("Settings saved and applied.", "settings_page")
+
+    @app.post("/settings/reset")
+    def reset_setting():
+        """Back to the config.yaml value for one field (the button next to "overrides config.yaml")."""
+        key = request.form.get("reset", "")
+        try:
+            settings.reset(cfg, store, key)
+        except ValueError as exc:
+            return failed(f"Not reset: {exc}", "settings_page")
+        store.log(service.now(), current_user(cfg), "reset setting", key)
+        return done(f"{key} now comes from config.yaml again.", "settings_page")
 
     @app.post("/settings/update-now")
     def update_now():

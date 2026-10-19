@@ -269,9 +269,11 @@ def stop(home: Path) -> bool:
     return stopped
 
 
-def supervise(config: Path, instance: Instance) -> None:
-    """Keep the attendance program running; when an update is ready, restart into the new version."""
+def supervise(config: Path, instance: Instance, unclean: bool = False) -> None:
+    """Keep the attendance program running; when an update is ready, restart into the new version.
+    Google Chat hears when it keeps crashing, and (`unclean`) when the last run was cut off."""
     from attendance.cli.updater import Updater, remove_old
+    from attendance.cli.watchdog import CrashWatch, chat_poster
 
     home = config.parent
     updates = Updater(home, config) if frozen() else None
@@ -282,6 +284,27 @@ def supervise(config: Path, instance: Instance) -> None:
         subprocess.Popen(["/usr/bin/caffeinate", "-i", "-w", str(os.getpid())])
     log_dir = home / "data"
     log_dir.mkdir(parents=True, exist_ok=True)
+    post = chat_poster(config)
+    watch = CrashWatch(post)
+    if unclean:
+        post(f"ℹ️ The attendance program on {watch.host} started again after it was stopped without shutting "
+             "down (power cut, forced restart or crash).")
+    child: subprocess.Popen | None = None
+
+    def on_terminate(signum, frame):
+        # Asked to stop (`stop`, logout, shutdown): a clean stop leaves no pid file, so the next
+        # start can tell it apart from a power cut.
+        if child is not None and child.poll() is None:
+            child.terminate()
+            try:
+                child.wait(10)
+            except subprocess.TimeoutExpired:
+                child.kill()
+        instance.pid_file.unlink(missing_ok=True)
+        raise SystemExit(0)
+
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, on_terminate)
     with open(log_dir / "service.log", "a", encoding="utf-8") as log:  # crashes the program could not log
         def note(text: str) -> None:
             log.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n")
@@ -291,12 +314,15 @@ def supervise(config: Path, instance: Instance) -> None:
             child = subprocess.Popen(attendance_command(config, "run"), cwd=home, creationflags=NO_WINDOW,
                                      stdin=subprocess.DEVNULL, stdout=log, stderr=log)
             instance.write_pids(os.getpid(), child.pid)
+            watch.started()
             while child.poll() is None and not (updates and updates.ready):
                 time.sleep(1)
+                watch.tick()
             if updates and updates.ready:
                 note(f"Restarting into the update: {updates.ready}")
                 child.terminate()
                 child.wait()
+                instance.pid_file.unlink(missing_ok=True)  # a planned stop, not a crash
                 instance.release()  # the new version takes the lock
                 subprocess.Popen([str(updates.ready), "--background"], cwd=home, creationflags=NO_WINDOW,
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -305,6 +331,7 @@ def supervise(config: Path, instance: Instance) -> None:
             instance.write_pids(os.getpid())
             note(f"The attendance program stopped (exit code {child.returncode}); "
                  f"starting it again in {RESTART_AFTER_S} s")
+            watch.exited(child.returncode)
             time.sleep(RESTART_AFTER_S)
 
 
@@ -392,6 +419,9 @@ def main(argv: list[str] | None = None) -> None:
     first_start = not (home / "config.yaml").exists()
     config = write_config(home)
     url = page_url(config)
+    from attendance.cli.watchdog import unclean_stop
+
+    unclean = unclean_stop(home)  # before Instance clears the pid file it left
     instance = Instance(home)
     if not instance.acquire(wait_s=30 if background else 0):  # after an update the old version is still stopping
         if not background:
@@ -404,7 +434,7 @@ def main(argv: list[str] | None = None) -> None:
         enable_autostart()
     if not background:
         threading.Thread(target=open_when_ready, args=(url + ("/setup" if first_start else ""),), daemon=True).start()
-    supervise(config, instance)
+    supervise(config, instance, unclean)
 
 
 if __name__ == "__main__":
