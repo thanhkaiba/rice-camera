@@ -292,27 +292,68 @@ class AttendanceStoreMixin:
     def resolve_unknown(self, unknown_id: int, status: str, employee_id: str | None) -> None:
         self._exec("UPDATE unknowns SET status = ?, employee_id = ? WHERE id = ?", (status, employee_id, unknown_id))
 
-    # holidays and leave (mirrored from the HR system) ---------------------------
+    # holidays and leave (mirrored from the HR system, or entered by an admin) ----
 
     def calendar_day(self, day: dt.date) -> tuple[str, str] | None:
         rows = self._all("SELECT kind, note FROM calendar WHERE day = ?", (day.isoformat(),))
         return (rows[0]["kind"], rows[0]["note"]) if rows else None
 
+    def calendar_days(self, start: dt.date | None = None) -> list[tuple[dt.date, str, str, str]]:
+        """(day, kind, note, source) from `start` on, oldest first."""
+        rows = self._all("SELECT * FROM calendar WHERE day >= ? ORDER BY day", ((start or dt.date.min).isoformat(),))
+        return [(dt.date.fromisoformat(r["day"]), r["kind"], r["note"], r["source"]) for r in rows]
+
+    def set_calendar_day(self, day: dt.date, kind: str, note: str) -> None:
+        """A holiday or extra work day entered by hand; it wins over the HR system's entry for that day."""
+        if kind not in ("holiday", "workday"):
+            raise ValueError("choose holiday or extra work day")
+        self._exec("INSERT INTO calendar (day, kind, note, source) VALUES (?, ?, ?, 'manual') "
+                   "ON CONFLICT(day) DO UPDATE SET kind = excluded.kind, note = excluded.note, source = 'manual'",
+                   (day.isoformat(), kind, note.strip()))
+
+    def delete_calendar_day(self, day: dt.date) -> bool:
+        """Remove a hand-entered day (days from the HR system come back with the next update)."""
+        return self._exec("DELETE FROM calendar WHERE day = ? AND source = 'manual'", (day.isoformat(),)).rowcount > 0
+
     def replace_external(self, start: dt.date, end: dt.date, days: list[tuple[dt.date, str, str]],
                          leaves: list[tuple[str, dt.date, dt.date, str, str]]) -> None:
         """Replace holidays/work days and leave between start and end with a fresh copy from the HR system.
-        days: (day, 'holiday' | 'workday', note); leaves: (employee_id, start, end, kind, note)."""
+        days: (day, 'holiday' | 'workday', note); leaves: (employee_id, start, end, kind, note).
+        Entries made on the admin page are kept, and a hand-entered day wins over the HR system's."""
         s, e = start.isoformat(), end.isoformat()
         with self._lock, self._db:
-            self._db.execute("DELETE FROM calendar WHERE day BETWEEN ? AND ?", (s, e))
-            self._db.execute("DELETE FROM leaves WHERE end_day >= ? AND start_day <= ?", (s, e))
+            self._db.execute("DELETE FROM calendar WHERE day BETWEEN ? AND ? AND source = 'hr'", (s, e))
+            self._db.execute("DELETE FROM leaves WHERE end_day >= ? AND start_day <= ? AND source = 'hr'", (s, e))
             self._db.executemany(
                 "INSERT INTO calendar (day, kind, note) VALUES (?, ?, ?) "
-                "ON CONFLICT(day) DO UPDATE SET kind = excluded.kind, note = excluded.note",
+                "ON CONFLICT(day) DO UPDATE SET kind = excluded.kind, note = excluded.note WHERE source = 'hr'",
                 [(d.isoformat(), kind, note) for d, kind, note in days])
             self._db.executemany(
                 "INSERT INTO leaves (employee_id, start_day, end_day, kind, note) VALUES (?, ?, ?, ?, ?)",
                 [(emp, a.isoformat(), b.isoformat(), kind, note) for emp, a, b, kind, note in leaves])
+
+    def add_leave(self, employee_id: str, start: dt.date, end: dt.date, kind: str, note: str = "") -> int:
+        """Leave entered on the admin page; counts exactly like leave from the HR system."""
+        if end < start:
+            raise ValueError("the leave ends before it starts")
+        if not kind.strip():
+            raise ValueError("choose the kind of leave")
+        return self._exec("INSERT INTO leaves (employee_id, start_day, end_day, kind, note, source) "
+                          "VALUES (?, ?, ?, ?, ?, 'manual')",
+                          (employee_id, start.isoformat(), end.isoformat(), kind.strip(), note.strip())).lastrowid
+
+    def leave(self, leave_id: int) -> Leave | None:
+        rows = self._all("SELECT * FROM leaves WHERE id = ?", (leave_id,))
+        return self._leave(rows[0]) if rows else None
+
+    def delete_leave(self, leave_id: int) -> bool:
+        """Remove hand-entered leave (leave from the HR system is changed there)."""
+        return self._exec("DELETE FROM leaves WHERE id = ? AND source = 'manual'", (leave_id,)).rowcount > 0
+
+    @staticmethod
+    def _leave(r) -> Leave:
+        return Leave(r["id"], r["employee_id"], dt.date.fromisoformat(r["start_day"]),
+                     dt.date.fromisoformat(r["end_day"]), r["kind"], r["note"], r["source"])
 
     def leaves(self, ending_after: dt.date | None = None, employee_id: str | None = None) -> list[Leave]:
         sql, params = "SELECT * FROM leaves WHERE 1 = 1", []
@@ -322,12 +363,31 @@ class AttendanceStoreMixin:
         if employee_id is not None:
             sql += " AND employee_id = ?"
             params.append(employee_id)
-        return [Leave(r["id"], r["employee_id"], dt.date.fromisoformat(r["start_day"]),
-                      dt.date.fromisoformat(r["end_day"]), r["kind"], r["note"])
-                for r in self._all(sql + " ORDER BY start_day", params)]
+        return [self._leave(r) for r in self._all(sql + " ORDER BY start_day", params)]
 
     def leaves_on(self, day: dt.date) -> dict[str, str]:
         """employee_id -> leave kind for everyone on leave that day."""
         rows = self._all("SELECT employee_id, kind FROM leaves WHERE start_day <= ? AND end_day >= ?",
                          (day.isoformat(), day.isoformat()))
         return {r["employee_id"]: r["kind"] for r in rows}
+
+    # notes people write about their own day ---------------------------------------
+
+    def set_day_note(self, day: dt.date, employee_id: str, note: str, now: dt.datetime) -> None:
+        """Save a person's note for a day; an empty note removes it."""
+        if note.strip():
+            self._exec("INSERT INTO day_notes (day, employee_id, note, created_at) VALUES (?, ?, ?, ?) "
+                       "ON CONFLICT(day, employee_id) DO UPDATE SET note = excluded.note, created_at = excluded.created_at",
+                       (day.isoformat(), employee_id, note.strip(), now.isoformat()))
+        else:
+            self._exec("DELETE FROM day_notes WHERE day = ? AND employee_id = ?", (day.isoformat(), employee_id))
+
+    def day_notes(self, day: dt.date) -> dict[str, str]:
+        """employee_id -> note for that day."""
+        rows = self._all("SELECT employee_id, note FROM day_notes WHERE day = ?", (day.isoformat(),))
+        return {r["employee_id"]: r["note"] for r in rows}
+
+    def notes_of(self, employee_id: str, start: dt.date, end: dt.date) -> dict[dt.date, str]:
+        rows = self._all("SELECT day, note FROM day_notes WHERE employee_id = ? AND day BETWEEN ? AND ?",
+                         (employee_id, start.isoformat(), end.isoformat()))
+        return {dt.date.fromisoformat(r["day"]): r["note"] for r in rows}

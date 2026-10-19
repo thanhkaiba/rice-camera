@@ -448,3 +448,24 @@ details.help p { margin: 8px 0 0; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   html { scroll-behavior: auto; }
 }
+
+/* review one at a time (phones open it from the chat link) · read-only login · personal page ------ */
+.face-card .focus-only { display: none; }
+.face-grid.focus { grid-template-columns: minmax(0, 520px); justify-content: center; }
+.face-grid.focus .face-card { display: none; cursor: default; animation: none; }
+.face-grid.focus .face-card.current { display: flex; }
+.face-grid.focus .face-card:hover { transform: none; }
+.face-grid.focus .face-card .focus-only { display: block; }
+.face-grid.focus .face-select { display: none; }
+.face-grid.focus .face-card .pic img.body { height: min(52vh, 440px); }
+.face-grid.focus .face-card .body button { min-height: 48px; font-size: 1rem; }
+.focus-bar { position: sticky; bottom: 12px; z-index: 15; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  max-width: 520px; margin: 12px auto 0; padding: 8px; background: var(--glass); border: 1px solid var(--line); border-radius: 14px;
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow-md); }
+.focus-bar button { min-height: 48px; min-width: 96px; }
+.focus-bar[hidden] { display: none; }
+@media (max-width: 760px) { .focus-bar { bottom: 92px; } }
+.viewer form[method="post"], .viewer .face-select, .viewer .focus-only { display: none !important; }
+.day-note { color: var(--brand-text); }
+.day-note svg { width: 12px; height: 12px; vertical-align: -1px; }
+body.personal main { max-width: 760px; }

@@ -40,6 +40,9 @@ The camera only runs during the camera hours (default 08:00–11:00). Someone wh
 - **Today:** everyone's status. Click a person to correct: move a sighting to the right person (the face is learned for them), mark it *Not them*, type an arrival time, or delete the arrival. The page says when everyone is in. **Evidence** (a link in that dialog) is a printable page for the person's day: the camera pictures with the time stamp burned in, every sighting, every correction, and whether the files are unchanged since they were taken; also as a ZIP to hand over.
 - **Review:** faces the camera could not identify, grouped by person. Click one: *It's …*, pick a person, *New employee*, or *Skip*. Start without any photos this way: let the camera run a day, name each face once.
 - **People:** add by email and name, or import CSV (`email,name`, optional `chat_user`). Email is unique; names may repeat. Upload 5–10 photos each and switch *never count as late* when needed.
+- **Leave & holidays** (People page, or *On leave* in a person's Today dialog): enter leave, holidays and extra work days by hand. They count like the HR system's, are kept when it updates, and a hand-entered day wins over its day.
+- **Personal page:** each person's page (link on their People page) shows only their own arrivals and leave, without the admin password; they can write a note for a day ("business trip") that shows on Today. *New link* makes the old one stop working.
+- **Read-only login** (Settings → Access): sees Today, Review and Reports, cannot change anything.
 - **Reports:** late & absence per person and per day (CSV), recognition accuracy from your corrections, change log.
 - **Camera:** live picture with labelled faces; draw the **detection area** over the walkway.
 - **Settings:** hours, notifications, camera, access, HR system, recognition. Light/dark follows the system; the moon/sun button switches.

@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 MAX_UPLOAD_MB = 50
+# Pages anyone may open without logging in: a person's own page (its link carries a signature) and
+# the stylesheet/script it needs. Everything else needs the admin login when a password is set.
+PUBLIC = {"personal_page", "personal_note", "static"}
+# What the read-only login may open; it may never send a form.
+VIEWER_PAGES = {"index", "evidence_page", "evidence_zip", "unknowns", "report", "accuracy", "audit",
+                "report_summary_csv", "report_details_csv", "media", "models_json"}
 
 
 def _date(value: str | None, default: dt.date) -> dt.date:
@@ -44,6 +50,24 @@ def current_user(cfg) -> str:
 
     auth = request.authorization
     return auth.username if cfg.web.password and auth and auth.username else "admin"
+
+
+def role(cfg) -> str | None:
+    """'admin', 'viewer' (read-only login) or None (not logged in). Without a password everyone is admin."""
+    from flask import request
+
+    if not cfg.web.password:
+        return "admin"
+    auth = request.authorization
+    if not auth:
+        return None
+    user, password, w = auth.username or "", auth.password or "", cfg.web
+    if hmac.compare_digest(user, w.username) and hmac.compare_digest(password, w.password):
+        return "admin"
+    if (w.viewer_password and hmac.compare_digest(user, w.viewer_username)
+            and hmac.compare_digest(password, w.viewer_password)):
+        return "viewer"
+    return None
 
 
 def leave_status(core: "App") -> dict:
@@ -126,11 +150,12 @@ def create_app(core: "App") -> "Flask":
 
     @app.before_request
     def guard():
-        if cfg.web.password:
-            auth = request.authorization
-            if not (auth and hmac.compare_digest(auth.username or "", cfg.web.username)
-                    and hmac.compare_digest(auth.password or "", cfg.web.password)):
+        if request.endpoint not in PUBLIC:
+            who = role(cfg)
+            if who is None:
                 return Response("Login required", 401, {"WWW-Authenticate": 'Basic realm="attendance"'})
+            if who == "viewer" and (request.method != "GET" or request.endpoint not in VIEWER_PAGES):
+                abort(403, "This login can only look, not change anything.")
         if request.method == "POST":
             # Reject form posts coming from other websites (cross-site request forgery).
             origin = request.headers.get("Origin") or request.headers.get("Referer")
@@ -144,15 +169,20 @@ def create_app(core: "App") -> "Flask":
                 "setup_open": first_setup.open_count(core), "models_status": core.live.models,
                 "translocated": sys.platform == "darwin" and "/AppTranslocation/" in sys.executable,
                 "leave_label": lambda kind: LEAVE_KINDS.get(kind, kind), "WEEKDAYS": WEEKDAYS,
-                "employee_emails": store.employee_emails()}
+                "employee_emails": store.employee_emails(),
+                "role": "admin" if request.endpoint in PUBLIC else role(cfg)}
 
     from . import attendance as attendance_routes
     from . import employees as employees_routes
+    from . import leave as leave_routes
+    from . import personal as personal_routes
     from . import reports as reports_routes
     from . import settings as settings_routes
 
     attendance_routes.register(app, core)
     employees_routes.register(app, core)
+    leave_routes.register(app, core)
+    personal_routes.register(app, core)
     reports_routes.register(app, core)
     settings_routes.register(app, core)
 

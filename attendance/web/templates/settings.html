@@ -122,6 +122,13 @@
       <label class="field">New password<input name="web.password" type="password" autocomplete="new-password" placeholder="leave empty to keep"><span class="hint">User: {{ cfg.web.username }}</span></label>
     </div>
     <div class="form-row" style="margin-top:14px">
+      <label class="field">Read-only user<input name="web.viewer_username" value="{{ s.web.viewer_username }}" autocomplete="off"><span class="hint">Sees Today, Review and Reports; cannot change anything</span></label>
+      <label class="field">Read-only password<input name="web.viewer_password" type="password" autocomplete="new-password"
+        placeholder="{{ 'leave empty to keep' if s.web.viewer_password else 'not set' }}">
+        <span class="hint">{% if not cfg.web.password %}Works once the admin password is set{% elif s.web.viewer_password %}Active{% else %}Empty: no read-only login{% endif %}</span></label>
+      {% if s.web.viewer_password %}<label class="switch"><input type="checkbox" name="web.viewer_off"><span>Remove the read-only login</span></label>{% endif %}
+    </div>
+    <div class="form-row" style="margin-top:14px">
       {{ field('', 'retention_days', 'Delete camera photos after (days)', 'Reference photos are kept', type='number') }}
       {{ field('', 'late_evidence_days', 'Keep late-day photos (days)', 'Evidence if someone disputes being late', type='number') }}
       <label class="field grow">Healthchecks.io ping URL<input name="healthcheck_url" value="{{ s['']['healthcheck_url'] }}"><span class="hint">Alerts if this computer stops</span></label>

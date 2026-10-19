@@ -72,13 +72,48 @@
     </div>
 
     <div class="card">
-      <h2 class="row" title="From the HR system">{{ icon('calendar') }}Upcoming leave</h2>
+      <div class="card-head"><h2 class="row">{{ icon('calendar') }}Upcoming leave</h2>
+        <a class="btn btn-sm ghost" href="{{ url_for('calendar_page') }}" title="Everyone's leave, holidays and extra work days">{{ icon('calendar') }}All</a></div>
       <div class="list">
       {% for l in leaves %}
-        <div><span class="tnum">{{ l.start.strftime('%d %b') }}{% if l.end != l.start %} – {{ l.end.strftime('%d %b') }}{% endif %}</span>
-          <span class="badge info">{{ leave_label(l.kind) }}</span></div>
+        <div><span class="tnum">{{ l.start.strftime('%d %b') }}{% if l.end != l.start %} – {{ l.end.strftime('%d %b') }}{% endif %}
+            {% if l.note %}<span class="small muted">· {{ l.note }}</span>{% endif %}</span>
+          <span class="row" style="gap:6px"><span class="badge info">{{ leave_label(l.kind) }}</span>
+            {% if l.source == 'manual' %}<form method="post" action="{{ url_for('delete_leave', leave_id=l.id) }}" data-confirm="Remove this leave?">
+              <input type="hidden" name="back" value="{{ request.path }}">
+              <button class="btn-sm icon ghost" title="Remove" aria-label="Remove leave">{{ icon('trash') }}</button></form>
+            {% else %}<span class="badge plain" title="From the HR system; change it there">{{ icon('hr') }}HR</span>{% endif %}</span></div>
       {% else %}<p class="muted" style="margin:0">None.</p>{% endfor %}
       </div>
+      <details class="inline" style="margin-top:10px">
+        <summary>{{ icon('plus') }} Add leave</summary>
+        <form method="post" action="{{ url_for('add_leave') }}" class="stack" style="margin:8px 0 0; gap:8px">
+          <input type="hidden" name="employee_id" value="{{ person.id }}">
+          <input type="hidden" name="back" value="{{ request.path }}">
+          <div class="form-row">
+            <label class="field">From<input type="date" name="start" required></label>
+            <label class="field">Until<input type="date" name="end"></label>
+          </div>
+          <div class="form-row">
+            <label class="field"><select name="kind" aria-label="Kind of leave">{% for k, label in leave_kinds.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select></label>
+            <label class="field grow"><input name="note" maxlength="200" placeholder="Note (optional)" aria-label="Note"></label>
+          </div>
+          <div><button class="primary">{{ icon('check') }}Save leave</button></div>
+        </form>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2 class="row">{{ icon('link') }}Personal page</h2>
+      <p class="small" style="margin-top:0">{{ person.name }} can see their own arrivals and leave there and write a note for a day, without the admin password. It shows nobody else.</p>
+      {% set link = personal_link(person.id) %}
+      <div class="form-row" style="flex-wrap:nowrap">
+        <input id="personal-link" value="{{ link }}" readonly aria-label="Personal page link" style="flex:1; min-width:0" onclick="this.select()">
+        <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('personal-link').value).then(() => this.textContent = 'Copied')">{{ icon('link') }}Copy</button>
+      </div>
+      <form method="post" action="{{ url_for('renew_personal_link', employee_id=person.id) }}" data-confirm="Make a new link? The current one stops working." style="margin-top:8px">
+        <button class="btn-sm ghost" title="If the link was shared with the wrong person">{{ icon('refresh') }}New link</button>
+      </form>
     </div>
 
     <details class="panel danger-zone">
