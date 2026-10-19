@@ -7,6 +7,9 @@
     <div class="chips">
       <span class="chip">{{ icon('employees') }}<strong>{{ people|selectattr('active')|list|length }}</strong> active</span>
       <span class="chip" title="Photos per person for reliable recognition">{{ icon('image') }}5–10 photos each</span>
+      {% set needing = namespace(n=0) %}
+      {% for p in people if p.active %}{% set q = quality.get(p.id, (0, 0, 0)) %}{% if q[0] == 0 or (q[2] < q[0] and q[1] < good_photos) %}{% set needing.n = needing.n + 1 %}{% endif %}{% endfor %}
+      {% if needing.n %}<button type="button" class="chip" id="needs" aria-pressed="false" title="Show only people with fewer than {{ good_photos }} sharp, frontal photos">{{ icon('alert') }}<strong>{{ needing.n }}</strong> need photos</button>{% endif %}
     </div>
   </div>
   <div class="actions">
@@ -15,6 +18,15 @@
   </div>
 </div>
 
+{% if seed_status.state == 'running' %}
+  <div class="alert info" id="seed-running"><span class="ico">{{ icon('upload') }}</span><span><strong>Importing the seed</strong> · the camera is paused meanwhile.
+    <span id="seed-progress">{{ seed_status.progress }}</span></span></div>
+{% elif seed_status.state == 'done' %}
+  <div class="alert ok"><span class="ico">{{ icon('check') }}</span><span><strong>Seed imported</strong> ({{ seed_status.finished|replace('T', ' ') }}): {{ seed_status.message }}.
+    Backup from before: <code>{{ seed_status.backup }}</code></span></div>
+{% elif seed_status.state == 'failed' %}
+  <div class="alert error"><span class="ico">{{ icon('alert') }}</span><span><strong>Seed import failed</strong>: {{ seed_status.message }}</span></div>
+{% endif %}
 {% if people and not counts %}
   <div class="alert info"><span class="ico">{{ icon('sparkles') }}</span><span><strong>No photos yet?</strong> Upload some, or let the camera run and name faces under <a href="{{ url_for('unknowns') }}">Review</a>.</span></div>
 {% endif %}
@@ -30,12 +42,14 @@
     <tbody>
     {% for p in people %}
       {% set n = counts.get(p.id, 0) %}
-      <tr class="link" data-name="{{ p.name|lower }} {{ p.email|lower }}" onclick="location.href='{{ url_for('employee', employee_id=p.id) }}'">
+      {% set q = quality.get(p.id, (0, 0, 0)) %}
+      <tr class="link" data-name="{{ p.name|lower }} {{ p.email|lower }}" data-needs="{{ 1 if p.active and (n == 0 or (q[2] < n and q[1] < good_photos)) else 0 }}" onclick="location.href='{{ url_for('employee', employee_id=p.id) }}'">
         <td>{% if thumbs.get(p.id) %}<img class="avatar" src="{{ url_for('media', path=thumbs[p.id]) }}" alt="" loading="lazy">{% else %}<span class="avatar empty">{{ p.name[:1] }}</span>{% endif %}</td>
         <td><div class="cell-main">{{ p.name }}</div><div class="cell-sub">{{ p.email or "Add email" }}</div></td>
         <td>{% if n == 0 %}<span class="badge bad plain">{{ icon('image') }}No photos</span>
-            {% elif n < 5 %}<span class="badge late plain" title="{{ n }} photos · add more (5–10)">{{ icon('image') }}{{ n }}</span>
-            {% else %}<span class="badge ok plain" title="{{ n }} photos">{{ icon('image') }}{{ n }}</span>{% endif %}</td>
+            {% elif q[2] == n %}<span class="badge info plain" title="{{ n }} photos · quality not checked yet">{{ icon('image') }}{{ n }}</span>
+            {% elif q[1] < good_photos %}<span class="badge late plain" title="{{ q[1] }} of {{ n }} photos are sharp and frontal · add {{ good_photos - q[1] }} more good ones">{{ icon('image') }}{{ q[1] }}/{{ n }} good</span>
+            {% else %}<span class="badge ok plain" title="{{ q[1] }} of {{ n }} photos are sharp and frontal">{{ icon('image') }}{{ q[1] }}/{{ n }} good</span>{% endif %}</td>
         <td class="hide-sm">{% if p.chat_user %}<span class="badge ok plain" title="Google Chat ID set · @mentions work">{{ icon('at') }}</span>{% else %}<span class="muted" title="No Google Chat ID">–</span>{% endif %}</td>
         <td>{% if not p.active %}<span class="badge info">Not tracked</span>
             {% elif on_leave.get(p.id) %}<span class="badge info">{{ leave_label(on_leave[p.id]) }} today</span>
@@ -68,17 +82,45 @@
         <input type="file" name="file" accept=".csv,text/csv" required></label>
       <div><button>{{ icon('upload') }}Import</button></div>
     </form>
+    <div class="divider" style="margin:0"></div>
+    <form method="post" action="{{ url_for('import_seed') }}" enctype="multipart/form-data"
+          {% if in_window %}data-confirm="It is camera hours: the camera pauses for the few minutes the import takes. Import now?"{% endif %}>
+      <strong class="row">{{ icon('upload') }}Seed (.zip)</strong>
+      <label class="field"><span>People, reference photos and Review samples from another install (<code>seed/</code> with <code>manifest.json</code>).
+        Files are checked and everything is backed up first.</span>
+        <input type="file" name="file" accept=".zip,application/zip" required></label>
+      <label class="switch"><input type="checkbox" name="review_only"><span>Review samples only
+        <span class="hint">Keep people and reference photos as they are.</span></span></label>
+      <div><button {{ 'disabled' if seed_status.state == 'running' }}>{{ icon('upload') }}Import seed</button></div>
+    </form>
   </div>
 </dialog>
 {% endblock %}
 {% block scripts %}
 <script>
-  const search = document.getElementById('search');
-  search.addEventListener('input', () => {
-    const q = search.value.trim().toLowerCase();
+  const search = document.getElementById('search'), needs = document.getElementById('needs');
+  function filter() {
+    const q = search.value.trim().toLowerCase(), onlyNeeds = needs && needs.getAttribute('aria-pressed') === 'true';
     let shown = 0;
-    document.querySelectorAll('#people tbody tr').forEach(tr => { tr.hidden = q && !tr.dataset.name.includes(q); if (!tr.hidden) shown++; });
+    document.querySelectorAll('#people tbody tr').forEach(tr => {
+      tr.hidden = (q && !tr.dataset.name.includes(q)) || (onlyNeeds && tr.dataset.needs !== '1');
+      if (!tr.hidden) shown++;
+    });
     document.getElementById('empty').hidden = shown > 0 || !document.querySelector('#people tbody tr');
+  }
+  search.addEventListener('input', filter);
+  if (document.getElementById('seed-running')) {  // follow the import, then show the result
+    const poll = setInterval(async () => {
+      try {
+        const status = await (await fetch('{{ url_for('seed_status') }}')).json();
+        if (status.state !== 'running') { clearInterval(poll); location.reload(); }
+        else document.getElementById('seed-progress').textContent = status.progress || '';
+      } catch (e) { /* the page keeps trying */ }
+    }, 3000);
+  }
+  if (needs) needs.addEventListener('click', () => {
+    needs.setAttribute('aria-pressed', needs.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    filter();
   });
 </script>
 {% endblock %}

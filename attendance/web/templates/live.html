@@ -10,6 +10,7 @@
     </div>
   </div>
   <form method="post" action="{{ url_for('preview') }}" class="actions">
+    <button formaction="{{ url_for('capture') }}" title="Freeze the picture and add its faces as reference photos">{{ icon('camera') }}Capture faces</button>
     <button name="action" value="start" class="primary" id="start" hidden title="Turn the camera on for 15 minutes outside camera hours">{{ icon('play') }}Preview 15 min</button>
     <button name="action" value="stop" id="stop" hidden>{{ icon('stop') }}Stop</button>
   </form>

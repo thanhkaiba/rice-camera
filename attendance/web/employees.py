@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from flask import Flask, abort, flash, redirect, render_template, request, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for
 
 from . import current_user, done, failed
 
 if TYPE_CHECKING:
     from ..core.pipeline import App
+
+SEED_UPLOAD_MB = 1024
 
 
 def register(app: Flask, core: "App") -> None:
@@ -16,6 +18,9 @@ def register(app: Flask, core: "App") -> None:
 
     @app.get("/employees")
     def employees():
+        from ..cli import seed
+        from ..vision.faces import GOOD_PHOTOS
+
         counts = {}
         thumbs = {}
         for r in store.references(cfg.recognition.model_id()):
@@ -24,8 +29,9 @@ def register(app: Flask, core: "App") -> None:
                 thumbs[r.employee_id] = r.image
         names = {e.id: e.name for e in store.all_employees()}
         return render_template("employees.html", people=store.all_employees(), counts=counts, thumbs=thumbs,
-                               look_alikes=library.look_alikes(), names=names,
-                               on_leave=store.leaves_on(service.now().date()))
+                               look_alikes=library.look_alikes(), names=names, quality=library.quality(),
+                               good_photos=GOOD_PHOTOS, on_leave=store.leaves_on(service.now().date()),
+                               seed_status=seed.read_status(core), in_window=service.in_window(service.now()))
 
     @app.post("/employees")
     def add_employee():
@@ -50,11 +56,40 @@ def register(app: Flask, core: "App") -> None:
         store.log(service.now(), current_user(cfg), "import employees", f"{n} rows")
         return done(f"Imported {n} employees.", "employees")
 
+    @app.post("/employees/seed")
+    def import_seed():
+        from ..cli import seed
+
+        request.max_content_length = SEED_UPLOAD_MB * 1024 * 1024  # a seed is bigger than a few photos
+        file = request.files.get("file")
+        if not file or not file.filename:
+            return failed("Choose the seed .zip file.", "employees")
+        folder = core.data_dir / "seed-upload"
+        folder.mkdir(parents=True, exist_ok=True)
+        archive = folder / f"{service.now():%Y%m%d-%H%M%S}.zip"
+        file.save(archive)
+        try:
+            seed.start(core, archive, review_only=request.form.get("review_only") == "on", user=current_user(cfg))
+        except ValueError as exc:
+            archive.unlink(missing_ok=True)
+            return failed(f"Seed import not started: {exc}.", "employees")
+        return done("Seed import started. The camera is paused until it finishes (a few minutes).", "employees")
+
+    @app.get("/employees/seed.json")
+    def seed_status():
+        from ..cli import seed
+
+        return jsonify(seed.read_status(core))
+
     @app.get("/employees/<employee_id>")
     def employee(employee_id: str):
+        from ..vision.faces import GOOD_PHOTOS
+
         person = store.employee(employee_id) or abort(404)
         refs = store.references(cfg.recognition.model_id(), employee_id)
-        return render_template("employee.html", person=person, refs=refs,
+        return render_template("employee.html", person=person, refs=refs, good_photos=GOOD_PHOTOS,
+                               good=sum(r.quality_ok is True for r in refs),
+                               look_alikes=library.look_alikes_of(employee_id), names=store.employees(),
                                leaves=store.leaves(employee_id=employee_id, ending_after=service.now().date()))
 
     @app.post("/employees/<employee_id>")

@@ -1,5 +1,35 @@
 # Nhập employee và ảnh sau khi pull code
 
+## Cách nhanh: ngay trong app (bản cài đặt hoặc từ source)
+
+Không cần Python hay mã nguồn. Nén thư mục `seed/` thành `.zip` (hoặc dùng file zip nhận được), rồi:
+
+- **Trang People → Add → Seed (.zip)**: chọn file, bấm **Import seed**. Tick **Review samples only** nếu chỉ cập nhật Review (tương đương `--review-only`). Camera tạm dừng trong vài phút import; trang hiện tiến độ và kết quả, kèm đường dẫn backup.
+- **Dòng lệnh** (dừng chương trình trước; lệnh từ chối chạy nếu chương trình đang chạy):
+
+```bash
+FaceAttendance import-seed seed.zip               # bản cài đặt (macOS: /Applications/FaceAttendance.app/Contents/MacOS/FaceAttendance)
+python -m attendance --config config.yaml import-seed seed/            # từ source; thư mục hoặc .zip
+python -m attendance --config config.yaml import-seed seed.zip --review-only
+```
+
+Kiểm tra SHA-256 theo manifest, backup `before-seed-*`, quy tắc ghép email và báo cáo `seed-import-*.json` giống hệt script bên dưới. `seed/import_seed.py` cũ vẫn chạy được; bộ seed mới có thể thay nó bằng wrapper mỏng:
+
+```python
+"""Import this seed: python seed/import_seed.py --config config.yaml [--review-only] (program stopped)."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from attendance.cli.seed import script_main
+
+script_main(Path(__file__).resolve().parent)
+```
+
+Các mục dưới đây là quy trình chi tiết khi chạy từ source.
+
+## Từ source bằng script
+
 Dùng **toàn bộ thư mục `seed/`**, đặt cạnh `attendance/` trên máy đích. Sau khi chuẩn bị môi trường và dừng dịch vụ, chạy tại gốc dự án:
 
 ```bash

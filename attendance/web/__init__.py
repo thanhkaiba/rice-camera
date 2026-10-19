@@ -147,18 +147,20 @@ def create_app(core: "App") -> "Flask":
                 "employee_emails": store.employee_emails()}
 
     from . import attendance as attendance_routes
+    from . import capture as capture_routes
     from . import employees as employees_routes
     from . import reports as reports_routes
     from . import settings as settings_routes
 
     attendance_routes.register(app, core)
+    capture_routes.register(app, core)
     employees_routes.register(app, core)
     reports_routes.register(app, core)
     settings_routes.register(app, core)
 
     @app.get("/media/<path:path>")
     def media(path: str):
-        if not path.startswith(("crops/", "faces/", "review-seed/")) or ".." in Path(path).parts:
+        if not path.startswith(("crops/", "faces/", "review-seed/", "captures/")) or ".." in Path(path).parts:
             abort(404)
         return send_from_directory(core.data_dir, path)
 

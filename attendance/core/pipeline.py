@@ -58,6 +58,7 @@ class App:
         self.service.library = self.library
         self.leave_sync = LeaveSync(cfg, self.store, self.service.now, lambda d: self.service.window(d).late_after)
         self.live = LiveStatus()
+        self.maintenance: str | None = None  # e.g. a seed import: the camera pauses while it is set
         self.pose = PoseCalibration(self.store, lambda: cfg.recognition.auto_pose)
         self.backup = Backup(self.store, cfg, self.service.now, self.service.alert)
         self.service.backup = self.backup
@@ -236,6 +237,8 @@ def run(cfg: Config) -> None:
     try:
         recognizer = app.recognizer()
         app.library.reembed_missing()
+        app.library.rate_in_background = True
+        app.library.rate_soon()
     except Exception as exc:
         live.problem = f"Face models could not be loaded: {exc}"
         log.error(live.problem)
@@ -266,13 +269,13 @@ def run(cfg: Config) -> None:
     log.info("Running; processing window %s-%s", cfg.schedule.window_start, cfg.schedule.window_end)
     while True:
         now = service.now()
-        in_window = service.in_window(now)
+        in_window = service.in_window(now) and not app.maintenance
         if was_in_window and not in_window:
             handle(processor.flush())
         was_in_window = in_window
         camera_ok = True
 
-        if (in_window or live.previewing) and recognizer is not None and cfg.camera.url:
+        if (in_window or live.previewing) and recognizer is not None and cfg.camera.url and not app.maintenance:
             if camera is None or camera.source != cfg.camera.url or camera.silent_for() > CAMERA_RESTART_S:
                 if camera is not None:
                     if camera.source == cfg.camera.url:
@@ -304,7 +307,7 @@ def run(cfg: Config) -> None:
                 live.faces = [text for _, (text, _) in labelled]
                 live.people = len(people)
                 if live.wants_frame():
-                    live.set_frame(draw(frame, labelled, people, cfg.camera.area_box(frame.shape)))
+                    live.set_frame(draw(frame, labelled, people, cfg.camera.area_box(frame.shape)), frame)
                 fps_count += 1
             else:
                 time.sleep(0.02)
@@ -312,9 +315,10 @@ def run(cfg: Config) -> None:
             if camera is not None:
                 camera.stop()
                 camera = None
-            live.camera_state = ("off (outside the camera hours)" if cfg.camera.url
+            live.camera_state = (f"paused ({app.maintenance})" if app.maintenance
+                                 else "off (outside the camera hours)" if cfg.camera.url
                                  else "off (no camera address in Settings)")
-            if in_window:
+            if in_window or (app.maintenance and service.in_window(now)):
                 camera_ok = False  # should be working but cannot: count it as an outage
             time.sleep(0.5)
 

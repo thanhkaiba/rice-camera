@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% set title = 'Capture photos' %}
+{% block body %}
+<div class="crumbs"><a href="{{ url_for('live_page') }}">Camera</a> {{ icon('chevron-right') }} <span>Capture</span></div>
+<div class="page-head">
+  <div>
+    <h1>Faces in the picture</h1>
+    <p class="subtitle">Choose who each face is and add it as a reference photo. Door-camera pictures are the best references.</p>
+  </div>
+  <form method="post" action="{{ url_for('capture') }}" class="actions">
+    <button class="primary" title="Freeze the live picture again">{{ icon('camera') }}Capture again</button>
+  </form>
+</div>
+
+<div class="card"><img src="{{ url_for('media', path='captures/' ~ token ~ '.jpg') }}" alt="The captured picture" style="width:100%; border-radius:10px"></div>
+
+<div class="photo-grid" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr))">
+  {% for f in faces %}
+  <div class="card stack" style="gap:8px; margin:0">
+    <div class="photo"><img src="{{ url_for('media', path='captures/' ~ token ~ '_' ~ loop.index0 ~ '.jpg') }}" alt=""></div>
+    <div class="row" style="gap:6px">
+      <span class="badge info plain">{{ f.size }} px</span>
+      {% if f.ok %}<span class="badge ok plain">Sharp, frontal</span>
+      {% else %}<span class="badge late plain" title="Blurred, turned away or small: a weaker reference">Blurred or turned</span>{% endif %}
+    </div>
+    {% if f.added %}
+      <span class="badge ok">{{ icon('check') }}Added for {{ names.get(f.added, f.added) }}</span>
+    {% else %}
+    <form method="post" action="{{ url_for('capture_add', token=token, index=loop.index0) }}" class="stack" style="gap:8px; margin:0">
+      <label class="field">Who is this?
+        <select name="employee_id" required>
+          <option value="">Choose…</option>
+          {% for p in people %}<option value="{{ p.id }}" {{ 'selected' if p.id == f.guess }}>{{ p.name }} · {{ p.email }}</option>{% endfor %}
+        </select></label>
+      <div><button class="primary">{{ icon('plus') }}Add photo</button></div>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -56,6 +56,7 @@ class LiveStatus:
     preview_until: float = 0.0
     _jpeg: bytes | None = None
     _jpeg_time: float = 0.0
+    _raw: np.ndarray | None = None  # the analysed picture without labels, for capturing reference photos
     _viewer_seen: float = 0.0
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -73,9 +74,17 @@ class LiveStatus:
         """Only spend CPU on drawing and encoding frames while someone has the live page open."""
         return time.time() - self._viewer_seen < VIEWER_TIMEOUT_S
 
-    def set_frame(self, jpeg: bytes) -> None:
+    def set_frame(self, jpeg: bytes, raw: np.ndarray | None = None) -> None:
         with self._lock:
             self._jpeg, self._jpeg_time = jpeg, time.time()
+            self._raw = raw  # each camera picture is a new array, so no copy is needed here
+
+    def raw_frame(self) -> np.ndarray | None:
+        """The newest unlabelled picture while it is fresh (someone has the live page open)."""
+        with self._lock:
+            if self._raw is None or time.time() - self._jpeg_time > VIEWER_TIMEOUT_S:
+                return None
+            return self._raw.copy()
 
     def frame(self) -> tuple[bytes | None, float]:
         self._viewer_seen = time.time()

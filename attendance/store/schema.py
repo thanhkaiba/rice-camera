@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS embeddings (
     vector BLOB NOT NULL,
     source TEXT NOT NULL,
     image TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    quality_ok INTEGER  -- 1 sharp and frontal, 0 blurred or turned away, NULL not checked yet
 );
 CREATE TABLE IF NOT EXISTS checkins (
     day TEXT NOT NULL,
@@ -176,6 +177,7 @@ class Reference:
     image: str | None
     source: str
     vector: np.ndarray
+    quality_ok: bool | None = None  # sharp and frontal enough; None = not checked yet
 
 
 @dataclass
@@ -233,7 +235,7 @@ def _blob(vector) -> bytes | None:
 
 def migrate(db: sqlite3.Connection) -> None:
     """Add columns introduced after a database was created."""
-    added = {"embeddings": [("image", "TEXT")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'")],
+    added = {"embeddings": [("image", "TEXT"), ("quality_ok", "INTEGER")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'")],
              "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT")],
              "sightings": [("camera_id", "TEXT"), ("model", "TEXT"), ("vector", "BLOB"), ("sha256", "TEXT")]}
     for table, columns in added.items():
