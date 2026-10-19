@@ -101,6 +101,7 @@
         <input name="camera.url" value="{{ s.camera.url }}" placeholder="rtsp://admin:CODE@192.168.1.64:554/Streaming/Channels/101" data-camera-check="auto">
         <span class="hint">Ezviz: rtsp://admin:&lt;6-letter code on the label&gt;@&lt;camera IP&gt;:554/Streaming/Channels/101</span>{{ src('camera.url') }}</label>
       {{ field('camera', 'process_fps', 'Frames / second', 'Lower on a slow computer', type='number', step='0.5') }}
+      {{ field('camera', 'decode_threads', 'Decoder threads', 'CPU cores reading the video · 0 = all', type='number', step='1') }}
     </div>
     <div class="form-row" style="margin-top:14px">
       {{ field('camera', 'area', 'Detection area', 'Draw it on the Camera page · empty = whole picture', cls='grow') }}

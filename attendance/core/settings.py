@@ -18,7 +18,7 @@ SECRET = {"password", "token"}
 # section ("" = top level) -> editable fields
 EDITABLE: dict[str, list[str]] = {
     "schedule": ["window_start", "late_after", "window_end", "work_days"],
-    "camera": ["url", "process_fps", "enhance_low_light", "area"],
+    "camera": ["url", "process_fps", "decode_threads", "enhance_low_light", "area"],
     "tracking": ["mode", "person_conf", "full_frame_every"],
     "recognition": ["accept_score", "min_margin", "votes_required", "min_face_px", "min_det_score",
                     "min_sharpness", "max_yaw", "max_pitch", "auto_pose", "unknown_min_frames",

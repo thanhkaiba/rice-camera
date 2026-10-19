@@ -50,6 +50,9 @@ class ScheduleConfig:
 class CameraConfig:
     url: str = ""  # rtsp://..., a video file, or a webcam index such as "0"
     process_fps: float = 5.0
+    # FFmpeg threads decoding the stream; 0 = FFmpeg's choice (all cores). A 3K H.265 stream on a
+    # 12-thread laptop took ~80 % CPU with all cores and ~40 % with 2, at the same frame rate.
+    decode_threads: int = 2
     enhance_low_light: bool = True
     # Part of the picture to analyse, as fractions "left,top,right,bottom" (e.g. "0.3,0.1,0.8,1");
     # empty = the whole picture. Cropping to the walkway makes faces bigger for the detector and
@@ -254,6 +257,8 @@ class Config:
             raise ValueError("seen_again_score must be between 0 and 1")
         if not 0 < self.camera.process_fps <= 30:
             raise ValueError("process_fps must be between 0 and 30")
+        if not 0 <= self.camera.decode_threads <= 32:
+            raise ValueError("camera.decode_threads must be between 0 (FFmpeg's choice) and 32")
         if r.det_size < 160 or (r.backend == "insightface" and r.det_size % 32):
             raise ValueError("det_size must be at least 160 and, for insightface, a multiple of 32 (e.g. 640, 960)")
         if self.retention_days < 1:

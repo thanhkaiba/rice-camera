@@ -134,6 +134,7 @@ class AttendanceService:
         self.gallery = gallery
         self.library: FaceLibrary | None = None  # set by the app; used to learn admin-confirmed faces
         self.backup = None  # set by the app: the daily backup (backup.Backup)
+        self.placement = None  # set by the app: how well the camera sees faces (placement.Placement)
         self._now = now or (lambda: dt.datetime.now(self.tz))
         saved = store.get("last_alive")
         self._last_alive = dt.datetime.fromisoformat(saved) if saved else None
@@ -593,6 +594,8 @@ class AttendanceService:
             lines.append(f"❓ {rep.pending_unknowns} unidentified faces to review · "
                          f"{self._link('/unknowns?review=first', 'Review')}")
         lines += self._extra_lines(rep)
+        if self.placement is not None:
+            lines += self.placement.hints(rep.day, self.cfg.recognition.min_face_px)
         lines.append(f"Details: {self._link('/')}")
         return "\n".join(lines)
 

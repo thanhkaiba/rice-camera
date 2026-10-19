@@ -9,6 +9,8 @@ import sys
 import time
 from typing import TYPE_CHECKING
 
+from . import machine
+
 if TYPE_CHECKING:
     from .config import Config
     from .pipeline import App
@@ -30,6 +32,10 @@ def config_warnings(cfg: "Config") -> list[dict]:
     if not cfg.backup.folder.strip():
         found.append({"id": "backup", "anchor": "admin",
                       "text": "No backup folder: a broken disk would lose the database and all photos."})
+    known = machine.addresses_if_ready()
+    url = machine.public_url_problem(cfg, known) if known else None
+    if url:
+        found.append({"id": "public_url", "anchor": "admin", "text": url["text"]})
     return found
 
 
@@ -124,6 +130,7 @@ def status(app: "App") -> dict:
         "version": __version__, "packaged": getattr(sys, "frozen", False),
         "camera": {"state": live.camera_state, "ok": live.camera_state == "ok", "problem": live.problem,
                    "fps": round(live.fps, 1), "target_fps": cfg.camera.process_fps,
+                   "source_fps": round(getattr(live, "source_fps", 0.0), 1), "decode_threads": cfg.camera.decode_threads,
                    "in_window": app.service.in_window(app.service.now()), "configured": bool(cfg.camera.url)},
         "uptime": camera_uptime(app),
         "usage": process_usage(),
@@ -133,4 +140,9 @@ def status(app: "App") -> dict:
         "disk": disk(app),
         "photos": photo_summary(app),
         "warnings": config_warnings(cfg),
+        "power": app.machine.status() if getattr(app, "machine", None) else None,
+        "public_url": machine.public_url_problem(cfg, machine.addresses_if_ready()) if machine.addresses_if_ready() else None,
+        "placement": (app.placement.recent(app.service.now().date(), UPTIME_DAYS, cfg.recognition.min_face_px)
+                      if getattr(app, "placement", None) else []),
+        "min_face_px": cfg.recognition.min_face_px,
     }

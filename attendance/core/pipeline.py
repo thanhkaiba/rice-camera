@@ -12,6 +12,8 @@ from . import settings
 from .backup import Backup
 from .config import Config
 from .evidence import evidence_digest
+from .machine import MachineWatch
+from .placement import Placement
 from ..vision.faces import FaceLibrary
 from ..vision.gallery import Gallery
 from ..integrations.leave_api import LeaveSync
@@ -62,6 +64,9 @@ class App:
         self.pose = PoseCalibration(self.store, lambda: cfg.recognition.auto_pose)
         self.backup = Backup(self.store, cfg, self.service.now, self.service.alert)
         self.service.backup = self.backup
+        self.placement = Placement(self.store)
+        self.service.placement = self.placement
+        self.machine = MachineWatch(cfg, self.store, self.service.alert, self.service.now)
 
     def recognizer(self):
         if self._recognizer is None:
@@ -251,7 +256,8 @@ def run(cfg: Config) -> None:
     face_regions: list = []  # where faces were in the last analysed frame
     health = FrameHealth()
     camera: Camera | None = None
-    last_processed = last_chosen = last_ping = last_tick = 0.0
+    last_processed = last_chosen = last_ping = last_tick = last_recorded = 0.0
+    placement_saved = time.time()
     fps_count, fps_since = 0, time.time()
     was_in_window = False
 
@@ -272,16 +278,18 @@ def run(cfg: Config) -> None:
         in_window = service.in_window(now) and not app.maintenance
         if was_in_window and not in_window:
             handle(processor.flush())
+            app.placement.save()  # before the summary, which reads it
         was_in_window = in_window
         camera_ok = True
 
         if (in_window or live.previewing) and recognizer is not None and cfg.camera.url and not app.maintenance:
-            if camera is None or camera.source != cfg.camera.url or camera.silent_for() > CAMERA_RESTART_S:
+            if (camera is None or camera.source != cfg.camera.url or camera.silent_for() > CAMERA_RESTART_S
+                    or camera.decode_threads != cfg.camera.decode_threads):
                 if camera is not None:
-                    if camera.source == cfg.camera.url:
+                    if camera.source == cfg.camera.url and camera.silent_for() > CAMERA_RESTART_S:
                         log.warning("No frames for %.0fs, reopening the camera", camera.silent_for())
                     camera.stop(wait_s=1.0)  # do not let a hung reader hold up the loop
-                camera = Camera(cfg.camera.url).start()
+                camera = Camera(cfg.camera.url, cfg.camera.decode_threads).start()
                 live.camera_state = "connecting"
             frame, frame_time = camera.latest()
             camera_ok = frame is not None
@@ -300,6 +308,10 @@ def run(cfg: Config) -> None:
                 ts = dt.datetime.fromtimestamp(frame_time, service.tz)
                 decisions, matched, people = processor.process(frame, ts, record=in_window)
                 handle(decisions)
+                if in_window:
+                    app.placement.add_frame(ts.date(), [f for f, _, _ in matched], cfg.recognition,
+                                            frame_time - last_recorded)
+                    last_recorded = frame_time
                 if processor.person_error and live.problem is None:
                     live.problem = processor.person_error
                 face_regions = [_grow(f.bbox, frame.shape) for f, _, _ in matched]
@@ -324,6 +336,11 @@ def run(cfg: Config) -> None:
 
         if time.time() - fps_since >= 5:
             live.fps, fps_count, fps_since = fps_count / (time.time() - fps_since), 0, time.time()
+            live.source_fps = camera.received_fps() if camera is not None else 0.0
+        if time.time() - placement_saved >= 60:
+            placement_saved = time.time()
+            app.placement.save()
+        app.machine.check_soon()
         if time.time() - last_tick >= 1.0:
             last_tick = time.time()
             service.tick(camera_ok, live.camera_state)

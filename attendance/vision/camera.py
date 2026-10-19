@@ -17,6 +17,7 @@ from collections import deque
 
 # RTSP over TCP: slower to start than UDP, but no smeared frames on a weak Wi-Fi link.
 os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+_BASE_OPTIONS = os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"]  # as set by the user or above
 
 import cv2  # noqa: E402
 
@@ -24,6 +25,31 @@ log = logging.getLogger(__name__)
 
 STALE_AFTER_S = 5.0
 BUFFER_FRAMES = 6
+RATE_WINDOW_S = 5.0  # frames received over this long give the camera's frame rate
+# OpenCV reads the FFmpeg options from the environment when a stream is opened; the environment is
+# shared by the whole program, so two cameras opening at once must not mix their options.
+_open_lock = threading.Lock()
+
+
+def capture_options(base: str, threads: int) -> str:
+    """FFmpeg capture options: `base` ("key;value|key;value") with the decoder thread count set,
+    replacing a threads option already in it. 0 threads keeps FFmpeg's choice (all cores)."""
+    parts = [p for p in base.split("|") if p and p.split(";", 1)[0] != "threads"]
+    if threads > 0:
+        parts.append(f"threads;{threads}")
+    return "|".join(parts)
+
+
+def open_capture(url, threads: int = 0):
+    """cv2.VideoCapture for a stream or file with `threads` decoder threads; a webcam index as is."""
+    if not isinstance(url, str):
+        return cv2.VideoCapture(url)
+    with _open_lock:
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = capture_options(_BASE_OPTIONS, threads)
+        try:
+            return cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+        finally:
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = _BASE_OPTIONS
 
 
 def focus(frame, regions) -> float:
@@ -42,9 +68,11 @@ def focus(frame, regions) -> float:
 
 
 class Camera:
-    def __init__(self, url: str):
+    def __init__(self, url: str, decode_threads: int = 0):
         self.source = url
         self.url = int(url) if url.isdigit() else url
+        self.decode_threads = decode_threads
+        self._arrivals: deque = deque()  # when recent frames came in, for the camera's frame rate
         self._started = time.time()
         self._frame = None
         self._frame_time = 0.0
@@ -71,6 +99,16 @@ class Camera:
         with self._lock:
             return time.time() - (self._frame_time or self._started)
 
+    def received_fps(self) -> float:
+        """Frames a second the camera actually delivers (and the computer decodes), lately."""
+        with self._lock:
+            now = time.time()
+            while self._arrivals and now - self._arrivals[0] > RATE_WINDOW_S:
+                self._arrivals.popleft()
+            if len(self._arrivals) < 2:
+                return 0.0
+            return (len(self._arrivals) - 1) / max(1e-6, self._arrivals[-1] - self._arrivals[0])
+
     def latest(self):
         """Return (frame, unix_time) of the newest frame, or (None, 0) if the stream is down."""
         with self._lock:
@@ -95,7 +133,7 @@ class Camera:
     def _run(self) -> None:
         backoff = 1.0
         while not self._stop.is_set():
-            cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG) if isinstance(self.url, str) else cv2.VideoCapture(self.url)
+            cap = open_capture(self.url, self.decode_threads)
             if not cap.isOpened():
                 log.warning("Cannot open camera, retrying in %.0fs", backoff)
                 self._stop.wait(backoff)
@@ -117,4 +155,7 @@ class Camera:
                 with self._lock:
                     self._frame, self._frame_time = frame, now
                     self._recent.append((frame, now))
+                    self._arrivals.append(now)
+                    if len(self._arrivals) > 200:
+                        self._arrivals.popleft()
             cap.release()
