@@ -318,9 +318,11 @@ def open_when_ready(url: str, wait_s: float = 120) -> None:
 
 
 def hand_over(home: Path, argv: list[str]) -> bool:
-    """Start the newest downloaded version instead of this one. True if it did."""
-    from attendance.cli.updater import newer_installed
+    """Start the newest downloaded version (or the one gone back to) instead of this one. True if it did."""
+    from attendance.cli.updater import newer_installed, note_base
 
+    if frozen():
+        note_base(home)  # so an update can go back to this program
     newer = newer_installed(home) if frozen() else None
     if newer is None:
         return False

@@ -13,7 +13,7 @@ Download the installer for your computer from the newest [release](https://githu
 
 The program starts at login, restarts itself if it stops, and opens the **Setup** page the first time. Opening it again just opens the page.
 
-**Automatic updates are off by default.** Tick the box in *Settings → Access → Updates* and every 6 hours the program looks for a newer release, downloads it into the data folder and, outside camera hours, restarts into it. That page shows the version and has *Check now*. Data and settings are kept. Coming from the install script below: install over it; it uses the same data folder and stops the old copy.
+**Automatic updates are on by default** in the installed program (untick the box in *Settings → Access → Updates* to stop them; an install whose Settings page saved them off stays off). Every 6 hours the program looks for a newer release, downloads it into the data folder and, outside camera hours, restarts into it. That page shows the version and has *Check now*. Data and settings are kept. If a new version misbehaves, *Go back to version …* on the same page restarts into the previous one (the last two downloaded versions and the installed program are kept); the version gone back from is not installed again, the next newer release is, and *Use version … again* returns to the newest. Coming from the install script below: install over it; it uses the same data folder and stops the old copy.
 
 ## Install script (from the source folder)
 
@@ -134,6 +134,8 @@ WantedBy=multi-user.target
 - script or source install: `python -m attendance --config config.yaml restore "<backup folder>"`
 
 It puts back the newest database copy (`--snapshot 2026-10-01` picks an older one), the photos, and `config.yaml` when the new computer has none. Start the program again and check the camera address and *Address of this page* in Settings: the new computer may have another IP address.
+
+**Setting up another computer the same way** (a second office, a new computer without the old data): *Settings → Access → Configuration file → Export* writes config.yaml and everything saved on the Settings page, including the detection area, the password, the Google Chat webhook and the HR token, so keep the file private. *Import* on the other computer checks it, saves that computer's current configuration to `data/config-backups/before-import-<time>.json` (import that file to undo), keeps its data folder and *Address of this page*, and restarts the program. People and photos are not in the file: use a backup or the [seed import](seed-import.md). From a terminal: `export-config <file>` and `import-config <file>` (e.g. `python -m attendance --config config.yaml import-config conf.json`), then restart the program.
 
 **By hand** works too: the data folder (see the table above) is self-contained, so copying it to the same place on the new computer is a complete move.
 

@@ -59,6 +59,10 @@ def main() -> None:
     p = sub.add_parser("restore", help="put a backup back into this install (stop the program first)")
     p.add_argument("folder")
     p.add_argument("--snapshot", default=None, help="which database copy, YYYY-MM-DD (default: the newest)")
+    p = sub.add_parser("export-config", help="write config.yaml and the saved settings to a file (holds passwords)")
+    p.add_argument("file")
+    p = sub.add_parser("import-config", help="set this install up from an exported configuration file")
+    p.add_argument("file")
     args = parser.parse_args()
 
     cfg = config_module.load(args.config)
@@ -109,6 +113,32 @@ def main() -> None:
         from .core.backup import restore
 
         print(restore(cfg, Path(args.folder), args.snapshot))
+    elif args.command in ("export-config", "import-config"):
+        import json
+
+        from .core import transfer
+        from .store import Store
+
+        store = Store(cfg.path(cfg.data_dir) / "attendance.db")
+        try:
+            if args.command == "export-config":
+                data = transfer.export(cfg, store, Path(args.config))
+                Path(args.file).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                print(f"Written to {args.file}. It holds the password and keys: keep it private.")
+            else:
+                try:
+                    data = json.loads(Path(args.file).read_text(encoding="utf-8-sig"))
+                    backup = transfer.import_(cfg, store, Path(args.config), data)
+                except (OSError, ValueError) as exc:
+                    raise SystemExit(f"Not imported: {exc}")
+                if getattr(sys, "frozen", False):  # the running program restarts by itself to apply it
+                    from .cli.updater import RESTART_FILE
+
+                    (cfg.path(cfg.data_dir) / RESTART_FILE).touch()
+                print(f"Imported; the previous configuration is saved as {backup}. "
+                      "Restart the program to apply all of it (the installed program does this by itself).")
+        finally:
+            store.close()
     elif args.command == "self-test":
         import numpy as np
 

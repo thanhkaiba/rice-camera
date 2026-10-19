@@ -154,10 +154,38 @@
       {{ check('updates', 'enabled', 'Install new versions automatically', 'Checked every few hours · installed outside camera hours') }}
       <button class="btn-sm" formaction="{{ url_for('update_now') }}" formnovalidate>{{ icon('refresh') }}Check now</button>
     </div>
+    {% if update.rolled_back %}<p class="hint"><b>{{ update.rolled_back }}.</b> That version is not installed again; the next newer release is.</p>{% endif %}
+    {% if versions.targets or versions.pinned %}
+    <div class="form-row" style="align-items:center; margin-top:12px">
+      <span class="hint grow">On this computer: {{ versions.all|join(' · ') }}</span>
+      {% if versions.targets %}
+      <button class="btn-sm" formaction="{{ url_for('go_back') }}" name="rollback.version" value="{{ versions.targets[0] }}" formnovalidate
+              onclick="return confirm('Go back to version {{ versions.targets[0] }}? The program restarts.')">{{ icon('undo') }}Go back to version {{ versions.targets[0] }}</button>
+      {% endif %}
+      {% if versions.pinned and versions.newest %}
+      <button class="btn-sm" formaction="{{ url_for('go_forward') }}" formnovalidate>{{ icon('download') }}Use version {{ versions.newest }} again</button>
+      {% endif %}
+    </div>
+    {% endif %}
     {% else %}
     <input type="hidden" name="updates.enabled" value="{{ 'on' if s.updates.enabled }}">
     <p class="hint">This copy runs from source; automatic updates are part of the installed program.</p>
     {% endif %}
+    <hr>
+    <h2 class="row">{{ icon('archive') }}Configuration file</h2>
+    <p class="hint" style="margin-top:0">Set up another computer the same way: config.yaml and everything on this page, including the detection area.
+      People, photos and attendance are not included (use a backup or the seed import). Importing keeps this computer's data folder and page address,
+      saves the current configuration first and restarts the program.</p>
+    <div class="form-row" style="align-items:center">
+      <label class="switch"><input type="checkbox" name="export.confirm"><span>The file holds the password, the Google Chat webhook and the HR token
+        <span class="hint">Keep it private; delete it once the other computer is set up</span></span></label>
+      <button class="btn-sm" formaction="{{ url_for('export_config') }}" formnovalidate>{{ icon('download') }}Export</button>
+    </div>
+    <div class="form-row" style="align-items:center; margin-top:12px">
+      <label class="field grow">Import a configuration file<input type="file" name="import.file" accept=".json,application/json"></label>
+      <button class="btn-sm" formaction="{{ url_for('import_config') }}" formenctype="multipart/form-data" formnovalidate
+              onclick="return confirm('Replace the configuration of this computer with this file?')">{{ icon('upload') }}Import</button>
+    </div>
   </section>
 
   <section class="card tab" id="hr">

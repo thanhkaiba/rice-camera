@@ -1,6 +1,7 @@
 """Routes for live camera view (/live), system settings (/settings), and first-run setup (/setup)."""
 from __future__ import annotations
 
+import json
 import sys
 import time
 from typing import TYPE_CHECKING
@@ -9,7 +10,7 @@ from flask import Flask, Response, abort, jsonify, redirect, render_template, re
 
 from .. import __version__
 from ..cli import updater
-from ..core import settings
+from ..core import settings, transfer
 from . import current_user, done, failed, first_setup, leave_status
 
 if TYPE_CHECKING:
@@ -81,7 +82,16 @@ def register(app: Flask, core: "App") -> None:
     def settings_page():
         return render_template("settings.html", s=settings.current(cfg), cfg=cfg, leave=leave_status(core),
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
-                               update=updater.read_status(core.data_dir), backup=core.backup.status())
+                               update=updater.read_status(core.data_dir), backup=core.backup.status(),
+                               versions=versions())
+
+    def versions() -> dict:
+        """Versions on this computer, for going back to the previous one or forward again."""
+        home = cfg.base_dir
+        found = updater.programs(home)
+        return dict(all=[v for v, _ in found], targets=[v for v, _ in updater.rollback_targets(home)],
+                    pinned=updater.pinned(home) is not None,
+                    newest=found[0][0] if found and updater.parse(found[0][0]) > updater.parse(__version__) else None)
 
     @app.post("/settings")
     def save_settings():
@@ -115,6 +125,54 @@ def register(app: Flask, core: "App") -> None:
         store.log(service.now(), current_user(cfg), "check for updates", "")
         return done("Checking for a new version. If there is one, it is installed and the program restarts "
                     "by itself in a minute or two.", "settings_page")
+
+    @app.post("/settings/go-back")
+    def go_back():
+        version = request.form.get("rollback.version", "")
+        if not getattr(sys, "frozen", False) or version not in versions()["targets"]:
+            return failed("That version cannot be started here.", "settings_page")
+        (core.data_dir / updater.ROLLBACK_FILE).write_text(json.dumps({"version": version}), encoding="utf-8")
+        store.log(service.now(), current_user(cfg), "go back to an earlier version", f"{__version__} -> {version}")
+        return done(f"Going back to version {version}: the program restarts by itself within a minute. "
+                    f"Version {__version__} is not installed again; a newer release is.", "settings_page")
+
+    @app.post("/settings/go-forward")
+    def go_forward():
+        if not getattr(sys, "frozen", False):
+            return failed("Only the installed program has versions to choose from.", "settings_page")
+        (core.data_dir / updater.ROLLBACK_FILE).write_text(json.dumps({"version": ""}), encoding="utf-8")
+        store.log(service.now(), current_user(cfg), "use the newest version again", __version__)
+        return done("Back to automatic updates: the newest version starts within a minute.", "settings_page")
+
+    @app.post("/settings/export-config")
+    def export_config():
+        if request.form.get("export.confirm") != "on":
+            return failed("Tick the box to confirm that the file holds passwords and keys.", "settings_page")
+        data = transfer.export(cfg, store, cfg.base_dir / "config.yaml")
+        store.log(service.now(), current_user(cfg), "export configuration", "")
+        name = f"face-attendance-configuration-{service.now():%Y-%m-%d}.json"
+        return Response(json.dumps(data, ensure_ascii=False, indent=2), mimetype="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.post("/settings/import-config")
+    def import_config():
+        upload = request.files.get("import.file")
+        if not upload or not upload.filename:
+            return failed("Choose a configuration file first.", "settings_page")
+        try:
+            data = json.loads(upload.read().decode("utf-8-sig"))
+            backup = transfer.import_(cfg, store, cfg.base_dir / "config.yaml", data)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return failed("Not imported: this is not a configuration file exported from this program.", "settings_page")
+        except ValueError as exc:
+            return failed(f"Not imported: {exc}.", "settings_page")
+        store.log(service.now(), current_user(cfg), "import configuration", f"{upload.filename}; before: {backup.name}")
+        if getattr(sys, "frozen", False):
+            (core.data_dir / updater.RESTART_FILE).touch()  # the launcher restarts the program within a minute
+            return done(f"Configuration imported; the program restarts by itself within a minute to apply all of it. "
+                        f"The previous one is saved as {backup.name}.", "settings_page")
+        return done(f"Configuration imported. Restart the program to apply all of it. "
+                    f"The previous one is saved as {backup.name}.", "settings_page")
 
     @app.post("/settings/backup-now")
     def backup_now():
