@@ -96,6 +96,12 @@ class DayReport:
         return self.workday and bool(self.on_time) and not self.not_seen and not self.late and not self.pending_unknowns
 
 
+def email_name(email: str) -> str:
+    """ruby@example.com → Ruby, tan.nguyen@… → Tan Nguyen: how a team that uses email names calls people."""
+    local = email.partition("@")[0]
+    return " ".join(w[:1].upper() + w[1:] for w in local.replace("_", ".").replace("-", ".").split(".") if w) or email
+
+
 def minutes_late(a: Arrival, w: Window) -> int:
     return int((a.ts - w.late_after).total_seconds() // 60)
 
@@ -192,18 +198,27 @@ class AttendanceService:
         e = self.store.employee(employee_id)
         return e.name if e else employee_id
 
+    def chat_name(self, employee_id: str, name: str | None = None) -> str:
+        """The name used in Chat messages: the People page name, or with google_chat.names = "email"
+        the part of the email before @ (ruby@… → Ruby, tan.nguyen@… → Tan Nguyen)."""
+        if self.cfg.google_chat.names == "email":
+            e = self.store.employee(employee_id)
+            if e and e.email:
+                return email_name(e.email)
+        return name or self._name(employee_id)
+
     def mention(self, employee_id: str) -> str:
         """A Google Chat @mention when the employee's Chat user ID is known, else "@Name" as plain text."""
         e = self.store.employee(employee_id)
         if e and e.chat_user:
             return f"<users/{e.chat_user}>"
-        return f"@{e.name if e else employee_id}"
+        return f"@{self.chat_name(employee_id)}"
 
     def who(self, employee_id: str, name: str | None = None) -> str:
         """How a person is named in alerts: a mention if that is switched on, else their name in bold."""
         if self.cfg.google_chat.mention_people:
             return self.mention(employee_id)
-        return f"*{name or self._name(employee_id)}*"
+        return f"*{self.chat_name(employee_id, name)}*"
 
     # daily late message ----------------------------------------------------------
 
@@ -222,7 +237,8 @@ class AttendanceService:
         if not people:
             return None
         lm, w = self.cfg.late_message, self.window(day)
-        items = [lm.item.format(mention=f"@{a.name}" if preview else self.mention(a.employee_id), name=a.name,
+        items = [lm.item.format(mention=f"@{self.chat_name(a.employee_id, a.name)}" if preview
+                                else self.mention(a.employee_id), name=self.chat_name(a.employee_id, a.name),
                                 time=a.time, minutes=minutes_late(a, w)) for a in people]
         joined = items[0] if len(items) == 1 else ", ".join(items[:-1]) + ", and " + items[-1]
         prefix = "" if day == self.now().date() else f"{day:%A %d %b}: "
@@ -499,7 +515,7 @@ class AttendanceService:
                 self._send(f"🟠 {self.who(employee_id)} arrived at {when}, {late} min late{suffix}.", day)
         elif self.store.notice_sent(day, "deadline"):
             # They were on the "not seen" list, but turned out to have arrived on time.
-            self._send(f"✅ Update: *{self._name(employee_id)}* arrived at {when}{suffix}, not late.", day)
+            self._send(f"✅ Update: *{self.chat_name(employee_id)}* arrived at {when}{suffix}, not late.", day)
 
     # reports -------------------------------------------------------------------
 
@@ -586,7 +602,8 @@ class AttendanceService:
             lines.append(f"✅ Everyone was in by {rep.last_arrival.time} 🎉")
         if rep.late:
             lines.append("*Late:*")
-            lines += [f"• {a.name}: {a.time} ({minutes_late(a, w)} min late)" for a in rep.late]
+            lines += [f"• {self.chat_name(a.employee_id, a.name)}: {a.time} ({minutes_late(a, w)} min late)"
+                      for a in rep.late]
         if rep.not_seen:
             lines.append(f"*Not seen on camera between {w.start:%H:%M} and {w.end:%H:%M}:*")
             lines += [f"• {name}" for _, name in rep.not_seen]

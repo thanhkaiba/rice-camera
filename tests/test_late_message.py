@@ -186,3 +186,33 @@ def test_chat_ids_are_normalised_and_checked(core):
     page = flask_app.test_client().post("/employees/C", data={"name": "Carol", "active": "on", "chat_user": "x"},
                                         follow_redirects=True).get_data(as_text=True)
     assert "is a number" in page
+
+
+def test_people_can_be_called_by_their_email_name(core):
+    from attendance.core.service import email_name
+
+    assert email_name("ruby@offspringdigital.com") == "Ruby"
+    assert email_name("tan.nguyen@offspringdigital.com") == "Tan Nguyen"
+    app, clock, sent = core
+    app.store._db.execute("UPDATE employees SET name = 'Lương Thế Hùng', email = 'enzo@example.com' WHERE id = 'B'")
+    app.store._db.commit()
+    clock.t = at(10, 40)
+    late(app, "B", 10, 15)
+    late(app, "C", 10, 32)
+    assert app.service.late_text(DAY) == "Morning, coming late today: @Lương Thế Hùng (10:15), and @Carol (10:32)"
+    app.cfg.google_chat.names = "email"
+    assert app.service.late_text(DAY) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)"
+    assert app.service.late_text(DAY, preview=True) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)"
+    app.cfg.google_chat.mention_people = False
+    assert app.service.who("B") == "*Enzo*"
+
+
+def test_email_names_setting_is_validated_and_saved(core):
+    app, _, _ = core
+    app.cfg.google_chat.names = "nickname"
+    with pytest.raises(ValueError):
+        app.cfg.validate()
+    app.cfg.google_chat.names = "name"
+    client = create_app(app).test_client()
+    page = client.get("/settings").get_data(as_text=True)
+    assert 'name="google_chat.names"' in page

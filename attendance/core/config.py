@@ -155,6 +155,9 @@ class GoogleChatConfig:
     mention_people: bool = True  # @mention late and missing people (needs their Google Chat user ID)
     notify_late_arrivals: bool = True
     unknown_batch_minutes: int = 5
+    # How people are called in messages: "name" (as on the People page) or "email" (the part
+    # before @, e.g. ruby@… → Ruby), for teams that know each other by their email names.
+    names: str = "name"
 
 
 @dataclass
@@ -285,6 +288,8 @@ class Config:
             raise ValueError("recognition.cpu_threads must be between 0 (automatic) and 64")
         a = parse_area(self.camera.area)
         self.camera.area = ",".join(f"{v:.3f}".rstrip("0").rstrip(".") or "0" for v in a) if a else ""
+        if self.google_chat.names not in ("name", "email"):
+            raise ValueError("google_chat.names must be name or email")
         t = self.tracking
         if t.mode not in ("face", "person"):
             raise ValueError("tracking.mode must be face or person")

@@ -77,6 +77,14 @@
       {{ check('google_chat', 'notify_late_arrivals', 'Post each late arrival as it happens') }}
     </div>
     {{ field('google_chat', 'unknown_batch_minutes', 'Batch "faces to review" notices (min)', type='number') }}
+    <div class="form-row">
+      <label class="field">Call people in messages by
+        <select name="google_chat.names">
+          <option value="name" {{ 'selected' if s.google_chat.names == 'name' }}>Their name (People page)</option>
+          <option value="email" {{ 'selected' if s.google_chat.names == 'email' }}>Their email name (ruby@… → Ruby)</option>
+        </select>
+        <span class="hint">Used when there is no Chat ID to @mention them</span>{{ src('google_chat.names') }}</label>
+    </div>
 
     <hr>
     <h2 class="row">{{ icon('send') }}Daily late message</h2>
