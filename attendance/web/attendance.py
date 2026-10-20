@@ -135,6 +135,7 @@ def register(app: Flask, core: "App") -> None:
             email = store.get(f"seed_review_email:{members[-1].id}") if members[-1].source == "seed" else None
             person = store.employee_by_email(email) if email else None
             photos = [u.image for u in reversed(members) if u.image][:6]
+            maybe = [] if best else service.review_candidates(members)
             groups.append({"id": members[-1].id, "members": members, "latest": members[-1], "photos": photos,
                            "source": members[-1].source,
                            "expected_id": person.id if person and person.active else None,
@@ -142,7 +143,13 @@ def register(app: Flask, core: "App") -> None:
                            "photo_urls": [url_for("media", path=p) for p in photos],
                            "body": next((body_photo(u.image) for u in reversed(members) if u.image
                                          and (core.data_dir / body_photo(u.image)).exists()), None),
-                           "guess": best[0] if best else None, "guess_score": best[1] if best else None})
+                           "guess": best[0] if best else None, "guess_score": best[1] if best else None,
+                           "maybe": maybe})
+        # Cards that only need "Confirm" first, then those with likely people, then the rest; the
+        # most similar first within each, newest first among equals. Camera faces before seed samples.
+        groups.sort(key=lambda g: (g["source"] != "camera", 0 if g["guess"] else 1 if g["maybe"] else 2,
+                                   -(g["guess_score"] or (g["maybe"][0][1] if g["maybe"] else 0.0)),
+                                   -g["latest"].ts.timestamp()))
         auto_labelled = []
         for u in store.unknowns(status="assigned", source="seed"):
             if store.get(f"seed_review_manual:{u.id}"):

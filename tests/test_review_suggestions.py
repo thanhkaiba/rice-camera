@@ -44,8 +44,9 @@ def test_review_does_not_suggest_between_two_nearly_equal_employees(core):
     app.gallery.replace([('A', a), ('B', b)])
     add_face(app, a)
     page = client(app).get('/unknowns').get_data(as_text=True)
-    assert 'data-guess=""' in page
-    assert 'No clear suggestion' in page
+    assert 'data-guess=""' in page and 'Confirm:' not in page
+    # Neither is offered as the answer, but both as choices to pick from.
+    assert "Maybe <strong>Alice</strong>" in page and "It's Alice" in page and "It's Bob" in page
 
 
 def test_review_does_not_suggest_for_a_split_group(core):
@@ -77,3 +78,25 @@ def test_review_get_does_not_assign_learn_or_change_cached_camera_evidence(core)
     assert after.guess_score == before.guess_score == .99
     assert len(app.store.references(app.library.model_id)) == refs
     assert not app.store.checkins(DAY) and not sent
+
+
+def test_review_shows_maybe_choices_from_the_suggest_score_and_sorts_ready_cards_first(core):
+    app, _, _ = core
+    a, other = person_vector(1), person_vector(30)
+    r = app.cfg.recognition
+    for w in np.arange(0.5, 4, 0.05):  # mix in a stranger until the face is only somewhat like Alice
+        weak = (a + w * other) / np.linalg.norm(a + w * other)
+        score = app.gallery.match(weak)[0][1]
+        if r.suggest_score + 0.01 <= score < r.accept_score - 0.02:
+            break
+    unlike = add_face(app, person_vector(31), minute=12)  # like nobody: last
+    maybe = add_face(app, weak, minute=11)
+    ready = add_face(app, a, minute=10)  # clearly Alice, though seen earliest: first
+    score = app.service.review_candidates([app.store.unknown(maybe)])[0][1]
+    assert r.suggest_score <= score < r.accept_score
+    page = client(app).get('/unknowns').get_data(as_text=True)
+    order = [page.index(f'data-id="{i}"') for i in (ready, maybe, unlike)]
+    assert order == sorted(order)
+    assert "1 ready to confirm" in page and "Confirm: Alice" in page and "It's Alice" in page
+    app.cfg.recognition.suggest_score = round(score + 0.01, 2)  # stricter: no longer offered
+    assert app.service.review_candidates([app.store.unknown(maybe)]) == []

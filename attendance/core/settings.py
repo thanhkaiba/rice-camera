@@ -22,7 +22,7 @@ EDITABLE: dict[str, list[str]] = {
     "tracking": ["mode", "person_conf", "full_frame_every"],
     "recognition": ["accept_score", "min_margin", "votes_required", "min_face_px", "min_det_score",
                     "min_sharpness", "max_yaw", "max_pitch", "auto_pose", "unknown_min_frames",
-                    "learn_corrections", "learn_per_group", "group_days", "seen_again_score"],
+                    "learn_corrections", "learn_per_group", "group_days", "seen_again_score", "suggest_score"],
     "google_chat": ["webhook_url", "mention_people", "notify_late_arrivals", "unknown_batch_minutes", "names"],
     "leave_api": ["url", "token", "refresh_minutes"],
     "late_message": ["enabled", "intro", "item", "auto_send", "send_at"],

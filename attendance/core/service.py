@@ -314,9 +314,28 @@ class AttendanceService:
 
     def review_guess(self, members) -> tuple[str, float] | None:
         """A current, unambiguous suggestion supported by most usable faces in the group."""
+        ranked, matches = self._review_ranking(members)
+        if not ranked:
+            return None
+        params = self.cfg.recognition
+        winner = vote_for(ranked, True, True, params)
+        if winner and sum(vote_for(candidates, True, True, params) == winner
+                          for candidates in matches) > len(matches) / 2:
+            return ranked[0]
+        return None
+
+    def review_candidates(self, members, limit: int = 3) -> list[tuple[str, float]]:
+        """People this group may be, best first: the group's average similarity to each person, from
+        recognition.suggest_score up. Shown on the Review page as "Maybe" choices when there is no
+        clear suggestion; unlike review_guess they are not reliable enough to confirm unseen."""
+        ranked, _ = self._review_ranking(members)
+        return [(person, score) for person, score in ranked[:limit] if score >= self.cfg.recognition.suggest_score]
+
+    def _review_ranking(self, members) -> tuple[list[tuple[str, float]], list]:
+        """(active people ranked by average similarity over the group's usable faces, per-face matches)."""
         count = len(self.gallery.counts())
         if not count:
-            return None
+            return [], []
         active = self.store.employees()
         matches = []
         for u in members:
@@ -328,19 +347,14 @@ class AttendanceService:
             if candidates:
                 matches.append(candidates)
         if not matches:
-            return None
+            return [], []
         totals = {}
         for candidates in matches:
             for person, score in candidates:
                 totals[person] = totals.get(person, 0.0) + score
         ranked = sorted(((person, score / len(matches)) for person, score in totals.items()),
                         key=lambda item: item[1], reverse=True)
-        params = self.cfg.recognition
-        winner = vote_for(ranked, True, True, params)
-        if winner and sum(vote_for(candidates, True, True, params) == winner
-                          for candidates in matches) > len(matches) / 2:
-            return ranked[0]
-        return None
+        return ranked, matches
 
     def _pending_group(self, unknown_id: int) -> list:
         u = self.store.unknown(unknown_id)

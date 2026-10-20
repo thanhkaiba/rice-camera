@@ -258,6 +258,7 @@
             {{ field('recognition', 'learn_per_group', 'Photos learned per group', 'Spread over the times seen', type='number') }}
             {{ field('recognition', 'group_days', 'Group faces within (days)', 'Look-alike unknown faces this recent are shown as one person', type='number') }}
             {{ field('recognition', 'seen_again_score', 'Already-seen score', 'An unclear face this similar to someone already in today is taken to be them · 0 = always review', type='number', step='0.01') }}
+            {{ field('recognition', 'suggest_score', 'Review "Maybe" from', 'People this similar are offered as choices on Review; never recorded by themselves', type='number', step='0.01') }}
           </div>
         </div>
       </div>

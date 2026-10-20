@@ -124,6 +124,7 @@ class RecognitionConfig:
     # An unclear face at least this similar to someone already checked in today is taken to be that
     # person passing again at a bad angle, and is not sent for review.
     seen_again_score: float = 0.3
+    suggest_score: float = 0.35  # Review lists people from this similarity up as "Maybe" choices
 
     def model_files(self) -> tuple[str, str]:
         default_det, default_rec = DEFAULT_MODELS.get(self.backend, ("", ""))
@@ -258,6 +259,8 @@ class Config:
             raise ValueError("learn_per_group and group_days must be at least 1")
         if not 0 <= r.seen_again_score < 1:
             raise ValueError("seen_again_score must be between 0 and 1")
+        if not 0 < r.suggest_score < 1:
+            raise ValueError("suggest_score must be between 0 and 1")
         if not 0 < self.camera.process_fps <= 30:
             raise ValueError("process_fps must be between 0 and 30")
         if not 0 <= self.camera.decode_threads <= 32:
