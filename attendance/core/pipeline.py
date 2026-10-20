@@ -159,29 +159,36 @@ def face_label(app: App, face, candidates) -> tuple[str, tuple[int, int, int]]:
     return f"? {reason}", (0, 165, 255)
 
 
+PREVIEW_WIDTH = 1600  # the Camera page picture; 960 px made a 2880 px camera look blurred
+PREVIEW_FPS = 3.0  # pictures drawn for the Camera page per second, however fast frames are analysed
+
+
 def draw(frame, labelled, people=(), area=None) -> bytes:
     import cv2
 
     from ..vision.faces import encode_jpeg
 
     canvas = frame.copy()
+    h, w = canvas.shape[:2]
+    line = max(2, round(2 * w / PREVIEW_WIDTH))  # lines and labels keep their size once scaled down
+    font = 0.6 * max(1.0, w / PREVIEW_WIDTH)
     if area is not None:  # dim what is not analysed and outline the area
         x1, y1, x2, y2 = area
         inside = canvas[y1:y2, x1:x2].copy()
         canvas = (canvas * 0.45).astype(canvas.dtype)
         canvas[y1:y2, x1:x2] = inside
-        cv2.rectangle(canvas, (x1, y1), (x2 - 1, y2 - 1), (0, 215, 255), 2)
+        cv2.rectangle(canvas, (x1, y1), (x2 - 1, y2 - 1), (0, 215, 255), line)
     for p in people:  # person tracking: thin grey box with the person's track number
         x1, y1, x2, y2 = (int(v) for v in p.box)
-        cv2.rectangle(canvas, (x1, y1), (x2, y2), (170, 170, 170), 1)
-        cv2.putText(canvas, f"#{p.id}", (x1 + 4, y2 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (170, 170, 170), 1)
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), (170, 170, 170), max(1, line // 2))
+        cv2.putText(canvas, f"#{p.id}", (x1 + 4, y2 - 6), cv2.FONT_HERSHEY_SIMPLEX, font * 0.8, (170, 170, 170),
+                    max(1, line // 2))
     for face, (text, colour) in labelled:
         x1, y1, x2, y2 = (int(v) for v in face.bbox)
-        cv2.rectangle(canvas, (x1, y1), (x2, y2), colour, 2)
-        cv2.putText(canvas, text, (x1, max(18, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, colour, 2)
-    h, w = canvas.shape[:2]
-    if w > 960:
-        canvas = cv2.resize(canvas, (960, int(h * 960 / w)))
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), colour, line)
+        cv2.putText(canvas, text, (x1, max(int(30 * font), y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, font, colour, line)
+    if w > PREVIEW_WIDTH:
+        canvas = cv2.resize(canvas, (PREVIEW_WIDTH, int(h * PREVIEW_WIDTH / w)), interpolation=cv2.INTER_AREA)
     return encode_jpeg(canvas)
 
 
@@ -256,7 +263,7 @@ def run(cfg: Config) -> None:
     face_regions: list = []  # where faces were in the last analysed frame
     health = FrameHealth()
     camera: Camera | None = None
-    last_processed = last_chosen = last_ping = last_tick = last_recorded = 0.0
+    last_processed = last_chosen = last_ping = last_tick = last_recorded = last_drawn = 0.0
     placement_saved = time.time()
     fps_count, fps_since = 0, time.time()
     was_in_window = False
@@ -318,7 +325,8 @@ def run(cfg: Config) -> None:
                 labelled = [(f, face_label(app, f, c)) for f, c, _ in matched]
                 live.faces = [text for _, (text, _) in labelled]
                 live.people = len(people)
-                if live.wants_frame():
+                if live.wants_frame() and frame_time - last_drawn >= 1.0 / PREVIEW_FPS:
+                    last_drawn = frame_time
                     live.set_frame(draw(frame, labelled, people, cfg.camera.area_box(frame.shape)), frame)
                 fps_count += 1
             else:

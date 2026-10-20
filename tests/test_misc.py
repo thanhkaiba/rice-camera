@@ -291,3 +291,22 @@ def test_camera_opens_with_short_timeouts(monkeypatch):
     url, backend, params = calls[0]
     assert dict(zip(params[::2], params[1::2])) == {camera.cv2.CAP_PROP_OPEN_TIMEOUT_MSEC: camera.OPEN_TIMEOUT_MS,
                                                     camera.cv2.CAP_PROP_READ_TIMEOUT_MSEC: camera.READ_TIMEOUT_MS}
+
+
+def test_camera_page_picture_is_sharp_enough_and_full_size_is_available(core):
+    import cv2
+    import numpy as np
+
+    from attendance.core.pipeline import PREVIEW_WIDTH, draw
+    from attendance.web import create_app
+
+    app, _, _ = core
+    frame = np.zeros((1616, 2880, 3), dtype=np.uint8)
+    preview = cv2.imdecode(np.frombuffer(draw(frame, []), np.uint8), cv2.IMREAD_COLOR)
+    assert preview.shape[1] == PREVIEW_WIDTH > 960
+    c = create_app(app).test_client()
+    assert c.get("/live/full.jpg").status_code == 404  # nothing analysed yet
+    app.live.set_frame(draw(frame, []), frame)
+    full = c.get("/live/full.jpg")
+    assert full.status_code == 200
+    assert cv2.imdecode(np.frombuffer(full.data, np.uint8), cv2.IMREAD_COLOR).shape[:2] == (1616, 2880)

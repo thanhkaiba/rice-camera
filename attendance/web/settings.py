@@ -11,6 +11,7 @@ from flask import Flask, Response, abort, jsonify, redirect, render_template, re
 from .. import __version__
 from ..cli import updater
 from ..core import settings, transfer
+from ..vision.faces import encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
 
 if TYPE_CHECKING:
@@ -37,6 +38,15 @@ def register(app: Flask, core: "App") -> None:
         if jpeg is None:
             abort(404)
         return Response(jpeg, mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    @app.get("/live/full.jpg")
+    def live_full_jpg():
+        """The camera picture at full resolution, unlabelled: to judge focus and sharpness."""
+        live.frame()  # counts as a viewer
+        raw = live.raw_frame()
+        if raw is None:
+            abort(404)
+        return Response(encode_jpeg(raw), mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.get("/live.json")
     def live_json():
