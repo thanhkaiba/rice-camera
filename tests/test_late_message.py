@@ -218,3 +218,13 @@ def test_email_names_setting_is_validated_and_saved(core):
     client = create_app(app).test_client()
     page = client.get("/settings").get_data(as_text=True)
     assert 'name="google_chat.names"' in page
+
+
+def test_summary_lists_use_email_names(core):
+    app, clock, _ = core
+    app.store._db.execute("UPDATE employees SET name = 'Lương Thế Hùng', email = 'enzo@example.com' WHERE id = 'B'")
+    app.store._db.commit()
+    clock.t = at(11, 30)
+    late(app, "A", 10, 15)
+    text = app.service.summary_text(app.service.report(DAY))
+    assert "• Alice: 10:15" in text and "• Enzo" in text and "Lương" not in text  # late and not-seen lists

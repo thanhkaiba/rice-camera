@@ -569,7 +569,7 @@ class AttendanceService:
         if stale:
             lines.append(stale)
         if rep.on_leave:
-            lines.append("🏖 On leave: " + ", ".join(f"{n} ({k})" for _, n, k in rep.on_leave))
+            lines.append("🏖 On leave: " + ", ".join(f"{self.chat_name(e, n)} ({k})" for e, n, k in rep.on_leave))
         if rep.no_photos:
             lines.append("⚠️ No reference photos, cannot be recognised: " + ", ".join(n for _, n in rep.no_photos))
         if rep.outages:
@@ -606,7 +606,7 @@ class AttendanceService:
                       for a in rep.late]
         if rep.not_seen:
             lines.append(f"*Not seen on camera between {w.start:%H:%M} and {w.end:%H:%M}:*")
-            lines += [f"• {name}" for _, name in rep.not_seen]
+            lines += [f"• {self.chat_name(emp_id, name)}" for emp_id, name in rep.not_seen]
         if rep.pending_unknowns:
             lines.append(f"❓ {rep.pending_unknowns} unidentified faces to review · "
                          f"{self._link('/unknowns?review=first', 'Review')}")
