@@ -53,6 +53,16 @@ class Gallery:
         self._direction: np.ndarray | None = None
         self.replace(items or [])
 
+    @classmethod
+    def from_normalized(cls, grouped: dict[str, np.ndarray], center: bool = False) -> "Gallery":
+        """Reuse prepared reference matrices without normalizing and stacking every row again.
+        The matrices are treated as read-only; the mapping is copied before gallery updates.
+        """
+        gallery = cls(center=center)
+        gallery._raw = dict(grouped)
+        gallery._refresh()
+        return gallery
+
     def _refresh(self) -> None:
         """Recompute the shared direction and the compared references (call with the lock held)."""
         self._direction = shared_direction(self._raw) if self.center else None

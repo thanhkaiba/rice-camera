@@ -1,6 +1,7 @@
 import datetime as dt
 
 import numpy as np
+import pytest
 
 from attendance.config import RecognitionConfig
 from attendance.gallery import Gallery
@@ -94,6 +95,52 @@ def test_two_people_side_by_side_are_tracked_separately():
     tr = tracker()
     out = frames(tr, lambda i: [obs(noisy(A), x=100), obs(noisy(B), x=400)], 4)
     assert sorted(d.employee_id for d in out) == ["A", "B"]
+
+
+@pytest.mark.parametrize('gap', [0.2, 1.9, 2.3])
+def test_eight_people_keep_votes_when_frame_processing_is_slow(gap):
+    tr = tracker()
+    vectors = np.eye(8, 512, dtype=np.float32)
+    out = []
+    for frame in range(3):
+        observations = [Observation((i * 100, 0, i * 100 + 80, 80), v,
+                                    [(str(i), .50), ('other', .1)], True, .8)
+                        for i, v in enumerate(vectors)]
+        decisions = tr.update(observations, T0 + dt.timedelta(seconds=frame * gap),
+                              frame_interval_s=gap + .2)
+        if frame < 2:
+            assert not decisions
+        out += decisions
+    assert {d.employee_id for d in out} == {str(i) for i in range(8)}
+    assert len(out) == 8 and all(d.ts == T0 for d in out)
+    assert tr.flush() == []
+
+
+def test_slow_frames_still_send_unrecognized_faces_to_review():
+    tr = tracker()
+    for i in range(3):
+        unknown = Observation((100, 100, 180, 180), A, [], True, .8)
+        assert tr.update([unknown], T0 + dt.timedelta(seconds=i * 2.3), frame_interval_s=2.5) == []
+    out = tr.update([], T0 + dt.timedelta(seconds=12), frame_interval_s=2.5)
+    assert len(out) == 1 and out[0].kind == 'unknown' and out[0].ts == T0
+    assert tr.flush() == []
+
+
+def test_processing_allowance_does_not_join_visits_across_a_camera_outage():
+    tr = tracker()
+    for seconds in [0, 10, 20]:
+        weak = Observation((100, 100, 180, 180), A, [('A', .5), ('B', .1)], True, .8)
+        assert tr.update([weak], T0 + dt.timedelta(seconds=seconds), frame_interval_s=2.5) == []
+    assert tr.flush() == []  # each isolated glimpse stays below the vote and review requirements
+
+
+def test_different_people_at_the_same_spot_stay_separate_with_slow_frames():
+    tr = tracker()
+    for i, vector in enumerate([A, A, B]):
+        person = 'A' if vector is A else 'B'
+        face = Observation((100, 100, 180, 180), vector, [(person, .5)], True, .8)
+        assert tr.update([face], T0 + dt.timedelta(seconds=i * 2.3), frame_interval_s=2.5) == []
+    assert tr.flush() == []  # two A votes and one B vote cannot form a three-vote decision
 
 
 def test_next_person_at_same_spot_is_not_merged_into_previous_track():

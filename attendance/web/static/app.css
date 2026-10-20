@@ -338,6 +338,12 @@ details.help p { margin: 8px 0 0; }
 .photo .meta form { margin: 0; }
 .photo .meta button { padding: 2px 8px; font-size: .78em; border-radius: 6px; background: rgba(255, 255, 255, .15); border-color: rgba(255, 255, 255, .3); color: #fff; box-shadow: none; }
 .photo .meta button:hover { background: var(--bad); border-color: var(--bad); }
+.reference-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.reference-week, .reference-other { margin-bottom: 24px; }
+.reference-week h3, .reference-other h3 { margin: 0; }
+.reference-card { border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; background: var(--card); }
+.reference-card .photo { border: 0; border-radius: 0; }
+.reference-check { padding: 10px; display: grid; gap: 8px; font-size: .84em; }
 .dropzone { display: block; border: 2px dashed var(--line-strong); border-radius: var(--radius); padding: 26px 18px; text-align: center; cursor: pointer; background: var(--soft);
             transition: border-color var(--fast), background var(--fast), transform var(--fast); }
 .dropzone:hover, .dropzone.over { border-color: var(--brand); background: var(--brand-soft); }
@@ -348,7 +354,7 @@ details.help p { margin: 8px 0 0; }
              transition: transform var(--normal) var(--spring), box-shadow var(--fast), border-color var(--fast); animation: fade-up .45s var(--ease) both; }
 .face-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--line-strong); }
 .face-card:focus-visible { box-shadow: 0 0 0 4px var(--ring), var(--shadow-md); }
-.face-card .face-select { position: absolute; top: 8px; left: 8px; z-index: 1; width: 32px; height: 32px; display: grid; place-items: center; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-xs); cursor: pointer; }
+.face-card .face-select, .photo .face-select { position: absolute; top: 8px; left: 8px; z-index: 1; width: 32px; height: 32px; display: grid; place-items: center; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-xs); cursor: pointer; }
 .face-card[data-id] .pic { min-height: 48px; }
 .face-card[data-id] .pic .badge { left: auto; right: 8px; }
 .face-card .pic { background: var(--stage); position: relative; }
@@ -358,7 +364,8 @@ details.help p { margin: 8px 0 0; }
 .face-card .pic .badge { position: absolute; left: 8px; top: 8px; background: rgba(15, 23, 42, .7); color: #fff; backdrop-filter: blur(3px); }
 .face-card .thumbs { display: flex; gap: 4px; padding: 4px; background: var(--soft); }
 .face-card .thumbs img { flex: 1; min-width: 0; aspect-ratio: 1; object-fit: cover; border-radius: 6px; display: block; }
-.face-card .body { padding: 12px; display: grid; gap: 8px; }
+.face-card .body { padding: 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; overflow-wrap: anywhere; }
+.face-card .body .btn-block { white-space: normal; }
 .strip { display: flex; gap: 6px; flex-wrap: wrap; }
 .strip img { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); display: block; }
 .body-photo { width: 100%; max-height: 320px; object-fit: contain; background: var(--stage); border-radius: 12px; display: block; }

@@ -30,7 +30,7 @@ class Result:
 def run_mode(app, video: Path, mode: str, fps: float) -> Result:
     import cv2
 
-    processor = FrameProcessor(app, mode)
+    processor = FrameProcessor(app, mode, realtime=False)
     result = Result(mode)
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
