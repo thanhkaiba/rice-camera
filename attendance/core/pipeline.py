@@ -141,20 +141,20 @@ def _leave_sync_loop(app: App) -> None:
 def face_label(app: App, face, candidates) -> tuple[str, tuple[int, int, int]]:
     """Text and BGR colour drawn on the live view for one face."""
     rc = app.cfg.recognition
-    names = app.store.employees()
+    name = app.service.chat_name  # the email name by default, as in Chat and on Review
     person = vote_for(candidates, face.quality_ok, face.size_ok, rc)
     if person is not None:
-        return f"{names.get(person, person)} {candidates[0][1]:.2f}", (60, 180, 60)
+        return f"{name(person)} {candidates[0][1]:.2f}", (60, 180, 60)
     if face.size < rc.min_face_px:
         reason = "too small"
     elif face.sharpness < rc.min_sharpness:
         reason = "blurred"
     elif abs(face.yaw) > rc.max_yaw or abs(face.pitch) > rc.max_pitch:
         reason = "turned away"
-    elif face.det_score < rc.min_det_score:
-        reason = "unclear"
+    elif face.det_score < rc.vote_det_score:
+        reason = "unclear"  # followed and sent for review, but too uncertain to count
     else:
-        best = f" (closest {names.get(candidates[0][0], candidates[0][0])} {candidates[0][1]:.2f})" if candidates else ""
+        best = f" (closest {name(candidates[0][0])} {candidates[0][1]:.2f})" if candidates else ""
         return f"no match{best}", (40, 40, 220)
     return f"? {reason}", (0, 165, 255)
 
@@ -275,7 +275,7 @@ def run(cfg: Config) -> None:
             digest = evidence_digest(app.data_dir, image)
             if d.kind == "identified":
                 service.on_identified(d.employee_id, ts, d.score, image, d.embedding, digest)
-                live.last_identified = f"{app.store.employees().get(d.employee_id, d.employee_id)} at {ts:%H:%M:%S}"
+                live.last_identified = f"{app.service.chat_name(d.employee_id)} at {ts:%H:%M:%S}"
             else:
                 service.on_unknown(ts, image, d.embedding, d.employee_id, d.score, digest)
 

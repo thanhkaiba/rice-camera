@@ -362,3 +362,20 @@ def test_low_confidence_faces_are_followed_but_do_not_vote():
     assert rec.analyze(frame)[0].quality_ok
     rec.cfg.min_det_score, rec.backend = 0.4, Backend(0.42)
     assert rec.analyze(frame) and seen["threshold"] == 0.4  # a lower setting reaches the detector
+
+
+def test_camera_page_labels_use_email_names(core):
+    from attendance.core.pipeline import face_label
+
+    app, _, _ = core
+    app.store._db.execute("UPDATE employees SET name = 'Lương Thế Hùng', email = 'enzo@example.com' WHERE id = 'B'")
+    app.store._db.commit()
+
+    class Face:
+        quality_ok = size_ok = True
+        size, sharpness, yaw, pitch, det_score = 120, 200, 0, 0, 0.9
+
+    text, _ = face_label(app, Face(), [("B", 0.8), ("A", 0.2)])
+    assert text.startswith("Enzo ") and "Lương" not in text
+    Face.quality_ok, Face.det_score = False, 0.55  # behind a mask: followed, but does not count
+    assert face_label(app, Face(), [("B", 0.8), ("A", 0.2)])[0] == "? unclear"
