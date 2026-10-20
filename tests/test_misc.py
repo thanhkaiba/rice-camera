@@ -334,3 +334,31 @@ def test_faces_detected_from_half_confidence_count(tmp_path):
     assert rec.analyze(frame)[0].size_ok
     rec.backend = Backend(0.45)
     assert not rec.analyze(frame)[0].size_ok
+
+
+def test_low_confidence_faces_are_followed_but_do_not_vote():
+    from attendance.recognizer import FaceRecognizer
+
+    kps = np.array([[60, 70], [140, 70], [100, 110], [70, 150], [130, 150]], np.float32)
+    seen = {}
+
+    class Backend:
+        def __init__(self, score):
+            self.score = score
+
+        def detect(self, frame, threshold=0.5, det_size=None):
+            seen["threshold"] = threshold
+            return [(np.array([20, 20, 180, 200]), self.score, kps)] if self.score >= threshold else []
+
+        def embed(self, frame, landmarks):
+            return np.ones(8, np.float32)
+
+    rec = FaceRecognizer.__new__(FaceRecognizer)
+    frame = np.random.default_rng(0).integers(0, 255, (220, 220, 3), dtype=np.uint8)
+    rec.cfg, rec.backend = config.RecognitionConfig(), Backend(0.55)
+    face, = rec.analyze(frame)
+    assert face.size_ok and not face.quality_ok  # reviewed if unknown, never votes someone in
+    rec.backend = Backend(0.7)
+    assert rec.analyze(frame)[0].quality_ok
+    rec.cfg.min_det_score, rec.backend = 0.4, Backend(0.42)
+    assert rec.analyze(frame) and seen["threshold"] == 0.4  # a lower setting reaches the detector

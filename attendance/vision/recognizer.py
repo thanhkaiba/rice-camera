@@ -258,11 +258,13 @@ class FaceRecognizer:
         """Faces in the whole frame (unless full_frame is False), plus faces found in `regions`
         (x1, y1, x2, y2) searched at full resolution: small faces at the back of a group are
         easier to find in a crop of the head."""
-        found = list(self.backend.detect(frame)) if full_frame else []
+        # The backends stop at 0.5 by default; a lower min_det_score has to reach the detector.
+        threshold = min(0.5, max(0.2, self.cfg.min_det_score))
+        found = list(self.backend.detect(frame, threshold=threshold)) if full_frame else []
         for x1, y1, x2, y2 in regions:
             if x2 - x1 < 16 or y2 - y1 < 16:
                 continue
-            for box, score, kps in self.backend.detect(frame[y1:y2, x1:x2], det_size=region_size):
+            for box, score, kps in self.backend.detect(frame[y1:y2, x1:x2], threshold=threshold, det_size=region_size):
                 found.append((box + [x1, y1, x1, y1], score, kps + [x1, y1]))
         if len(found) <= 1 or not regions or not full_frame:
             return found
@@ -283,7 +285,8 @@ class FaceRecognizer:
             yaw, pitch = raw_yaw - pose_offset[0], raw_pitch - pose_offset[1]
             sharp = sharpness(frame, bbox)
             size_ok = size >= c.min_face_px and det >= c.min_det_score
-            ok = size_ok and sharp >= c.min_sharpness and abs(yaw) <= c.max_yaw and abs(pitch) <= c.max_pitch
+            ok = (size_ok and det >= c.vote_det_score and sharp >= c.min_sharpness
+                  and abs(yaw) <= c.max_yaw and abs(pitch) <= c.max_pitch)
             quality = (det * min(1.0, size / 112) * min(1.0, sharp / 150)
                        * math.cos(math.radians(min(abs(yaw), 89))) * math.cos(math.radians(min(abs(pitch), 89))))
             try:

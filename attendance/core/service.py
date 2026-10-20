@@ -304,10 +304,12 @@ class AttendanceService:
             return None
         if vector is None:
             return "unknown"
-        active = self.store.employees()
-        rivals = [(p, s) for p, s in self.gallery.match(vector, k=len(self.gallery.counts()) or 1)
-                  if p in active and p not in checked]
-        if rivals and guess_score - rivals[0][1] < r.min_margin:
+        # Both scores from the same picture: guess_score is the track's best frame against them,
+        # which would make anyone else look further away than they are.
+        ranked = self.gallery.match(vector, k=len(self.gallery.counts()) or 1)
+        theirs = next((s for p, s in ranked if p == guess_id), None)
+        rivals = [(p, s) for p, s in ranked if p not in checked]
+        if theirs is None or (rivals and theirs - rivals[0][1] < r.min_margin):
             return None  # could just as well be someone not in yet: let the admin decide
         return f"{rivals[0][0]} {rivals[0][1]:.2f}" if rivals else "none"
 

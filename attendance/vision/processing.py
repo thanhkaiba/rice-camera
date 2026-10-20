@@ -104,7 +104,9 @@ class FrameProcessor:
                                         f.size_ok, crop_body(frame, f.bbox), _scene(whole, f.bbox))
                             for f, c, pid in matched]
             # Capture timestamps are separated by the previous frame's processing time.
-            interval = self._last_processing_s + 1 / self.cfg.camera.process_fps if self._realtime else 0.0
+            # Frames are paced from the start of the previous one: they are max(processing, 1/fps)
+            # apart, not the sum of the two.
+            interval = max(self._last_processing_s, 1 / self.cfg.camera.process_fps) if self._realtime else 0.0
             decisions = self.face_tracker.update(observations, ts, followed, frame_interval_s=interval)
         self._last_processing_s = time.monotonic() - started
         self.people = people

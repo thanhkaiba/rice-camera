@@ -110,9 +110,11 @@ def test_moving_a_sighting_to_the_right_person_learns_their_face(env):
 def test_unclear_face_like_someone_checked_in_is_reviewed_when_setting_is_zero(env):
     service, store, clock, sent = env
     service.on_identified("B", at(9, 0), 0.7, None)
-    assert service.on_unknown(at(9, 5), "a.jpg", person_vector(20), "B", 0.35) is None  # taken to be Bob again
+    like_bob = person_vector(2) + 0.6 * person_vector(20)  # Bob, unclear
+    like_bob /= np.linalg.norm(like_bob)
+    assert service.on_unknown(at(9, 5), "a.jpg", like_bob, "B", 0.35) is None  # taken to be Bob again
     service.cfg.recognition.seen_again_score = 0
-    assert service.on_unknown(at(9, 6), "b.jpg", person_vector(21), "B", 0.35) is not None
+    assert service.on_unknown(at(9, 6), "b.jpg", like_bob, "B", 0.35) is not None
 
 
 def test_no_late_time_message_when_everyone_is_in(env):
@@ -268,3 +270,12 @@ def test_unclear_face_also_like_someone_not_in_yet_is_reviewed(env):
     mostly_bob /= np.linalg.norm(mostly_bob)
     (_, score), = [m for m in service.gallery.match(mostly_bob, k=3) if m[0] == "B"]
     assert service.on_unknown(at(9, 6), "b.jpg", mostly_bob, "B", score) is None  # clearly Bob again
+
+
+def test_seen_again_margin_uses_scores_from_the_same_picture(env):
+    service, store, clock, sent = env
+    service.on_identified("B", at(9, 0), 0.7, None)
+    both = person_vector(2) + person_vector(3)  # this picture is as like Carol (not in) as Bob
+    both /= np.linalg.norm(both)
+    # Another frame of the track matched Bob at 0.95: still not "Bob again", as this picture shows.
+    assert service.on_unknown(at(9, 5), "m.jpg", both, "B", 0.95) is not None

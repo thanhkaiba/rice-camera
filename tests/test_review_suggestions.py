@@ -127,3 +127,14 @@ def test_review_shows_maybe_choices_from_the_suggest_score_and_sorts_ready_cards
     assert "1 ready to confirm" in page and "Confirm: Alice" in page and "It's Alice" in page
     app.cfg.recognition.suggest_score = round(score + 0.01, 2)  # stricter: no longer offered
     assert app.service.review_candidates([app.store.unknown(maybe)]) == []
+
+
+def test_review_picker_labels_stay_unique_when_email_names_repeat():
+    from types import SimpleNamespace as P
+
+    from attendance.web.attendance import _review_labels
+
+    labels = _review_labels([P(id="1", name="An Nguyen", email="an@company.com"),
+                             P(id="2", name="An Nguyen", email="an@partner.com"),
+                             P(id="3", name="Ruby Doan", email="ruby@company.com")])
+    assert labels == {"1": "An Nguyen (an@company.com)", "2": "An Nguyen (an@partner.com)", "3": "Ruby Doan (ruby)"}

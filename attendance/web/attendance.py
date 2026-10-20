@@ -26,9 +26,17 @@ if TYPE_CHECKING:
     from ..core.pipeline import App
 
 
-def _review_name(name: str, email: str) -> str:
-    local = email.partition("@")[0]
+def _review_name(name: str, email: str, full: bool = False) -> str:
+    local = email if full else email.partition("@")[0]
     return f"{name} ({local})" if name and local else name or local
+
+
+def _review_labels(people) -> dict[str, str]:
+    """Picker labels, one per person: the email name, or the whole email where two people share an
+    email name (an@company and an@partner). The picker maps a typed label back to the first person
+    with that label, so a repeated one would confirm the face as the wrong person."""
+    locals_ = [p.email.partition("@")[0] for p in people]
+    return {p.id: _review_name(p.name, p.email, full=locals_.count(local) > 1) for p, local in zip(people, locals_)}
 
 
 def register(app: Flask, core: "App") -> None:
@@ -134,7 +142,7 @@ def register(app: Flask, core: "App") -> None:
 
     @app.get("/unknowns")
     def unknowns():
-        labels = {p.id: _review_name(p.name, p.email) for p in store.all_employees()}
+        labels = _review_labels(store.all_employees())
         groups = []
         for members in store.pending_groups():
             best, maybe = service.review_suggestions(members)

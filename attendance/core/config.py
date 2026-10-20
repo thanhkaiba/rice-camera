@@ -101,9 +101,12 @@ class RecognitionConfig:
     cpu_threads: int = 0
     # Quality gate: frames failing it never vote, they can only end up as "unknown".
     min_face_px: int = 60
+    # Detector confidence for a face to be followed and, when nobody is recognised, sent for review.
     # 0.65 left out a third of ordinary reference photos and most faces behind a mask; from 0.5 up
-    # camera detections are nearly all faces (side views, blur and masks are judged further on).
+    # camera detections are nearly all faces. A frame only votes for a person from vote_det_score
+    # up: a mask or a side view makes faces of different people look alike.
     min_det_score: float = 0.5
+    vote_det_score: float = 0.65
     min_sharpness: float = 40.0
     max_yaw: float = 35.0
     max_pitch: float = 30.0
@@ -255,6 +258,8 @@ class Config:
         r = self.recognition
         if not (0 < r.accept_score < 1 and 0 <= r.min_margin < 1 and 0 <= r.min_det_score <= 1):
             raise ValueError("accept_score, min_margin and min_det_score must be between 0 and 1")
+        if not 0 <= r.vote_det_score <= 1:
+            raise ValueError("vote_det_score must be between 0 and 1")
         if r.votes_required < 1 or r.unknown_min_frames < 1 or r.min_face_px < 1:
             raise ValueError("votes_required, unknown_min_frames and min_face_px must be at least 1")
         if r.learn_per_group < 1 or r.group_days < 1:
