@@ -1,5 +1,6 @@
 """Reference photo quality on the People page, photos captured from the camera, and seed import."""
 import csv
+import datetime as dt
 import hashlib
 import io
 import json
@@ -7,6 +8,7 @@ import re
 import sqlite3
 import time
 import zipfile
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -23,6 +25,7 @@ class FakeRecognizerWithQuality(FakeRecognizer):
         face = super().largest_face(image, mirror)
         if face is not None and round(float(image.mean()) / 10) == BLURRED_PERSON:
             face.quality_ok = False
+            face.quality = 0.2
         return face
 
 
@@ -47,6 +50,223 @@ def test_photo_quality_is_stored_counted_and_shown(core):
     assert "1/2 good" in page and "need photos" in page and 'data-needs="1"' in page
     page = c.get(f"/employees/{dan}").get_data(as_text=True)
     assert "1/2 good photos" in page and "blurred</span>" in page
+
+
+def test_photo_scores_are_saved_and_shown_per_photo_and_person(core):
+    app, _, _ = core
+    app._recognizer = FakeRecognizerWithQuality()
+    dan = add_person(app, "dan@example.com", "Dan")
+    app.library.add_photo(dan, face_image(4))
+    app.library.add_photo(dan, face_image(BLURRED_PERSON))
+    refs = app.store.references(app.library.model_id, dan)
+    assert [r.quality_score for r in refs] == [0.8, 0.2]
+    c = client(app)
+    page = c.get(f"/employees/{dan}").get_data(as_text=True)
+    assert "80/100" in page and "20/100" in page
+    assert "50/100" in c.get("/employees").get_data(as_text=True)
+
+
+def test_profile_groups_photos_by_local_monday_weeks_newest_first(core):
+    app, _, _ = core
+    app.store._exec('DELETE FROM embeddings WHERE employee_id = ?', ('A',))
+    model = app.library.model_id
+    # UTC Sunday evening is already Monday in the configured timezone.
+    for timestamp, source in [('2026-10-18T16:59:00+00:00', 'admin'),
+                              ('2026-10-18T17:00:00+00:00', 'admin'),
+                              ('2026-10-20T08:00:00+07:00', 'capture'),
+                              ('2026-10-18T10:00:00+07:00', 'capture')]:
+        app.store.add_embedding(model, 'A', person_vector(1), source, dt.datetime.fromisoformat(timestamp))
+    refs = app.store.references(model, 'A')
+    page = client(app).get('/employees/A').get_data(as_text=True)
+    weeks = re.findall(r'<section class="reference-week".*?</section>', page, re.S)
+    assert len(weeks) == 2
+    assert '19/10/2026 – 25/10/2026' in weeks[0]
+    assert '12/10/2026 – 18/10/2026' in weeks[1]
+    assert '2 photos' in weeks[0] and '2 photos' in weeks[1]
+    ids = lambda section: re.findall(r'id="reference-(\d+)"', section)
+    assert ids(weeks[0]) == [str(refs[2].id), str(refs[1].id)]
+    assert ids(weeks[1]) == [str(refs[0].id), str(refs[3].id)]
+    assert len(re.findall('form="bulk-delete-photos"', page)) == 4
+
+
+def test_only_camera_and_learned_photos_are_grouped_into_weeks(core):
+    app, _, _ = core
+    dan = add_person(app, 'dan@example.com', 'Dan')
+    sources = ['admin', 'capture', 'upload', 'enroll', 'enroll:seed', 'admin:correction', 'capture:door']
+    for source in sources:
+        app.store.add_embedding(app.library.model_id, dan, person_vector(1), source, at(8, 0))
+    refs = app.store.references(app.library.model_id, dan)
+    page = client(app).get(f'/employees/{dan}').get_data(as_text=True)
+    weeks = re.findall(r'<section class="reference-week".*?</section>', page, re.S)
+    other = re.findall(r'<section class="reference-other".*?</section>', page, re.S)
+    assert len(weeks) == len(other) == 1
+    assert set(re.findall(r'id="reference-(\d+)"', weeks[0])) == {str(refs[i].id) for i in (0, 1, 5, 6)}
+    assert set(re.findall(r'id="reference-(\d+)"', other[0])) == {str(refs[i].id) for i in (2, 3, 4)}
+    assert '4 photos' in weeks[0] and '3 photos' in other[0]
+    assert len(re.findall('form="bulk-delete-photos"', page)) == len(refs)
+
+
+def test_uploaded_photos_stay_visible_without_a_week_group(core):
+    app, _, _ = core
+    page = client(app).get('/employees/A').get_data(as_text=True)
+    assert 'class="reference-week"' not in page
+    assert 'class="reference-other"' in page
+    assert 'id="reference-' in page
+
+
+def test_photo_weeks_span_the_year_boundary_and_empty_profiles_have_no_groups(core):
+    app, _, _ = core
+    dan = add_person(app, 'dan@example.com', 'Dan')
+    c = client(app)
+    assert 'class="reference-week"' not in c.get(f'/employees/{dan}').get_data(as_text=True)
+    for timestamp in ['2027-01-03T23:59:00+07:00', '2026-12-28T00:00:00+07:00',
+                      '2027-01-04T00:00:00+07:00']:
+        app.store.add_embedding(app.library.model_id, dan, person_vector(1), 'admin',
+                                dt.datetime.fromisoformat(timestamp))
+    page = c.get(f'/employees/{dan}').get_data(as_text=True)
+    weeks = re.findall(r'<section class="reference-week".*?</section>', page, re.S)
+    assert len(weeks) == 2
+    assert '04/01/2027 – 10/01/2027' in weeks[0] and '1 photo' in weeks[0]
+    assert '28/12/2026 – 03/01/2027' in weeks[1] and '2 photos' in weeks[1]
+
+
+def test_photo_order_stays_chronological_when_daylight_saving_time_ends(core):
+    app, _, _ = core
+    app.service.tz = ZoneInfo('America/New_York')
+    dan = add_person(app, 'dan@example.com', 'Dan')
+    for timestamp in ['2026-11-01T01:45:00-04:00', '2026-11-01T01:15:00-05:00']:
+        app.store.add_embedding(app.library.model_id, dan, person_vector(1), 'admin',
+                                dt.datetime.fromisoformat(timestamp))
+    refs = app.store.references(app.library.model_id, dan)
+    page = client(app).get(f'/employees/{dan}').get_data(as_text=True)
+    assert re.findall(r'id="reference-(\d+)"', page) == [str(refs[1].id), str(refs[0].id)]
+
+
+def test_existing_checked_photos_get_scores_without_counting_missing_images(core):
+    app, _, _ = core
+    dan = add_person(app, "dan@example.com", "Dan")
+    folder = app.data_dir / "faces" / dan
+    folder.mkdir(parents=True)
+    (folder / "old.jpg").write_bytes(jpeg(4))
+    app.store.add_embedding(app.library.model_id, dan, person_vector(4), "upload", at(8, 0),
+                            f"faces/{dan}/old.jpg", True)
+    app.store.add_embedding(app.library.model_id, dan, person_vector(4), "upload", at(8, 0),
+                            f"faces/{dan}/missing.jpg")
+    assert app.library.rate_missing() == 1
+    refs = app.store.references(app.library.model_id, dan)
+    assert [r.quality_score for r in refs] == [0.8, None]
+    assert app.library.rate_missing() == 0
+    page = client(app).get("/employees").get_data(as_text=True)
+    assert "80/100" in page and "1/2 scored" in page
+
+
+def test_saved_photo_without_a_face_scores_zero(core):
+    app, _, _ = core
+    folder = app.data_dir / "faces" / "A"
+    folder.mkdir(parents=True)
+    (folder / "empty.jpg").write_bytes(jpeg(0))
+    app.store.add_embedding(app.library.model_id, "A", person_vector(1), "admin", at(8, 0),
+                            "faces/A/empty.jpg")
+    assert app.library.rate_missing() == 1
+    ref = app.store.references(app.library.model_id, "A")[-1]
+    assert ref.quality_score == 0 and ref.quality_ok is False
+    assert "0/100" in client(app).get("/employees/A").get_data(as_text=True)
+
+
+def test_bulk_photo_delete_only_removes_selected_references_and_all_their_models(core):
+    from test_review_controls import ReviewControls
+
+    app, _, _ = core
+    app.library.add_photo("A", face_image(1))
+    app.library.add_photo("A", face_image(1))
+    refs = app.store.references(app.library.model_id, "A")
+    selected, kept = refs[-2:]
+    app.store.add_embedding("other-model", "A", person_vector(1), "upload", at(8, 0), selected.image)
+    c = client(app)
+    controls = ReviewControls(c.get("/employees/A").get_data(as_text=True))
+    bulk = next(f for f in controls.forms if f.get("id") == "bulk-delete-photos")
+    boxes = [i for i in controls.inputs if i.get("type") == "checkbox" and i.get("name") == "ref_id"]
+    assert {i["value"] for i in boxes} == {str(r.id) for r in refs}
+    assert all(i.get("form") == bulk["id"] for i in boxes)
+    assert bulk.get("data-confirm")
+    response = c.post(bulk["action"], data={"ref_id": [str(refs[0].id), str(selected.id), str(selected.id)]})
+    assert response.status_code == 302
+    assert [r.id for r in app.store.references(app.library.model_id, "A")] == [kept.id]
+    assert not app.store.references("other-model", "A")
+    assert not (app.data_dir / selected.image).exists()
+    assert (app.data_dir / kept.image).exists()
+    assert app.gallery.counts()["A"] == 1
+    assert len(app.store.references(app.library.model_id, "B")) == 1
+    assert any(action == "delete photo" and "alice@example.com" in detail
+               for _, _, action, detail in app.store.audit())
+
+
+@pytest.mark.parametrize("selection", [[], ["no-number"], ["999999"], ["other-person"], ["valid", "other-person"]])
+def test_bulk_photo_delete_rejects_invalid_or_foreign_selection_before_deleting(core, selection):
+    app, _, _ = core
+    app.library.add_photo("A", face_image(1))
+    refs = app.store.references(app.library.model_id, "A")
+    other = app.store.references(app.library.model_id, "B")[0]
+    ids = {"valid": str(refs[-1].id), "other-person": str(other.id)}
+    response = client(app).post("/employees/A/photos/delete",
+                                data={"ref_id": [ids.get(value, value) for value in selection]})
+    assert response.status_code == 400
+    assert len(app.store.references(app.library.model_id, "A")) == len(refs)
+    assert (app.data_dir / refs[-1].image).exists()
+
+
+def test_delete_photos_below_score_defaults_to_twenty_and_uses_displayed_points(core):
+    from test_review_controls import ReviewControls
+
+    app, _, _ = core
+    refs = []
+    for score in (0, 0.19, 0.199, 0.20, 0.8, None):
+        app.library.add_photo("A", face_image(1))
+        ref = app.store.references(app.library.model_id, "A")[-1]
+        app.store.set_reference_quality(ref.image, True, score)
+        refs.append(ref)
+    app.store.add_embedding("other-model", "A", person_vector(1), "upload", at(8, 0), refs[0].image)
+    app.library.add_photo("B", face_image(2))
+    other = app.store.references(app.library.model_id, "B")[-1]
+    app.store.set_reference_quality(other.image, False, 0)
+
+    c = client(app)
+    controls = ReviewControls(c.get("/employees/A").get_data(as_text=True))
+    low = next(f for f in controls.forms if f.get("id") == "delete-low-score-photos")
+    assert low["fields"] == {"below_score": "20"} and low.get("data-confirm")
+    response = c.post(low["action"], data=low["fields"], follow_redirects=True)
+    assert response.status_code == 200 and "2 photos deleted" in response.get_data(as_text=True)
+    remaining = {r.id for r in app.store.references(app.library.model_id, "A")}
+    assert not remaining & {r.id for r in refs[:2]}
+    assert {r.id for r in refs[2:]} <= remaining  # displayed 20/100 and unscored photos stay
+    assert not app.store.references("other-model", "A")
+    assert all(not (app.data_dir / r.image).exists() for r in refs[:2])
+    assert (app.data_dir / other.image).exists()
+    assert app.gallery.counts()["A"] == len(remaining)
+
+
+@pytest.mark.parametrize("threshold", ["", "-1", "101", "20.5", "nan", "inf", "invalid"])
+def test_delete_below_score_rejects_invalid_threshold_without_deleting(core, threshold):
+    app, _, _ = core
+    app.library.add_photo("A", face_image(1))
+    ref = app.store.references(app.library.model_id, "A")[-1]
+    app.store.set_reference_quality(ref.image, False, 0)
+    response = client(app).post("/employees/A/photos/delete", data={"below_score": threshold})
+    assert response.status_code == 400
+    assert (app.data_dir / ref.image).exists()
+    assert any(r.id == ref.id for r in app.store.references(app.library.model_id, "A"))
+
+
+@pytest.mark.parametrize("threshold,score", [("0", 0), ("100", 1)])
+def test_delete_below_score_keeps_equal_scores_and_reports_no_matches(core, threshold, score):
+    app, _, _ = core
+    app.library.add_photo("A", face_image(1))
+    ref = app.store.references(app.library.model_id, "A")[-1]
+    app.store.set_reference_quality(ref.image, True, score)
+    response = client(app).post("/employees/A/photos/delete", data={"below_score": threshold}, follow_redirects=True)
+    assert response.status_code == 200
+    assert "No photos below" in response.get_data(as_text=True)
+    assert (app.data_dir / ref.image).exists()
 
 
 def test_people_with_enough_good_photos_are_not_flagged(core):
@@ -80,16 +300,20 @@ def test_old_database_gets_the_quality_column(tmp_path):
     Store(path).close()
     with sqlite3.connect(path) as db:
         db.execute("ALTER TABLE embeddings DROP COLUMN quality_ok")
+        db.execute("ALTER TABLE embeddings DROP COLUMN quality_score")
     store = Store(path)
     store.add_embedding("m", "A", person_vector(1), "upload", at(8, 0), "faces/A/x.jpg", True)
     assert store.references("m")[0].quality_ok is True
+    assert store.references("m")[0].quality_score is None
 
 
 def test_employee_page_lists_look_alikes(core):
     app, _, _ = core
     dan = add_person(app, "dan@example.com", "Dan")
     app.library.add_photo(dan, face_image(1))  # looks like Alice
-    page = client(app).get(f"/employees/{dan}").get_data(as_text=True)
+    c = client(app)
+    c.post('/employees/quality')
+    page = c.get(f"/employees/{dan}").get_data(as_text=True)
     assert "Reference photos of Dan look like" in page and "Alice" in page
 
 

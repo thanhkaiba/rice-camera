@@ -1,6 +1,7 @@
 import datetime as dt
 
 import numpy as np
+import pytest
 from conftest import face_image
 
 from attendance.person import ByteTracker, assign_faces, box_iou, head_region
@@ -179,6 +180,71 @@ def test_face_mode_ignores_person_detector(core):
     proc = FrameProcessor(app)
     proc.process(face_image(1), step(0))
     assert proc._detector is None and proc.person_error is None
+
+
+@pytest.mark.parametrize('capture_jitter', [0., .35])
+def test_frame_processor_keeps_eight_tracks_across_slow_then_fast_inference(core, monkeypatch, capture_jitter):
+    from types import SimpleNamespace
+    from attendance.vision import processing
+
+    app, _, _ = core
+    clock = SimpleNamespace(now=0.0)
+    monkeypatch.setattr(processing, 'time', SimpleNamespace(monotonic=lambda: clock.now))
+    vectors = np.eye(8, 512, dtype=np.float32)
+    app.gallery.replace([(str(i), v) for i, v in enumerate(vectors)])
+    durations = iter([2.3, 2.3, .05])
+
+    class SlowRecognizer:
+        def analyze(self, *args):
+            clock.now += next(durations)
+            return [DetectedFace((i * 100., 10., i * 100. + 80, 90.), v,
+                                 .9, 80., 100., 0., 0., True, .8)
+                    for i, v in enumerate(vectors)]
+
+    app._recognizer = SlowRecognizer()
+    proc = FrameProcessor(app)
+    out = []
+    for i in range(3):
+        decisions, matched, _ = proc.process(np.zeros((100, 800, 3), np.uint8),
+                                             T0 + dt.timedelta(seconds=i * (2.5 + capture_jitter)))
+        assert len(matched) == 8
+        if i < 2:
+            assert not decisions
+        out += decisions
+    assert len(out) == 8 and {d.employee_id for d in out} == {str(i) for i in range(8)}
+    assert all(d.ts == T0 for d in out)
+
+
+@pytest.mark.parametrize('processing_s', [.01, 2.3])
+def test_offline_benchmark_expiry_depends_on_video_time(core, monkeypatch, tmp_path, processing_s):
+    from types import SimpleNamespace
+    import cv2
+    from attendance.cli.benchmark import run_mode
+    from attendance.vision import processing
+
+    app, _, _ = core
+    clock = SimpleNamespace(now=0.)
+    monkeypatch.setattr(processing, 'time', SimpleNamespace(monotonic=lambda: clock.now))
+    frames = iter([face_image(1)] * 3)
+
+    class Video:
+        def isOpened(self): return True
+        def get(self, prop): return .4  # observations are 2.5 seconds apart in the video
+        def read(self):
+            frame = next(frames, None)
+            return frame is not None, frame
+        def release(self): pass
+
+    class SlowRecognizer(RegionRecognizer):
+        def analyze(self, *args):
+            clock.now += processing_s
+            return super().analyze(*args)
+
+    monkeypatch.setattr(cv2, 'VideoCapture', lambda path: Video())
+    app._recognizer = SlowRecognizer()
+    result = run_mode(app, tmp_path / 'recording.avi', 'face', fps=.4)
+    assert result.frames == 3
+    assert result.identified == [] and result.unknowns == 0
 
 
 # detection area ------------------------------------------------------------------------------

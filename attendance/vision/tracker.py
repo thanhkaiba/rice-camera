@@ -115,11 +115,13 @@ class FaceTracker:
         self._people: dict[int, dt.datetime] = {}  # person tracks currently followed
 
     def update(self, observations: list[Observation], ts: dt.datetime,
-               people: dict[int, dt.datetime] | None = None) -> list[Decision]:
+               people: dict[int, dt.datetime] | None = None, *, frame_interval_s: float = 0.0) -> list[Decision]:
         """`people`: person tracks still followed (id -> when that person first appeared), when
-        person tracking is on. Their face tracks stay open while the face is out of sight."""
+        person tracking is on. Their face tracks stay open while the face is out of sight.
+        `frame_interval_s`: processing/sampling grace added to the missing-face timeout for live frames.
+        """
         self._people = people or {}
-        decisions = self._expire(ts)
+        decisions = self._expire(ts, frame_interval_s=frame_interval_s)
         free = list(self._tracks)
         for obs in observations:
             track = self._link(obs, free)
@@ -191,8 +193,8 @@ class FaceTracker:
         strong = t.best_score.get(person, 0) >= self.p.accept_score + STRONG_BONUS
         return person if strong and n >= max(1, self.p.votes_required - 1) else None
 
-    def _expire(self, now: dt.datetime, force: bool = False) -> list[Decision]:
-        timeout = dt.timedelta(seconds=self.p.track_timeout_s)
+    def _expire(self, now: dt.datetime, force: bool = False, frame_interval_s: float = 0.0) -> list[Decision]:
+        timeout = dt.timedelta(seconds=self.p.track_timeout_s + frame_interval_s)
         alive, decisions = [], []
         for t in self._tracks:
             following = t.person_id is not None and t.person_id in self._people

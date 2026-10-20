@@ -27,7 +27,7 @@
   {% for g in groups %}
   {% set first, last = g.members[0], g.latest %}
   {% set guess = employees.get(g.guess) if g.guess else None %}
-  {% set guess_label = guess ~ ' (' ~ employee_emails.get(g.guess, '') ~ ')' if guess else '' %}
+  {% set guess_label = employee_labels.get(g.guess, '') if guess else '' %}
   {% set when = local(last.ts).strftime('%a %d %b %H:%M') if g.members|length == 1
      else 'First ' ~ local(first.ts).strftime('%a %d %b %H:%M') ~ ' · last ' ~ local(last.ts).strftime('%a %d %b %H:%M') %}
   <div class="face-card" style="animation-delay: {{ (loop.index0 % 8) * 40 }}ms"
@@ -53,20 +53,20 @@
       {% if g.source == 'seed' %}<span class="badge info" title="No attendance will be recorded when this sample is labelled">Seed sample</span>{% endif %}
       <div class="small muted tnum">{{ local(last.ts).strftime('%a %d %b %H:%M') }}</div>
       {% if guess %}<div class="small">Looks like <strong>{{ guess_label }}</strong> <span class="muted" title="Similarity score, not a probability of identity">(similarity {{ '%.2f'|format(g.guess_score) }})</span></div>
-      {% elif g.maybe %}<div class="small">Maybe {% for pid, score in g.maybe %}<strong>{{ call_name(pid) }}</strong> <span class="muted tnum" title="Similarity score, not a probability of identity">{{ '%.2f'|format(score) }}</span>{{ ' · ' if not loop.last }}{% endfor %} <span class="muted">· not sure, check the photo</span></div>
+      {% elif g.maybe %}<div class="small">Maybe {% for pid, score in g.maybe %}<strong>{{ employee_labels.get(pid, '') }}</strong> <span class="muted tnum" title="Similarity score, not a probability of identity">{{ '%.2f'|format(score) }}</span>{{ ' · ' if not loop.last }}{% endfor %} <span class="muted">· not sure, check the photo</span></div>
       {% else %}<div class="small muted">No clear suggestion · choose a person manually</div>{% endif %}
       {% if g.expected_name %}<div class="small">Source label: <strong>{{ g.expected_name }}</strong> · check the photo</div>{% endif %}
       {% if guess and g.expected_id and g.expected_id != g.guess %}<div class="small">Model and source disagree · manual review required</div>{% endif %}
       {% if guess %}
       <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
         <input type="hidden" name="employee_id" value="{{ g.guess }}">
-        <button class="primary btn-sm btn-block" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ call_name(g.guess) }}</button>
+        <button class="primary btn-sm btn-block" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ guess_label }}</button>
       </form>
       {% endif %}
       {% if not guess %}{% for pid, score in g.maybe %}
       <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
         <input type="hidden" name="employee_id" value="{{ pid }}">
-        <button class="btn-sm btn-block" title="Name this person and learn the face">{{ icon('check') }}It's {{ call_name(pid) }}</button>
+        <button class="btn-sm btn-block" title="Name this person and learn the face">{{ icon('check') }}It's {{ employee_labels.get(pid, '') }}</button>
       </form>
       {% endfor %}{% endif %}
       <button type="button" class="{{ 'primary' if not guess and not g.maybe }} btn-sm btn-block" onclick="openReview(this.closest('.face-card'))">{{ icon('help') }}{{ 'Someone else?' if guess else 'Who is this?' }}</button>
@@ -150,7 +150,7 @@
         <input id="pick-search" list="employee-options" required autocomplete="off" placeholder="Search by name or email…" aria-label="Choose an employee by name or email" style="flex:1; min-width:0">
         <input type="hidden" name="employee_id" id="pick-id">
         <datalist id="employee-options">
-          {% for id, name in employees.items() %}<option value="{{ name }} ({{ employee_emails.get(id, '') }})" data-id="{{ id }}"></option>{% endfor %}
+          {% for id in employees %}<option value="{{ employee_labels.get(id, '') }}" data-id="{{ id }}"></option>{% endfor %}
         </datalist>
         <button title="Records their arrival on every day seen and learns the face">{{ icon('check') }}Confirm</button>
       </div>

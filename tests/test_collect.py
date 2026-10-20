@@ -76,7 +76,7 @@ def test_review_page_groups_and_new_employee_form(core):
     assert "Seen 3 times" in page and "New employee" in page and 'value="D"' not in page
     uid = app.store.pending_groups()[0][-1].id
     resp = c.post(f"/unknowns/{uid}/new-employee", data={"email": "linh@example.com", "name": "Linh"}, follow_redirects=True)
-    assert "Linh added as a new employee" in resp.get_data(as_text=True)
+    assert "Linh (linh) added as a new employee" in resp.get_data(as_text=True)
     assert app.store.employee_by_email("linh@example.com") and app.store.pending_group_count() == 0
     assert '<span class="count">' not in c.get("/").get_data(as_text=True)
 

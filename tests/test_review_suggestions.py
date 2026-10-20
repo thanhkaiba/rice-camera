@@ -21,7 +21,7 @@ def test_review_updates_suggestions_after_reference_photos_change(core):
     app.library.reload()
     page = c.get('/unknowns').get_data(as_text=True)
     assert 'data-guess="A"' in page
-    assert 'data-guess-name="Alice (alice@example.com)"' in page
+    assert 'data-guess-name="Alice (alice)"' in page
 
 
 def test_review_uses_group_agreement_instead_of_the_highest_cached_guess(core):
@@ -46,11 +46,34 @@ def test_review_does_not_suggest_between_two_nearly_equal_employees(core):
     page = client(app).get('/unknowns').get_data(as_text=True)
     assert 'data-guess=""' in page and 'Confirm:' not in page
     # Neither is offered as the answer, but both as choices to pick from.
-    assert "Maybe <strong>Alice</strong>" in page and "It's Alice" in page and "It's Bob" in page
+    assert "Maybe <strong>Alice (alice)</strong>" in page and "It's Alice (alice)" in page and "It's Bob (bob)" in page
     app.store._db.execute("UPDATE employees SET name = 'Lương Thế Hùng', email = 'enzo@example.com' WHERE id = 'B'")
     app.store._db.commit()
     page = client(app).get('/unknowns').get_data(as_text=True)
-    assert "It's Enzo" in page and "It's Lương" not in page  # buttons use the email name, like Chat
+    assert "It's Lương Thế Hùng (enzo)" in page and "It's Enzo" not in page
+
+
+@pytest.mark.parametrize("chat_names", ["email", "name"])
+def test_review_uses_employee_name_and_email_prefix_everywhere(core, chat_names):
+    app, _, _ = core
+    app.cfg.google_chat.names = chat_names
+    app.store.update_employee("A", "Lương Thế Hùng", True, email="enzo.nguyen@example.com")
+    add_face(app, person_vector(1))
+    page = client(app).get('/unknowns').get_data(as_text=True)
+    assert 'data-guess-name="Lương Thế Hùng (enzo.nguyen)"' in page
+    assert 'Looks like <strong>Lương Thế Hùng (enzo.nguyen)</strong>' in page
+    assert 'Confirm: Lương Thế Hùng (enzo.nguyen)' in page
+    assert '<option value="Lương Thế Hùng (enzo.nguyen)" data-id="A">' in page
+    assert 'enzo.nguyen@example.com' not in page
+
+
+def test_review_shows_legacy_employee_without_empty_email_parentheses(core):
+    app, _, _ = core
+    app.store._exec("UPDATE employees SET email = NULL WHERE id = 'A'")
+    add_face(app, person_vector(1))
+    page = client(app).get('/unknowns').get_data(as_text=True)
+    assert 'data-guess-name="Alice"' in page
+    assert 'Confirm: Alice' in page and 'Alice ()' not in page
 
 
 def test_review_does_not_suggest_for_a_split_group(core):

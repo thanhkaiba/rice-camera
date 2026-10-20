@@ -131,12 +131,13 @@ class EmployeeStoreMixin:
     # reference faces -------------------------------------------------------
 
     def add_embedding(self, model: str, employee_id: str, vector: np.ndarray, source: str, now: dt.datetime,
-                      image: str | None = None, quality_ok: bool | None = None) -> None:
+                      image: str | None = None, quality_ok: bool | None = None,
+                      quality_score: float | None = None) -> None:
         self._exec(
-            "INSERT INTO embeddings (model, employee_id, vector, source, image, created_at, quality_ok) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO embeddings (model, employee_id, vector, source, image, created_at, quality_ok, quality_score) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (model, employee_id, _blob(vector), source, image, now.isoformat(),
-             None if quality_ok is None else int(quality_ok)),
+             None if quality_ok is None else int(quality_ok), quality_score),
         )
 
     def embeddings(self, model: str) -> list[tuple[str, np.ndarray]]:
@@ -153,12 +154,13 @@ class EmployeeStoreMixin:
             sql += " AND employee_id = ?"
             params.append(employee_id)
         return [Reference(r["id"], r["employee_id"], r["image"], r["source"], _vec(r["vector"]),
-                          None if r["quality_ok"] is None else bool(r["quality_ok"]))
+                          dt.datetime.fromisoformat(r["created_at"]),
+                          None if r["quality_ok"] is None else bool(r["quality_ok"]), r["quality_score"])
                 for r in self._all(sql + " ORDER BY id", params)]
 
-    def set_reference_quality(self, image: str, ok: bool) -> None:
+    def set_reference_quality(self, image: str, ok: bool, score: float | None = None) -> None:
         """Whether a reference photo is sharp and frontal enough (for every model's embedding of it)."""
-        self._exec("UPDATE embeddings SET quality_ok = ? WHERE image = ?", (int(ok), image))
+        self._exec("UPDATE embeddings SET quality_ok = ?, quality_score = ? WHERE image = ?", (int(ok), score, image))
 
     def reference_images(self) -> list[tuple[str, str, str]]:
         """(employee_id, image, source) of every stored reference photo, from any model."""

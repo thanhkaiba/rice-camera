@@ -135,7 +135,7 @@ def test_seed_auto_resolution_uses_local_email_id_without_learning_or_attendance
     assert not app.store.checkins(DAY) and not app.store.sightings(DAY) and not sent
     assert import_review_samples(app, seed)['resolved'] == 0
     page = client(app).get('/unknowns').get_data(as_text=True)
-    assert 'Auto-labelled seed samples (1)' in page and 'alice@example.com' in page
+    assert 'Auto-labelled seed samples (1)' in page and 'Alice (alice)' in page
 
 
 @pytest.mark.parametrize('score,runner', [(.59, .0), (.70, .59)])
@@ -216,7 +216,7 @@ def test_seed_source_hint_is_manual_and_independent_of_the_model_guess(core, tmp
     seed_metadata(seed, expected_email='bob@example.com')
     assert import_review_samples(app, seed)['resolved'] == 0
     page = client(app).get('/unknowns').get_data(as_text=True)
-    assert 'Source label:' in page and 'Bob (bob@example.com)' in page
+    assert 'Source label:' in page and 'Bob (bob)' in page
     assert 'Model and source disagree' in page and 'data-guess="A"' in page
     assert app.store.unknowns()[0].employee_id is None and not sent
 

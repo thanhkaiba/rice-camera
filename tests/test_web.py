@@ -27,8 +27,8 @@ def test_pages_render_and_admin_can_assign_unknown(core):
     assert "Alice" in page and "09:05" in page and page.count('data-status="not_seen"') == 2
 
     page = c.get("/unknowns").get_data(as_text=True)
-    assert "Looks like <strong>Bob (bob@example.com)</strong>" in page
-    assert 'data-guess-name="Bob (bob@example.com)"' in page
+    assert "Looks like <strong>Bob (bob)</strong>" in page
+    assert 'data-guess-name="Bob (bob)"' in page
     assert "openReview(first)" not in page  # nothing opens by itself
     page = c.get("/unknowns?review=first").get_data(as_text=True)  # the link posted in chat
     assert f'.face-card[data-id="{uid}"]' in page and "openReview(first)" in page
@@ -78,6 +78,7 @@ def test_employee_management_and_photo_upload(core):
     resp = c.post(f"/employees/{employee_id}/photos", data={"photos": [(io.BytesIO(png(face_image(1))), "oops.png")]},
                   content_type="multipart/form-data", follow_redirects=True)
     assert "looks like Alice" in resp.get_data(as_text=True)
+    c.post("/employees/quality")
     assert "have reference photos that look" in c.get("/employees").get_data(as_text=True)
 
     c.post(f"/employees/{employee_id}/photos/delete", data={"image": image})

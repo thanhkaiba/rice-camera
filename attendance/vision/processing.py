@@ -4,6 +4,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import logging
+import time
 
 import numpy as np
 
@@ -24,9 +25,11 @@ def _scene(whole, bbox):
 
 
 class FrameProcessor:
-    def __init__(self, app, mode: str | None = None):
+    def __init__(self, app, mode: str | None = None, *, realtime: bool = True):
         """`mode` overrides cfg.tracking.mode (the benchmark runs both); otherwise the setting is
-        read on every frame, so switching it on the Settings page takes effect right away."""
+        read on every frame, so switching it on the Settings page takes effect right away.
+        Offline videos use realtime=False: expiry follows video timestamps regardless of CPU speed.
+        """
         self.app = app
         self.cfg = app.cfg
         self.face_tracker = FaceTracker(self.cfg.recognition)
@@ -36,6 +39,8 @@ class FrameProcessor:
         self.person_error: str | None = None
         self.people: list[PersonTrack] = []
         self._frames = 0
+        self._last_processing_s = 0.0
+        self._realtime = realtime
 
     @property
     def mode(self) -> str:
@@ -74,6 +79,7 @@ class FrameProcessor:
     def _process(self, frame: np.ndarray, ts: dt.datetime, record: bool, whole=None):
         """`whole`: (the whole camera frame, where `frame` sits in it), kept with each observation so
         the evidence picture of a sighting shows the entire scene."""
+        started = time.monotonic()
         regions, people, followed, full_frame = (), [], None, True
         detector = self._detector_or_none() if self.mode == "person" else None
         if detector is not None:
@@ -97,7 +103,10 @@ class FrameProcessor:
             observations = [Observation(f.bbox, f.embedding, c, f.quality_ok, f.quality, crop_face(frame, f.bbox), pid,
                                         f.size_ok, crop_body(frame, f.bbox), _scene(whole, f.bbox))
                             for f, c, pid in matched]
-            decisions = self.face_tracker.update(observations, ts, followed)
+            # Capture timestamps are separated by the previous frame's processing time.
+            interval = self._last_processing_s + 1 / self.cfg.camera.process_fps if self._realtime else 0.0
+            decisions = self.face_tracker.update(observations, ts, followed, frame_interval_s=interval)
+        self._last_processing_s = time.monotonic() - started
         self.people = people
         return decisions, matched, people
 

@@ -26,6 +26,11 @@ if TYPE_CHECKING:
     from ..core.pipeline import App
 
 
+def _review_name(name: str, email: str) -> str:
+    local = email.partition("@")[0]
+    return f"{name} ({local})" if name and local else name or local
+
+
 def register(app: Flask, core: "App") -> None:
     cfg, store, service = core.cfg, core.store, core.service
 
@@ -129,6 +134,7 @@ def register(app: Flask, core: "App") -> None:
 
     @app.get("/unknowns")
     def unknowns():
+        labels = {p.id: _review_name(p.name, p.email) for p in store.all_employees()}
         groups = []
         for members in store.pending_groups():
             best, maybe = service.review_suggestions(members)
@@ -138,7 +144,7 @@ def register(app: Flask, core: "App") -> None:
             groups.append({"id": members[-1].id, "members": members, "latest": members[-1], "photos": photos,
                            "source": members[-1].source,
                            "expected_id": person.id if person and person.active else None,
-                           "expected_name": f"{person.name} ({email})" if person else email,
+                           "expected_name": _review_name(person.name, person.email) if person else _review_name("", email or ""),
                            "photo_urls": [url_for("media", path=p) for p in photos],
                            "body": next((body_photo(u.image) for u in reversed(members) if u.image
                                          and (core.data_dir / body_photo(u.image)).exists()), None),
@@ -158,7 +164,7 @@ def register(app: Flask, core: "App") -> None:
                 person = store.employee(u.employee_id)
                 if person:
                     auto_labelled.append({"id": u.id, "image": u.image,
-                                          "name": f"{person.name} ({person.email})", **json.loads(saved)})
+                                          "name": _review_name(person.name, person.email), **json.loads(saved)})
         ignored = [{"id": g[-1].id, "count": len(g), "latest": g[-1],
                     "photo": next((u.image for u in reversed(g) if u.image), None)}
                    for g in store.ignored_groups(service.now().date())]
@@ -167,7 +173,7 @@ def register(app: Flask, core: "App") -> None:
         open_id = (next((g["id"] for g in groups if g["source"] == "camera"), None) if review == "first"
                    else (int(review) if review.isdigit() else None))
         return render_template("unknowns.html", groups=groups, ignored=ignored, employees=store.employees(),
-                               auto_labelled=auto_labelled,
+                               auto_labelled=auto_labelled, employee_labels=labels,
                                local=lambda ts: ts.astimezone(service.tz),
                                no_photos=not core.gallery.counts(), open_id=open_id)
 
@@ -190,7 +196,9 @@ def register(app: Flask, core: "App") -> None:
             return failed(str(exc), "unknowns")
         if face and face.source == "seed":
             return done("Sample labelled. No attendance recorded; usable faces are learned after confirmation.", "unknowns")
-        return done(f"Confirmed as {store.employees().get(request.form.get('employee_id', ''), '')}; face learned.", "unknowns")
+        person = store.employee(request.form.get("employee_id", ""))
+        label = _review_name(person.name, person.email) if person else "employee"
+        return done(f"Confirmed as {label}; face learned.", "unknowns")
 
     @app.post("/unknowns/<int:unknown_id>/new-employee")
     def new_employee_from_face(unknown_id: int):
@@ -200,10 +208,11 @@ def register(app: Flask, core: "App") -> None:
             service.add_employee_from_unknown(unknown_id, email, name, current_user(cfg))
         except ValueError as exc:
             return failed(str(exc), "unknowns")
+        label = _review_name(name, email.strip().lower())
         if face and face.source == "seed":
-            flash(f"{name} added and sample labelled. No attendance recorded; add reference photos if needed.", "ok")
+            flash(f"{label} added and sample labelled. No attendance recorded; add reference photos if needed.", "ok")
         else:
-            flash(f"{name} added as a new employee and their face learned.", "ok")
+            flash(f"{label} added as a new employee and their face learned.", "ok")
         return redirect(url_for("unknowns"))
 
     @app.post("/unknowns/<int:unknown_id>/ignore")

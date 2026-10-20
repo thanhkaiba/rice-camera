@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS embeddings (
     source TEXT NOT NULL,
     image TEXT,
     created_at TEXT NOT NULL,
-    quality_ok INTEGER  -- 1 sharp and frontal, 0 blurred or turned away, NULL not checked yet
+    quality_ok INTEGER,  -- 1 sharp and frontal, 0 blurred or turned away, NULL not checked yet
+    quality_score REAL  -- 0–1 from the recognizer; NULL not scored yet
 );
 CREATE TABLE IF NOT EXISTS checkins (
     day TEXT NOT NULL,
@@ -187,7 +188,14 @@ class Reference:
     image: str | None
     source: str
     vector: np.ndarray
+    created_at: dt.datetime
     quality_ok: bool | None = None  # sharp and frontal enough; None = not checked yet
+    quality_score: float | None = None
+
+    @property
+    def image_score(self) -> int | None:
+        """Displayed points, also used by deletion thresholds so a displayed 20 is kept at 20."""
+        return None if self.quality_score is None else round(self.quality_score * 100)
 
 
 @dataclass
@@ -246,7 +254,7 @@ def _blob(vector) -> bytes | None:
 
 def migrate(db: sqlite3.Connection) -> None:
     """Add columns introduced after a database was created."""
-    added = {"embeddings": [("image", "TEXT"), ("quality_ok", "INTEGER")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'")],
+    added = {"embeddings": [("image", "TEXT"), ("quality_ok", "INTEGER"), ("quality_score", "REAL")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'")],
              "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT")],
              "sightings": [("camera_id", "TEXT"), ("model", "TEXT"), ("vector", "BLOB"), ("sha256", "TEXT")],
              "calendar": [("source", "TEXT NOT NULL DEFAULT 'hr'")], "leaves": [("source", "TEXT NOT NULL DEFAULT 'hr'")]}

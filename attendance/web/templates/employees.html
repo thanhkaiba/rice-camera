@@ -19,6 +19,8 @@
   </div>
 </div>
 
+<div class="card">{% include '_reference_quality.html' %}</div>
+
 {% if seed_status.state == 'running' %}
   <div class="alert info" id="seed-running"><span class="ico">{{ icon('upload') }}</span><span><strong>Importing the seed</strong> · the camera is paused meanwhile.
     <span id="seed-progress">{{ seed_status.progress }}</span></span></div>
@@ -50,7 +52,15 @@
         <td>{% if n == 0 %}<span class="badge bad plain">{{ icon('image') }}No photos</span>
             {% elif q[2] == n %}<span class="badge info plain" title="{{ n }} photos · quality not checked yet">{{ icon('image') }}{{ n }}</span>
             {% elif q[1] < good_photos %}<span class="badge late plain" title="{{ q[1] }} of {{ n }} photos are sharp and frontal · add {{ good_photos - q[1] }} more good ones">{{ icon('image') }}{{ q[1] }}/{{ n }} good</span>
-            {% else %}<span class="badge ok plain" title="{{ q[1] }} of {{ n }} photos are sharp and frontal">{{ icon('image') }}{{ q[1] }}/{{ n }} good</span>{% endif %}</td>
+            {% else %}<span class="badge ok plain" title="{{ q[1] }} of {{ n }} photos are sharp and frontal">{{ icon('image') }}{{ q[1] }}/{{ n }} good</span>{% endif %}
+            {% set scores = photo_scores.get(p.id, []) %}
+            {% if scores %}<div class="cell-sub" title="Average image clarity, not recognition confidence.">Image {{ '%.0f'|format(scores|sum / scores|length * 100) }}/100 · {{ scores|length }}/{{ n }} scored</div>{% endif %}
+            {% set fit = recognition.get(p.id) %}
+            {% if fit %}<div class="small" title="Reference consistency: compared with other photos, excluding self and near-duplicates. Not measured camera accuracy.">
+              <span class="badge {{ 'late' if fit.review else 'ok' if fit.useful else 'info' }} plain">{{ fit.useful }} consistent{% if fit.review %} · {{ fit.review }} need review{% endif %}</span>
+              {% if fit.unverified %}<div class="cell-sub">{{ fit.unverified }} need more evidence</div>{% endif %}
+              {% if fit.duplicates %}<div class="cell-sub">{{ fit.duplicates }} near-duplicate</div>{% endif %}
+            </div>{% elif n %}<div class="cell-sub">Not evaluated · use Re-evaluate quality</div>{% endif %}</td>
         <td class="hide-sm">{% if p.chat_user %}<span class="badge ok plain" title="Google Chat ID set · @mentions work">{{ icon('at') }}</span>{% else %}<span class="muted" title="No Google Chat ID">–</span>{% endif %}</td>
         <td>{% if not p.active %}<span class="badge info">Not tracked</span>
             {% elif on_leave.get(p.id) %}<span class="badge info">{{ leave_label(on_leave[p.id]) }} today</span>
