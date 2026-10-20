@@ -227,4 +227,21 @@ def test_summary_lists_use_email_names(core):
     clock.t = at(11, 30)
     late(app, "A", 10, 15)
     text = app.service.summary_text(app.service.report(DAY))
-    assert "• Alice: 10:15" in text and "• Enzo" in text and "Lương" not in text  # late and not-seen lists
+    assert "• @Alice: 10:15" in text and "• @Enzo" in text and "Lương" not in text  # late and not-seen lists
+
+
+def test_messages_tag_people_by_their_chat_id(core):
+    app, clock, sent = core
+    app.store.update_employee("A", "Alice", True, "1001")
+    app.store.update_employee("B", "Bob", True, "1002")
+    clock.t = at(11, 30)
+    late(app, "A", 10, 15)
+    text = app.service.summary_text(app.service.report(DAY))
+    assert "• <users/1001>: 10:15" in text and "• <users/1002>" in text  # late, and not seen
+    app.store._db.execute("UPDATE employees SET email = 'cee@example.com' WHERE id = 'C'")
+    app.store._db.commit()
+    # Carol has no Chat ID: she is called by her email name instead
+    assert "• @Cee" in app.service.summary_text(app.service.report(DAY))
+    app.cfg.google_chat.mention_people = False  # switched off: email names in bold
+    text = app.service.summary_text(app.service.report(DAY))
+    assert "• *Alice*: 10:15" in text and "<users/" not in text

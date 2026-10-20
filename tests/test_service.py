@@ -46,8 +46,8 @@ def test_not_seen_by_deadline_is_listed_then_late_arrival_announced(env):
     summary = sent[-1]
     assert summary.startswith("📋")
     assert "On time: 1 · Late: 1 · Not seen: 1" in summary
-    assert "• Bob: 10:23 (23 min late)" in summary
-    assert "• Carol" in summary
+    assert "• @Bob: 10:23 (23 min late)" in summary
+    assert "• @Carol" in summary
 
 
 def test_notices_are_sent_once_even_after_restart(env, tmp_path):
@@ -73,7 +73,7 @@ def test_unknown_faces_are_batched_and_admin_can_resolve(env):
 
     # Admin confirms the 9:12 face was C: on time, with a correction in the chat.
     service.resolve_unknown(uid, "C")
-    assert sent[-1] == "✅ Update: *Carol* arrived at 09:12 (confirmed by admin), not late."
+    assert sent[-1] == "✅ Update: @Carol arrived at 09:12 (confirmed by admin), not late."
     rep = service.report(DAY)
     assert "C" in [a.employee_id for a in rep.on_time]
     assert service.gallery.counts()["C"] == 2  # the confirmed face was learned
@@ -252,4 +252,4 @@ def test_confirming_several_faces_of_a_late_person_posts_once(env):
     assert store.checkins(DAY)["B"].first_seen == at(10, 29)
     early = service.on_unknown(at(9, 50), "b3.jpg", person_vector(23), None, None)
     service.resolve_unknown(early, "B")  # turns out B was on time after all: that is worth a post
-    assert [m for m in sent if "Bob" in m][-1] == "✅ Update: *Bob* arrived at 09:50 (confirmed by admin), not late."
+    assert [m for m in sent if "Bob" in m][-1] == "✅ Update: @Bob arrived at 09:50 (confirmed by admin), not late."

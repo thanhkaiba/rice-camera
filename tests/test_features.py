@@ -50,7 +50,7 @@ def test_admin_can_add_move_and_delete_arrivals_with_audit_trail(env):
     service.reassign_arrival(DAY, "A", "C", user="hr")
     assert set(store.checkins(DAY)) == {"C"}
     assert store.checkins(DAY)["C"].image == "crops/x.jpg"
-    assert sent[-1] == "✅ Update: *Carol* arrived at 09:10 (corrected by admin), not late."
+    assert sent[-1] == "✅ Update: @Carol arrived at 09:10 (corrected by admin), not late."
 
     # Bob forgot to look at the camera; HR enters his arrival.
     service.set_arrival(DAY, "B", dt.time(9, 45), user="hr")
@@ -71,7 +71,7 @@ def test_messages_about_past_days_carry_the_date(env):
     run_until(service, clock, at(10, 1))
     clock.t = at(9, 0, day=DAY + dt.timedelta(days=1))
     service.set_arrival(DAY, "B", dt.time(9, 30))
-    assert sent[-1] == "✅ Update: *Bob* arrived at 09:30 on 2026-10-14 (entered by admin), not late."
+    assert sent[-1] == "✅ Update: @Bob arrived at 09:30 on 2026-10-14 (entered by admin), not late."
 
 
 def test_unclear_face_of_someone_already_checked_in_is_not_reported(env):
@@ -239,7 +239,7 @@ def test_correcting_a_wrong_sighting_brings_back_the_real_later_arrival(env):
     assert arrivals["A"].first_seen == at(9, 20) and arrivals["A"].source == "corrected"
     assert arrivals["B"].first_seen == at(10, 15) and arrivals["B"].image == "crops/bob.jpg"
     assert sent[-2:] == ["🟠 @Bob arrived at 10:15, 15 min late (corrected by admin).",
-                         "✅ Update: *Alice* arrived at 09:20 (corrected by admin), not late."]
+                         "✅ Update: @Alice arrived at 09:20 (corrected by admin), not late."]
     assert [d.employee_id for d in service.report(DAY).late] == ["B"]
 
 

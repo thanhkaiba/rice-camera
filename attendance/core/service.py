@@ -541,7 +541,7 @@ class AttendanceService:
                 self._send(f"🟠 {self.who(employee_id)} arrived at {when}, {late} min late{suffix}.", day)
         elif self.store.notice_sent(day, "deadline"):
             # They were on the "not seen" list, but turned out to have arrived on time.
-            self._send(f"✅ Update: *{self.chat_name(employee_id)}* arrived at {when}{suffix}, not late.", day)
+            self._send(f"✅ Update: {self.who(employee_id)} arrived at {when}{suffix}, not late.", day)
 
     # reports -------------------------------------------------------------------
 
@@ -628,11 +628,11 @@ class AttendanceService:
             lines.append(f"✅ Everyone was in by {rep.last_arrival.time} 🎉")
         if rep.late:
             lines.append("*Late:*")
-            lines += [f"• {self.chat_name(a.employee_id, a.name)}: {a.time} ({minutes_late(a, w)} min late)"
+            lines += [f"• {self.who(a.employee_id, a.name)}: {a.time} ({minutes_late(a, w)} min late)"
                       for a in rep.late]
         if rep.not_seen:
             lines.append(f"*Not seen on camera between {w.start:%H:%M} and {w.end:%H:%M}:*")
-            lines += [f"• {self.chat_name(emp_id, name)}" for emp_id, name in rep.not_seen]
+            lines += [f"• {self.who(emp_id, name)}" for emp_id, name in rep.not_seen]
         if rep.pending_unknowns:
             lines.append(f"❓ {rep.pending_unknowns} unidentified faces to review · "
                          f"{self._link('/unknowns?review=first', 'Review')}")
