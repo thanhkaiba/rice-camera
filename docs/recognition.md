@@ -106,7 +106,7 @@ An Intel Mac from 2017 is roughly half as fast as the numbers above. In order of
 2. *Frames per second* in Settings: 2-3 is enough for people walking past. When the computer is slower than this it simply skips frames; nothing breaks, but fewer frames vote.
 3. In person mode: keep `yolox_tiny` and raise `full_frame_every`.
 4. Keep the Camera page closed when not needed (drawing the picture costs CPU).
-5. `recognition.cpu_threads` (default: all CPUs but one) leaves a core for video decoding and the page; set it lower if the picture stutters, higher if nothing else runs on the computer.
+5. `recognition.cpu_threads` (default: one per physical core, at most 6) leaves cores for video decoding and the page; set it lower if the picture stutters, higher if nothing else runs on the computer.
 
 Run `benchmark` on the real machine and pick the combination that reaches the frame rate you set.
 

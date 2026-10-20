@@ -96,8 +96,8 @@ class RecognitionConfig:
     recognizer_model: str = ""
     det_size: int = 640
     use_gpu: bool = False
-    # Threads for the models (and OpenCV). 0 = all CPUs but one, which is left for the video
-    # decoder and the admin page, so frames are not dropped while a frame is being analysed.
+    # Threads for the models (and OpenCV). 0 = one per physical core, at most 6; the rest is left
+    # for the video decoder and the admin page, so frames are not dropped while one is analysed.
     cpu_threads: int = 0
     # Quality gate: frames failing it never vote, they can only end up as "unknown".
     min_face_px: int = 60

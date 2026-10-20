@@ -215,3 +215,40 @@ def test_visit_votes_like_the_live_tracker():
     frames += [Sample(None, "A", 0.3, 0.1, "stranger")]  # rejected: below threshold
     r = visits(frames, 0.5, 0.08, votes_required=3)
     assert (r.correct, r.wrong, r.rejected, r.employees) == (1, 0, 2, 2)
+
+
+def test_inference_threads_default_to_physical_cores(monkeypatch):
+    from attendance.vision import recognizer
+
+    monkeypatch.setattr(recognizer.os, "cpu_count", lambda: 12)  # 6 cores with hyper-threading
+    assert recognizer.cpu_threads() == 6
+    monkeypatch.setattr(recognizer.os, "cpu_count", lambda: 32)
+    assert recognizer.cpu_threads() == recognizer.MAX_AUTO_THREADS
+    monkeypatch.setattr(recognizer.os, "cpu_count", lambda: 1)
+    assert recognizer.cpu_threads() == 1
+    assert recognizer.cpu_threads(3) == 3  # an explicit setting wins
+
+
+def test_onnx_sessions_do_not_spin(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    from attendance.vision import recognizer
+
+    seen = {}
+
+    class Options:
+        def __init__(self):
+            self.entries = {}
+
+        def add_session_config_entry(self, key, value):
+            self.entries[key] = value
+
+    def session(path, sess_options, providers):
+        seen.update(options=sess_options, providers=providers)
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(SessionOptions=Options, InferenceSession=session))
+    recognizer.onnx_session(tmp_path / "m.onnx", threads=4)
+    options = seen["options"]
+    assert options.intra_op_num_threads == 4 and options.inter_op_num_threads == 1
+    assert options.entries == {"session.intra_op.allow_spinning": "0", "session.inter_op.allow_spinning": "0"}

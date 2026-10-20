@@ -111,22 +111,31 @@ def crop_body(frame: np.ndarray, bbox) -> np.ndarray:
     return crop_face(frame, (cx - 2 * fw, y1 - fh, cx + 2 * fw, y1 + 8 * fh), margin=0)
 
 
+MAX_AUTO_THREADS = 6  # more threads barely speed up one small image, and each one costs CPU
+
+
 def cpu_threads(setting: int = 0) -> int:
-    """Threads for model inference: the setting, or all CPUs but one, which is left for the video
-    decoder and the admin page (at least 1)."""
-    return setting if setting > 0 else max(1, (os.cpu_count() or 2) - 1)
+    """Threads for model inference: the setting, or about one per physical core (os.cpu_count()
+    counts hyper-threads twice), at most MAX_AUTO_THREADS, leaving the rest for the video decoder
+    and the admin page (at least 1)."""
+    return setting if setting > 0 else max(1, min(MAX_AUTO_THREADS, (os.cpu_count() or 2) // 2))
 
 
 def onnx_session(model: Path, use_gpu: bool = False, threads: int = 0):
     """An onnxruntime session with a capped thread pool, logging errors only: SCRFD run on head
     crops (any size other than 640) makes onnxruntime warn about output shapes on every frame,
-    which is harmless."""
+    which is harmless.
+
+    Spinning is off: by default idle pool threads busy-wait for the next model call, and with a
+    few models called several times a second that kept every core at 90 % on an office Mac."""
     import onnxruntime as ort
 
     options = ort.SessionOptions()
     options.log_severity_level = 3
     options.intra_op_num_threads = cpu_threads(threads)
     options.inter_op_num_threads = 1
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    options.add_session_config_entry("session.inter_op.allow_spinning", "0")
     providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if use_gpu else ["CPUExecutionProvider"]
     return ort.InferenceSession(str(model), sess_options=options, providers=providers)
 
