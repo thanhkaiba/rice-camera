@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import datetime as dt
 import hmac
+import logging
+import re
 import secrets
 import sys
 from pathlib import Path
@@ -129,6 +131,16 @@ def failed(message: str, endpoint: str, **kwargs):
     return _back(endpoint, **kwargs)
 
 
+# The Camera page asks for a new picture several times a second and pages load photos from /media:
+# logging every successful one buried everything else (95 % of the log). Failures are still logged.
+_ROUTINE_REQUEST = re.compile(r'"(?:\x1b\[[0-9;]*m)*(?:GET|HEAD) /(?:live\.json|live\.jpg|media/|static/)[^"]*" (?:2\d\d|304) ')
+
+
+class QuietRoutineRequests(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not _ROUTINE_REQUEST.search(record.getMessage())
+
+
 def create_app(core: "App") -> "Flask":
     from flask import Flask, Response, abort, request, send_from_directory
 
@@ -138,6 +150,9 @@ def create_app(core: "App") -> "Flask":
 
     cfg, store = core.cfg, core.store
     app = Flask(__name__)
+    werkzeug_log = logging.getLogger("werkzeug")
+    if not any(isinstance(f, QuietRoutineRequests) for f in werkzeug_log.filters):
+        werkzeug_log.addFilter(QuietRoutineRequests())
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
     secret = store.get("web_secret")
     if not secret:

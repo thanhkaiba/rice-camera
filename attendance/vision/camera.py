@@ -24,6 +24,10 @@ import cv2  # noqa: E402
 log = logging.getLogger(__name__)
 
 STALE_AFTER_S = 5.0
+# A stalled stream is dropped after READ_TIMEOUT_MS and reopened, instead of FFmpeg's default 30 s
+# during which nobody walking past is seen; a camera that is slow to answer gets OPEN_TIMEOUT_MS.
+OPEN_TIMEOUT_MS = 10_000
+READ_TIMEOUT_MS = 5_000
 BUFFER_FRAMES = 6
 RATE_WINDOW_S = 5.0  # frames received over this long give the camera's frame rate
 # OpenCV reads the FFmpeg options from the environment when a stream is opened; the environment is
@@ -47,7 +51,8 @@ def open_capture(url, threads: int = 0):
     with _open_lock:
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = capture_options(_BASE_OPTIONS, threads)
         try:
-            return cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+            return cv2.VideoCapture(url, cv2.CAP_FFMPEG, [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, OPEN_TIMEOUT_MS,
+                                                         cv2.CAP_PROP_READ_TIMEOUT_MSEC, READ_TIMEOUT_MS])
         finally:
             os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = _BASE_OPTIONS
 

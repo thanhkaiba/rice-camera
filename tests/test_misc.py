@@ -252,3 +252,42 @@ def test_onnx_sessions_do_not_spin(monkeypatch, tmp_path):
     options = seen["options"]
     assert options.intra_op_num_threads == 4 and options.inter_op_num_threads == 1
     assert options.entries == {"session.intra_op.allow_spinning": "0", "session.inter_op.allow_spinning": "0"}
+
+
+def test_routine_requests_are_not_logged():
+    import logging
+
+    from attendance.web import QuietRoutineRequests
+
+    def record(msg):
+        return logging.LogRecord("werkzeug", logging.INFO, __file__, 1, msg, None, None)
+
+    quiet = QuietRoutineRequests()
+    assert not quiet.filter(record('192.168.10.77 - - [20/Oct/2026 09:25:21] "GET /live.jpg?t=1 HTTP/1.1" 200 -'))
+    assert not quiet.filter(record('1.2.3.4 - - [x] "\x1b[36mGET /static/app.css?v=1 HTTP/1.1\x1b[0m" 304 -'))
+    assert quiet.filter(record('1.2.3.4 - - [x] "GET /media/crops/a.jpg HTTP/1.1" 404 -'))  # failures stay
+    assert quiet.filter(record('1.2.3.4 - - [x] "GET /unknowns HTTP/1.1" 200 -'))  # pages stay
+    assert quiet.filter(record('1.2.3.4 - - [x] "POST /settings HTTP/1.1" 302 -'))
+
+
+def test_service_log_is_rotated_when_large(tmp_path):
+    from attendance.cli.launcher import rotate
+
+    log = tmp_path / "service.log"
+    log.write_text("x" * 20)
+    rotate(log, max_bytes=100)
+    assert log.exists()
+    rotate(log, max_bytes=10)
+    assert not log.exists() and (tmp_path / "service.log.1").read_text() == "x" * 20
+    rotate(tmp_path / "missing.log")  # nothing to do
+
+
+def test_camera_opens_with_short_timeouts(monkeypatch):
+    from attendance.vision import camera
+
+    calls = []
+    monkeypatch.setattr(camera.cv2, "VideoCapture", lambda *a: calls.append(a))
+    camera.open_capture("rtsp://cam/stream", 2)
+    url, backend, params = calls[0]
+    assert dict(zip(params[::2], params[1::2])) == {camera.cv2.CAP_PROP_OPEN_TIMEOUT_MSEC: camera.OPEN_TIMEOUT_MS,
+                                                    camera.cv2.CAP_PROP_READ_TIMEOUT_MSEC: camera.READ_TIMEOUT_MS}

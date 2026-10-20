@@ -238,3 +238,18 @@ def test_exempt_people_are_recorded_but_never_late_or_missing(env):
     assert not any("Carol" in m for m in sent)
     assert "Carol" not in (service.late_text(DAY) or "")
     assert "C" not in [p.employee_id for p in service.period_report(DAY, DAY).people]
+
+
+def test_confirming_several_faces_of_a_late_person_posts_once(env):
+    service, store, clock, sent = env
+    run_until(service, clock, at(10, 40))
+    first = service.on_unknown(at(10, 30), "b1.jpg", person_vector(21), None, None)  # unlike each other:
+    second = service.on_unknown(at(10, 29), "b2.jpg", person_vector(22), None, None)  # two separate groups
+    service.resolve_unknown(first, "B")
+    service.resolve_unknown(second, "B")  # an earlier visit, still late
+    late_posts = [m for m in sent if m.startswith("🟠")]
+    assert len(late_posts) == 1 and "10:30" in late_posts[0]
+    assert store.checkins(DAY)["B"].first_seen == at(10, 29)
+    early = service.on_unknown(at(9, 50), "b3.jpg", person_vector(23), None, None)
+    service.resolve_unknown(early, "B")  # turns out B was on time after all: that is worth a post
+    assert [m for m in sent if "Bob" in m][-1] == "✅ Update: *Bob* arrived at 09:50 (confirmed by admin), not late."

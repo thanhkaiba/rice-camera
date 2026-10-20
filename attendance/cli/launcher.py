@@ -269,6 +269,18 @@ def stop(home: Path) -> bool:
     return stopped
 
 
+SERVICE_LOG_MAX = 5_000_000
+
+
+def rotate(path: Path, max_bytes: int = SERVICE_LOG_MAX) -> None:
+    """Keep service.log from growing for ever: when it is over `max_bytes` at start-up it becomes
+    service.log.1 (replacing the previous one), like attendance.log's own rotation."""
+    try:
+        if path.stat().st_size > max_bytes:
+            path.replace(path.with_name(path.name + ".1"))
+    except OSError:
+        pass
+
 def supervise(config: Path, instance: Instance, unclean: bool = False) -> None:
     """Keep the attendance program running; when an update is ready, restart into the new version.
     Google Chat hears when it keeps crashing, and (`unclean`) when the last run was cut off."""
@@ -305,6 +317,7 @@ def supervise(config: Path, instance: Instance, unclean: bool = False) -> None:
 
     if threading.current_thread() is threading.main_thread():
         signal.signal(signal.SIGTERM, on_terminate)
+    rotate(log_dir / "service.log")
     with open(log_dir / "service.log", "a", encoding="utf-8") as log:  # crashes the program could not log
         def note(text: str) -> None:
             log.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n")
@@ -312,7 +325,8 @@ def supervise(config: Path, instance: Instance, unclean: bool = False) -> None:
 
         while True:
             child = subprocess.Popen(attendance_command(config, "run"), cwd=home, creationflags=NO_WINDOW,
-                                     stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+                                     stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                                     env={**os.environ, "ATTENDANCE_LAUNCHED": "1"})
             instance.write_pids(os.getpid(), child.pid)
             watch.started()
             while child.poll() is None and not (updates and updates.ready):

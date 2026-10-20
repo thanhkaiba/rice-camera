@@ -363,15 +363,17 @@ class AttendanceService:
         for u in with_vector[::step][:per_group]:
             self._learn(employee_id, u.vector, u.image, u.model)
         today = self.now().date()
+        before = self.store.checkins(today).get(employee_id)
         for u in members:
             if u.source == "seed":
                 continue
             ts = self._local(u.ts)
-            result = self.store.record_checkin(ts.date(), employee_id, ts, "admin", u.guess_score, u.image,
-                                               sha256=u.sha256)
-            # Earlier days are corrected quietly; only today's arrival is posted.
-            if result in ("new", "earlier") and ts.date() == today:
-                self._announce(employee_id, ts, suffix=" (confirmed by admin)")
+            self.store.record_checkin(ts.date(), employee_id, ts, "admin", u.guess_score, u.image, sha256=u.sha256)
+        # Earlier days are corrected quietly. Today's arrival is posted once, and again only if the
+        # person turns out to be on time after all: confirming several faces of someone who came in
+        # late (one group after another, or a group with several visits) must not repeat the post.
+        self._announce_change(employee_id, before, self.store.checkins(today).get(employee_id),
+                              suffix=" (confirmed by admin)")
         when = ", ".join(sorted({f"{self._local(u.ts):%Y-%m-%d %H:%M}" for u in members})[:5])
         more = f" (+{len(members) - 5} more)" if len(members) > 5 else ""
         self.store.log(self.now(), user, "confirm face", f"{self._name(employee_id)}: {when}{more}")
@@ -489,7 +491,7 @@ class AttendanceService:
         for e in people:
             self._announce_change(e, before[e], after.get(e))
 
-    def _announce_change(self, employee_id: str, before, after) -> None:
+    def _announce_change(self, employee_id: str, before, after, suffix: str = " (corrected by admin)") -> None:
         """After a correction, post only what changes someone's status: they turn out to be late
         (or on time after being listed as not seen)."""
         if after is None or (before is not None and after.first_seen == before.first_seen):
@@ -500,7 +502,7 @@ class AttendanceService:
         late = ts >= self.window(ts.date()).late_after
         was_late = before is not None and self._local(before.first_seen) >= self.window(ts.date()).late_after
         if late != was_late or before is None:
-            self._announce(employee_id, ts, suffix=" (corrected by admin)")
+            self._announce(employee_id, ts, suffix=suffix)
 
     def _announce(self, employee_id: str, ts: dt.datetime, suffix: str) -> None:
         day = ts.date()

@@ -5,6 +5,7 @@ import argparse
 import datetime as dt
 import logging
 import logging.handlers
+import os
 import sys
 from pathlib import Path
 
@@ -19,7 +20,9 @@ def setup_logging(cfg) -> None:
     log_dir = cfg.path(cfg.data_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     handlers = [
-        *([logging.StreamHandler()] if sys.stderr else []),  # none in the packaged Windows program
+        # Not under the launcher: it sends stderr to service.log, which would repeat every line of
+        # attendance.log there (service.log keeps what cannot be logged: crashes, decoder warnings).
+        *([logging.StreamHandler()] if sys.stderr and not os.environ.get("ATTENDANCE_LAUNCHED") else []),
         logging.handlers.RotatingFileHandler(log_dir / "attendance.log", maxBytes=5_000_000, backupCount=5,
                                              encoding="utf-8"),
     ]
