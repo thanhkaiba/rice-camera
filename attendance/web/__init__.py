@@ -186,6 +186,7 @@ def create_app(core: "App") -> "Flask":
                 "translocated": sys.platform == "darwin" and "/AppTranslocation/" in sys.executable,
                 "leave_label": lambda kind: LEAVE_KINDS.get(kind, kind), "WEEKDAYS": WEEKDAYS,
                 "employee_emails": store.employee_emails(), "config_warnings": health.config_warnings(cfg),
+                "call_name": core.service.chat_name,  # how people are called: their email name by default
                 "role": "admin" if request.endpoint in PUBLIC else role(cfg)}
 
     from . import attendance as attendance_routes

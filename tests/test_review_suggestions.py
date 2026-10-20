@@ -47,6 +47,10 @@ def test_review_does_not_suggest_between_two_nearly_equal_employees(core):
     assert 'data-guess=""' in page and 'Confirm:' not in page
     # Neither is offered as the answer, but both as choices to pick from.
     assert "Maybe <strong>Alice</strong>" in page and "It's Alice" in page and "It's Bob" in page
+    app.store._db.execute("UPDATE employees SET name = 'Lương Thế Hùng', email = 'enzo@example.com' WHERE id = 'B'")
+    app.store._db.commit()
+    page = client(app).get('/unknowns').get_data(as_text=True)
+    assert "It's Enzo" in page and "It's Lương" not in page  # buttons use the email name, like Chat
 
 
 def test_review_does_not_suggest_for_a_split_group(core):
