@@ -133,9 +133,16 @@ def pin(home: Path, program: Path | None) -> None:
         path.write_text(json.dumps({"program": str(program)}), encoding="utf-8")
 
 
+# Going back works by pinning the earlier program (pinned.json) and skipping the newer release.
+# Versions before this one know neither: started as "the version gone back to" they would hand over
+# to the newest unpacked version straight away, which hands back to them, and so on.
+PIN_SUPPORT = (1, 1, 8)
+
+
 def rollback_targets(home: Path) -> list[tuple[str, Path]]:
-    """Earlier versions this one can go back to, newest first."""
-    return [(v, p) for v, p in programs(home) if parse(v) < parse(__version__) and p != Path(sys.executable)]
+    """Earlier versions this one can go back to, newest first: those that respect the pin."""
+    return [(v, p) for v, p in programs(home)
+            if PIN_SUPPORT <= parse(v) < parse(__version__) and p != Path(sys.executable)]
 
 
 def newer_installed(home: Path) -> Path | None:

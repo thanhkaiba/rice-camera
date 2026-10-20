@@ -267,3 +267,25 @@ def test_seed_folder_script_still_works(core, tmp_path, monkeypatch):
     monkeypatch.setattr("attendance.core.pipeline.App.recognizer", lambda self: FakeRecognizer())
     script_main(seed)
     assert Store(tmp_path / "data" / "attendance.db").employee_by_email("dan@example.com") is not None
+
+
+def test_seed_import_with_some_photos_rejected_is_done_not_failed(core, tmp_path, monkeypatch):
+    import json
+    import threading
+
+    from attendance.cli import seed as seed_module
+
+    app, _, _ = core
+
+    def partly(app_, seed_dir, review_only, progress):
+        raise seed_module.PhotosRejected("1 photos were rejected", {"employees": 2, "imported": 3, "failed": [{}], "warnings": [],
+                                                                     "backup": "b", "expected_photos": 4})
+    monkeypatch.setattr(seed_module, "import_seed", partly)
+    monkeypatch.setattr(seed_module, "unpack", lambda archive, work: work)
+    archive = tmp_path / "s.zip"
+    archive.write_bytes(b"")
+    seed_module._running.acquire()  # held by the page's start(); released by _run
+    seed_module._run(app, archive, False, "admin")
+    status = json.loads((app.data_dir / seed_module.STATUS_FILE).read_text())
+    assert status["state"] == "done" and "rejected" in status["message"]
+    assert any(a == "import seed" for _, _, a, _ in app.store.audit())

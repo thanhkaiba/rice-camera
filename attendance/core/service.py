@@ -312,9 +312,17 @@ class AttendanceService:
 
     # admin actions -------------------------------------------------------------
 
+    def review_suggestions(self, members) -> tuple[tuple[str, float] | None, list[tuple[str, float]]]:
+        """(review_guess, review_candidates when there is no guess) from one pass over the gallery."""
+        ranked, matches = self._review_ranking(members)
+        guess = self._clear_guess(ranked, matches)
+        return guess, [] if guess else self._candidates(ranked)
+
     def review_guess(self, members) -> tuple[str, float] | None:
         """A current, unambiguous suggestion supported by most usable faces in the group."""
-        ranked, matches = self._review_ranking(members)
+        return self._clear_guess(*self._review_ranking(members))
+
+    def _clear_guess(self, ranked, matches) -> tuple[str, float] | None:
         if not ranked:
             return None
         params = self.cfg.recognition
@@ -328,7 +336,9 @@ class AttendanceService:
         """People this group may be, best first: the group's average similarity to each person, from
         recognition.suggest_score up. Shown on the Review page as "Maybe" choices when there is no
         clear suggestion; unlike review_guess they are not reliable enough to confirm unseen."""
-        ranked, _ = self._review_ranking(members)
+        return self._candidates(self._review_ranking(members)[0], limit)
+
+    def _candidates(self, ranked, limit: int = 3) -> list[tuple[str, float]]:
         return [(person, score) for person, score in ranked[:limit] if score >= self.cfg.recognition.suggest_score]
 
     def _review_ranking(self, members) -> tuple[list[tuple[str, float]], list]:

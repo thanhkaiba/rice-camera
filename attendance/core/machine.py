@@ -207,12 +207,15 @@ class MachineWatch:
         self.power: Power | None = None
         self._since: dict[str, float] = {}  # problem -> first seen in this run
         self._running = False
+        self._last_start = 0.0
 
     def check_soon(self, every_s: float = 60.0) -> None:
         """Start a check in the background unless one ran within `every_s` or is running."""
-        if self._running or (self.power and time.time() - self.power.checked_at < every_s):
+        # Paced by the last start, not by self.power: that stays None where power cannot be read
+        # (Windows, Linux, a Mac without a battery), which started a check on every loop pass.
+        if self._running or time.time() - self._last_start < every_s:
             return
-        self._running = True
+        self._running, self._last_start = True, time.time()
 
         def go():
             try:

@@ -180,7 +180,14 @@ def two_versions(tmp_path, monkeypatch):
     updater.note_base(home)
     monkeypatch.setattr(sys, "executable", str(new))
     monkeypatch.setattr(updater, "__version__", "2.0.0")
+    monkeypatch.setattr(updater, "PIN_SUPPORT", (0, 5, 0))  # these made-up versions all know the pin
     return home, base, old, new
+
+
+def test_versions_that_ignore_the_pin_are_not_offered(tmp_path, monkeypatch):
+    home, base, old, new = two_versions(tmp_path, monkeypatch)
+    monkeypatch.setattr(updater, "PIN_SUPPORT", (1, 0, 0))  # 0.5.0 would hand straight back to 2.0.0
+    assert [v for v, _ in updater.rollback_targets(home)] == ["1.0.0"]
 
 
 def test_going_back_pins_the_earlier_version_and_skips_the_newer_one(tmp_path, monkeypatch):
@@ -246,6 +253,7 @@ def test_go_back_button_on_settings_page(core, monkeypatch):
     archive = app.cfg.base_dir / updater.asset_name()
     make_package(archive)
     updater.unpack(archive.as_uri(), "0.1.0", app.cfg.base_dir)
+    monkeypatch.setattr(updater, "PIN_SUPPORT", (0, 1, 0))
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     c = create_app(app).test_client()
     assert "Go back to version 0.1.0" in c.get("/settings").get_data(as_text=True)

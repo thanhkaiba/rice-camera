@@ -254,9 +254,17 @@ def import_seed(app, seed: Path, review_only: bool = False, progress: Callable[[
             json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     progress(f'Imported {report["imported"]}/{planned} photos; failures: {len(report["failed"])}')
     if report["failed"]:
-        raise RuntimeError(f'{len(report["failed"])} photos were rejected; see seed-import-{stamp}.json '
-                           "in the data folder")
+        raise PhotosRejected(f'{len(report["failed"])} photos were rejected; see seed-import-{stamp}.json '
+                             "in the data folder", report)
     return report
+
+
+class PhotosRejected(RuntimeError):
+    """The import ran to the end (employees and the other photos are in), but some photos were refused."""
+
+    def __init__(self, message: str, report: dict):
+        super().__init__(message)
+        self.report = report
 
 
 def script_main(seed: Path) -> None:
@@ -317,6 +325,10 @@ def _run(app, archive: Path, review_only: bool, user: str) -> None:
     try:
         seed = unpack(archive, work)
         report = import_seed(app, seed, review_only, progress=lambda text: _write_status(app, progress=text))
+    except PhotosRejected as exc:  # done, with photos to look at: uploading again would redo all of it
+        _write_status(app, state="done", message=f"{summary(exc.report)} · {exc}", backup=exc.report.get("backup"),
+                      finished=dt.datetime.now().isoformat(timespec="seconds"))
+        app.store.log(app.service.now(), user, "import seed", f"{summary(exc.report)} · {exc}")
     except Exception as exc:  # shown on the People page
         log.exception("Seed import failed")
         _write_status(app, state="failed", message=str(exc),

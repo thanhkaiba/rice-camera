@@ -21,14 +21,14 @@ if TYPE_CHECKING:
 LOG_TAIL_BYTES = 2_000_000
 DAYS = 30
 HIDDEN = "***"
-SECRET_FIELDS = {"password", "token", "webhook_url", "healthcheck_url"}
+SECRET_FIELDS = {"password", "viewer_password", "token", "webhook_url", "healthcheck_url"}
 
 _SECRETS = [
     (re.compile(r"(?i)\b(key|token|secret|password|access_token)=([^&\s\"'<>]+)"), rf"\1={HIDDEN}"),
     (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)([^/\s:@\"']+):([^@\s\"']+)@"), rf"\1\2:{HIDDEN}@"),  # rtsp://user:pass@
     (re.compile(r"(?i)(hc-ping\.com/)[\w-]+"), rf"\1{HIDDEN}"),
     (re.compile(r"(?i)(bearer\s+)[\w.~+/=-]+"), rf"\1{HIDDEN}"),
-    (re.compile(r"(?im)^(\s*(?:password|token|webhook_url|healthcheck_url)\s*:\s*).+$"), rf"\1{HIDDEN}"),
+    (re.compile(r"(?im)^(\s*(?:password|viewer_password|token|webhook_url|healthcheck_url)\s*:\s*).+$"), rf"\1{HIDDEN}"),
 ]
 
 
@@ -43,7 +43,7 @@ def redact_settings(value, name: str = ""):
     if isinstance(value, dict):
         return {k: redact_settings(v, k) for k, v in value.items()}
     if name in SECRET_FIELDS and value:
-        return HIDDEN if name in ("password", "token") else redact(re.sub(r"\?.*", f"?{HIDDEN}", str(value)))
+        return HIDDEN if name in ("password", "viewer_password", "token") else redact(re.sub(r"\?.*", f"?{HIDDEN}", str(value)))
     return redact(value) if isinstance(value, str) else value
 
 

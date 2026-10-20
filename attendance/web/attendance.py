@@ -131,11 +131,10 @@ def register(app: Flask, core: "App") -> None:
     def unknowns():
         groups = []
         for members in store.pending_groups():
-            best = service.review_guess(members)
+            best, maybe = service.review_suggestions(members)
             email = store.get(f"seed_review_email:{members[-1].id}") if members[-1].source == "seed" else None
             person = store.employee_by_email(email) if email else None
             photos = [u.image for u in reversed(members) if u.image][:6]
-            maybe = [] if best else service.review_candidates(members)
             groups.append({"id": members[-1].id, "members": members, "latest": members[-1], "photos": photos,
                            "source": members[-1].source,
                            "expected_id": person.id if person and person.active else None,

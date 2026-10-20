@@ -105,7 +105,7 @@ def photo_summary(app: "App") -> dict:
     good = getattr(app.library, "quality", None)  # employee_id -> (photos, good, not checked yet)
     if callable(good):
         try:
-            counts = {k: q[1] for k, q in good().items()}
+            counts = {k: q[1] + q[2] for k, q in good().items()}  # not checked yet: not counted against them
         except Exception:
             pass
     few = sorted((p for p in active if counts.get(p.id, 0) < FEW_PHOTOS), key=lambda p: counts.get(p.id, 0))

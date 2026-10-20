@@ -13,7 +13,7 @@ from ..store import Store
 
 KEY = "settings"
 BASELINE = "_file_settings"  # attribute on the Config: the values from config.yaml, before overrides
-SECRET = {"password", "token"}
+SECRET = {"password", "viewer_password", "token", "webhook_url"}  # never shown, only "set"/"empty"
 
 # section ("" = top level) -> editable fields
 EDITABLE: dict[str, list[str]] = {

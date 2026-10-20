@@ -199,3 +199,33 @@ def test_chat_poster_uses_the_saved_webhook_and_queues_on_failure(core, monkeypa
     watchdog.chat_poster(config)("hello")
     assert calls == [("https://chat.example/hook", {"text": "hello · http://pc:8000/status"})]
     assert [p for _, p, _ in app.store.outbox()] == [{"text": "hello · http://pc:8000/status"}]
+
+
+def test_read_only_password_is_never_shown_or_bundled(core):
+    app, _, _ = core
+    app.cfg.web.password, app.cfg.web.viewer_password = "adm1n", "v1ewer-s3cret"
+    assert diagnostics.redact_settings("v1ewer-s3cret", "viewer_password") == diagnostics.HIDDEN
+    assert "v1ewer-s3cret" not in diagnostics.redact("web:\n  viewer_password: v1ewer-s3cret\n")
+    assert "viewer_password" in settings.SECRET and "webhook_url" in settings.SECRET
+
+
+def test_machine_checks_are_paced_where_power_cannot_be_read(core, monkeypatch):
+    from attendance.core import machine
+
+    app, _, _ = core
+    watch = app.machine
+    started = []
+    monkeypatch.setattr(machine.threading, "Thread", lambda target, **kw: type("T", (), {"start": lambda self: started.append(1)})())
+    watch.power = None
+    for _ in range(50):
+        watch.check_soon()
+        watch._running = False  # as if each check finished at once
+    assert len(started) == 1
+
+
+def test_photos_not_rated_yet_do_not_flag_people(core, monkeypatch):
+    app, _, _ = core
+    monkeypatch.setattr(app.library, "quality", lambda: {e: (6, 0, 6) for e in "ABC"})  # just upgraded
+    assert health.photo_summary(app)["few"] == []
+    monkeypatch.setattr(app.library, "quality", lambda: {e: (6, 1, 0) for e in "ABC"})  # rated: mostly blurred
+    assert len(health.photo_summary(app)["few"]) == 3

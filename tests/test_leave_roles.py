@@ -203,3 +203,14 @@ def test_old_databases_get_the_source_columns(tmp_path):
     assert [x.source for x in store.leaves()] == ["hr"]
     store.set_calendar_day(DAY, "holiday", "")
     assert store.calendar_days() == [(DAY, "holiday", "", "manual")]
+
+
+def test_personal_page_lets_the_browser_send_its_origin(core):
+    """With no-referrer, browsers post Origin: null and the cross-site check refused every note."""
+    app, clock, _ = core
+    clock.t = at(10, 30)
+    c = client(app, password="s3cret")
+    link = link_of(c, "B")
+    assert 'content="same-origin"' in c.get(link).get_data(as_text=True)
+    r = c.post(link + "/note", data={"day": DAY.isoformat(), "note": "trip"}, headers={"Origin": "http://localhost"})
+    assert r.status_code == 302 and app.store.day_notes(DAY) == {"B": "trip"}
