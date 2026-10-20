@@ -177,7 +177,9 @@ select { appearance: none; padding-right: 32px; background-repeat: no-repeat; ba
 label.field, .field { display: flex; flex-direction: column; gap: 6px; font-size: .88em; font-weight: 500; color: var(--muted); min-width: 0; }
 label.field > input, label.field > select, .field > input, .field > select { color: var(--text); font-size: 1.05em; font-weight: 400; }
 label.check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
-.form-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+.form-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+/* fields line up by their inputs (hints of different heights hang below); buttons beside fields sit level with the input */
+.form-row:not([style*="align-items"]):not(.dialog-body .form-row):has(> .field) > :not(.field) { margin-top: 26px; }
 .search { position: relative; }
 .search input { padding-left: 36px; width: 100%; }
 .search::before { content: ""; position: absolute; left: 12px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); opacity: .55; pointer-events: none;
