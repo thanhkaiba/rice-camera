@@ -71,6 +71,7 @@ google_chat:
   mention_people: true    # @mention late and missing people (needs each employee's Google Chat user ID)
   notify_late_arrivals: true
   unknown_batch_minutes: 5   # group unknown-face notices instead of one message per face
+  names: email            # how people are called in messages: email (ruby@... -> Ruby) or name (People page)
 
 late_message:             # one message a day listing who came late
   enabled: true

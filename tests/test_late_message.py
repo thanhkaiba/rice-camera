@@ -199,6 +199,8 @@ def test_people_can_be_called_by_their_email_name(core):
     clock.t = at(10, 40)
     late(app, "B", 10, 15)
     late(app, "C", 10, 32)
+    assert app.service.late_text(DAY) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)"  # the default
+    app.cfg.google_chat.names = "name"
     assert app.service.late_text(DAY) == "Morning, coming late today: @Lương Thế Hùng (10:15), and @Carol (10:32)"
     app.cfg.google_chat.names = "email"
     assert app.service.late_text(DAY) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)"

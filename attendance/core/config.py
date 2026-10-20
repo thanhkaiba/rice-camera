@@ -157,7 +157,7 @@ class GoogleChatConfig:
     unknown_batch_minutes: int = 5
     # How people are called in messages: "name" (as on the People page) or "email" (the part
     # before @, e.g. ruby@… → Ruby), for teams that know each other by their email names.
-    names: str = "name"
+    names: str = "email"
 
 
 @dataclass
