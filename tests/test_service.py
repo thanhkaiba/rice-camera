@@ -253,3 +253,18 @@ def test_confirming_several_faces_of_a_late_person_posts_once(env):
     early = service.on_unknown(at(9, 50), "b3.jpg", person_vector(23), None, None)
     service.resolve_unknown(early, "B")  # turns out B was on time after all: that is worth a post
     assert [m for m in sent if "Bob" in m][-1] == "✅ Update: @Bob arrived at 09:50 (confirmed by admin), not late."
+
+
+def test_unclear_face_also_like_someone_not_in_yet_is_reviewed(env):
+    """A mask or a side view makes a face only somewhat like several people: once one of them is in,
+    it must not be dropped as "them again" while it may be the arrival of someone not in yet."""
+    service, store, clock, sent = env
+    service.on_identified("B", at(9, 0), 0.7, None)
+    both = person_vector(2) + person_vector(3)  # as like Bob (in) as Carol (not in yet)
+    both /= np.linalg.norm(both)
+    (bob, score), = [m for m in service.gallery.match(both, k=3) if m[0] == "B"]
+    assert service.on_unknown(at(9, 5), "m.jpg", both, "B", score) is not None
+    mostly_bob = person_vector(2) + 0.2 * person_vector(3)
+    mostly_bob /= np.linalg.norm(mostly_bob)
+    (_, score), = [m for m in service.gallery.match(mostly_bob, k=3) if m[0] == "B"]
+    assert service.on_unknown(at(9, 6), "b.jpg", mostly_bob, "B", score) is None  # clearly Bob again

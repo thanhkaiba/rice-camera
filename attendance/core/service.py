@@ -276,11 +276,10 @@ class AttendanceService:
     def on_unknown(self, ts: dt.datetime, image: str | None, vector: np.ndarray | None,
                    guess_id: str | None, guess_score: float | None, sha256: str | None = None) -> int | None:
         ts = self._local(ts)
-        seen_again = self.cfg.recognition.seen_again_score  # 0 switches this off
-        if (guess_id and guess_score is not None and seen_again and guess_score >= seen_again
-                and guess_id in self.store.checkins(ts.date())):
-            log.info("Unclear face at %s resembles %s, who is already checked in; not reported",
-                     ts.strftime("%H:%M:%S"), guess_id)
+        again = self._seen_again(vector, guess_id, guess_score, ts.date())
+        if again:
+            log.info("Unclear face at %s resembles %s (%.2f, next not checked in: %s), who is already checked in; "
+                     "not reported", ts.strftime("%H:%M:%S"), guess_id, guess_score, again)
             return None
         group_id, ignored = self._find_group(vector, ts)
         if ignored:
@@ -290,6 +289,27 @@ class AttendanceService:
                      guess_score or 0, group_id or "new")
         return self.store.add_unknown(ts.date(), ts, image, self.model_id, vector, guess_id, guess_score,
                                       group_id, ignored=ignored, sha256=sha256)
+
+    def _seen_again(self, vector, guess_id: str | None, guess_score: float | None, day: dt.date) -> str | None:
+        """Whether an unclear face is someone already checked in today passing again (not worth a
+        review): it resembles them from seen_again_score up, and clearly more than anyone who is not in
+        yet. Without the second condition a face only somewhat like an early arrival (a mask, a side
+        view, a newcomer) was dropped once most people were in, and its arrival with it.
+        Returns a note for the log ("none" or the closest person not in and their score), else None."""
+        r = self.cfg.recognition
+        if not (r.seen_again_score and guess_id and guess_score is not None and guess_score >= r.seen_again_score):
+            return None
+        checked = self.store.checkins(day)
+        if guess_id not in checked:
+            return None
+        if vector is None:
+            return "unknown"
+        active = self.store.employees()
+        rivals = [(p, s) for p, s in self.gallery.match(vector, k=len(self.gallery.counts()) or 1)
+                  if p in active and p not in checked]
+        if rivals and guess_score - rivals[0][1] < r.min_margin:
+            return None  # could just as well be someone not in yet: let the admin decide
+        return f"{rivals[0][0]} {rivals[0][1]:.2f}" if rivals else "none"
 
     def _find_group(self, vector: np.ndarray | None, ts: dt.datetime) -> tuple[int | None, bool]:
         """(group, ignored): the group of the most similar unknown face if it is clearly the same person,
