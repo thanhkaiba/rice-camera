@@ -310,3 +310,27 @@ def test_camera_page_picture_is_sharp_enough_and_full_size_is_available(core):
     full = c.get("/live/full.jpg")
     assert full.status_code == 200
     assert cv2.imdecode(np.frombuffer(full.data, np.uint8), cv2.IMREAD_COLOR).shape[:2] == (1616, 2880)
+
+
+def test_faces_detected_from_half_confidence_count(tmp_path):
+    """Masks and side views lower the detector's confidence: 0.55 (common behind a mask) is a face."""
+    from attendance.recognizer import FaceRecognizer
+
+    kps = np.array([[60, 70], [140, 70], [100, 110], [70, 150], [130, 150]], np.float32)
+
+    class Backend:
+        def __init__(self, score):
+            self.score = score
+
+        def detect(self, frame, threshold=0.5):
+            return [(np.array([20, 20, 180, 200]), self.score, kps)]
+
+        def embed(self, frame, landmarks):
+            return np.ones(8, np.float32)
+
+    rec = FaceRecognizer.__new__(FaceRecognizer)
+    frame = np.random.default_rng(0).integers(0, 255, (220, 220, 3), dtype=np.uint8)
+    rec.cfg, rec.backend = config.RecognitionConfig(), Backend(0.55)
+    assert rec.analyze(frame)[0].size_ok
+    rec.backend = Backend(0.45)
+    assert not rec.analyze(frame)[0].size_ok

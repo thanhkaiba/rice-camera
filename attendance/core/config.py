@@ -101,7 +101,9 @@ class RecognitionConfig:
     cpu_threads: int = 0
     # Quality gate: frames failing it never vote, they can only end up as "unknown".
     min_face_px: int = 60
-    min_det_score: float = 0.65
+    # 0.65 left out a third of ordinary reference photos and most faces behind a mask; from 0.5 up
+    # camera detections are nearly all faces (side views, blur and masks are judged further on).
+    min_det_score: float = 0.5
     min_sharpness: float = 40.0
     max_yaw: float = 35.0
     max_pitch: float = 30.0
