@@ -312,9 +312,11 @@ def test_camera_page_picture_is_sharp_enough_and_full_size_is_available(core):
     assert cv2.imdecode(np.frombuffer(full.data, np.uint8), cv2.IMREAD_COLOR).shape[:2] == (1616, 2880)
 
 
-def test_faces_detected_from_half_confidence_count(tmp_path):
-    """Masks and side views lower the detector's confidence: 0.55 (common behind a mask) is a face."""
+def test_faces_below_the_vote_score_are_followed_but_cannot_vote():
+    """Masks and side views lower the detector's confidence (0.5-0.65): such a face is still
+    returned, so it is tracked and reviewed when unknown, but it never votes anyone in."""
     from attendance.recognizer import FaceRecognizer
+    from attendance.tracker import vote_for
 
     kps = np.array([[60, 70], [140, 70], [100, 110], [70, 150], [130, 150]], np.float32)
 
@@ -322,7 +324,7 @@ def test_faces_detected_from_half_confidence_count(tmp_path):
         def __init__(self, score):
             self.score = score
 
-        def detect(self, frame, threshold=0.5):
+        def detect(self, frame, threshold=0.5, det_size=None):
             return [(np.array([20, 20, 180, 200]), self.score, kps)]
 
         def embed(self, frame, landmarks):
@@ -331,37 +333,30 @@ def test_faces_detected_from_half_confidence_count(tmp_path):
     rec = FaceRecognizer.__new__(FaceRecognizer)
     frame = np.random.default_rng(0).integers(0, 255, (220, 220, 3), dtype=np.uint8)
     rec.cfg, rec.backend = config.RecognitionConfig(), Backend(0.55)
-    assert rec.analyze(frame)[0].size_ok
-    rec.backend = Backend(0.45)
-    assert not rec.analyze(frame)[0].size_ok
+    face, = rec.analyze(frame)
+    assert not face.size_ok and not face.quality_ok
+    assert vote_for([("A", 0.95), ("B", 0.1)], face.quality_ok, face.size_ok, rec.cfg) is None  # however strong
+    rec.backend = Backend(0.7)
+    assert rec.analyze(frame)[0].quality_ok
 
 
-def test_low_confidence_faces_are_followed_but_do_not_vote():
+def test_a_lower_detection_setting_reaches_the_detector():
     from attendance.recognizer import FaceRecognizer
 
-    kps = np.array([[60, 70], [140, 70], [100, 110], [70, 150], [130, 150]], np.float32)
     seen = {}
 
     class Backend:
-        def __init__(self, score):
-            self.score = score
-
         def detect(self, frame, threshold=0.5, det_size=None):
             seen["threshold"] = threshold
-            return [(np.array([20, 20, 180, 200]), self.score, kps)] if self.score >= threshold else []
-
-        def embed(self, frame, landmarks):
-            return np.ones(8, np.float32)
+            return []
 
     rec = FaceRecognizer.__new__(FaceRecognizer)
-    frame = np.random.default_rng(0).integers(0, 255, (220, 220, 3), dtype=np.uint8)
-    rec.cfg, rec.backend = config.RecognitionConfig(), Backend(0.55)
-    face, = rec.analyze(frame)
-    assert face.size_ok and not face.quality_ok  # reviewed if unknown, never votes someone in
-    rec.backend = Backend(0.7)
-    assert rec.analyze(frame)[0].quality_ok
-    rec.cfg.min_det_score, rec.backend = 0.4, Backend(0.42)
-    assert rec.analyze(frame) and seen["threshold"] == 0.4  # a lower setting reaches the detector
+    rec.cfg, rec.backend = config.RecognitionConfig(), Backend()
+    rec.analyze(np.zeros((50, 50, 3), np.uint8))
+    assert seen["threshold"] == 0.5  # the detectors' own cut-off with the default 0.65
+    rec.cfg.min_det_score = 0.4
+    rec.analyze(np.zeros((50, 50, 3), np.uint8))
+    assert seen["threshold"] == 0.4
 
 
 def test_camera_page_labels_use_email_names(core):
@@ -377,5 +372,6 @@ def test_camera_page_labels_use_email_names(core):
 
     text, _ = face_label(app, Face(), [("B", 0.8), ("A", 0.2)])
     assert text.startswith("Enzo ") and "Lương" not in text
-    Face.quality_ok, Face.det_score = False, 0.55  # behind a mask: followed, but does not count
+    Face.quality_ok = Face.size_ok = False  # behind a mask (0.55): followed, but does not count
+    Face.det_score = 0.55
     assert face_label(app, Face(), [("B", 0.8), ("A", 0.2)])[0] == "? unclear"

@@ -151,7 +151,7 @@ def face_label(app: App, face, candidates) -> tuple[str, tuple[int, int, int]]:
         reason = "blurred"
     elif abs(face.yaw) > rc.max_yaw or abs(face.pitch) > rc.max_pitch:
         reason = "turned away"
-    elif face.det_score < rc.vote_det_score:
+    elif face.det_score < rc.min_det_score:
         reason = "unclear"  # followed and sent for review, but too uncertain to count
     else:
         best = f" (closest {name(candidates[0][0])} {candidates[0][1]:.2f})" if candidates else ""

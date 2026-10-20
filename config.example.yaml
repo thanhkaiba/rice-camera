@@ -38,8 +38,7 @@ recognition:
   cpu_threads: 0          # 0 = one per physical core, at most 6 (the rest is left for video decoding and the admin page)
   # A frame only votes if the face is big, sharp and roughly frontal enough:
   min_face_px: 60
-  min_det_score: 0.5      # lower finds more faces (masks, side views) for review; below ~0.45 decorations get in
-  vote_det_score: 0.65    # a frame only votes for a person from this detector confidence up
+  min_det_score: 0.65     # a frame votes for a person from this detector confidence up (masks score 0.5-0.65)
   min_sharpness: 40
   max_yaw: 35
   max_pitch: 30
