@@ -23,6 +23,11 @@
       <div id="stage" class="stage">
         <img id="frame" alt="" style="display:none" draggable="false">
         <div id="sel" class="sel" hidden></div>
+        <div id="guide" class="guide" hidden>
+          <div class="steps" id="guide-steps"></div>
+          <div class="say" id="guide-say"></div>
+          <div class="foot"><div class="note" id="guide-note"></div><div class="left" id="guide-left"></div></div>
+        </div>
       </div>
       <div id="no-frame" class="no-frame"><span class="ico">{{ icon('live') }}</span><strong>No picture</strong><span class="small" id="no-frame-why"></span></div>
     </div>
@@ -53,7 +58,7 @@
     </div>
     <div class="card" id="enrol-card">
       <strong class="row"><span style="color:var(--brand)">{{ icon('user-plus') }}</span>Enrol at the door</strong>
-      <div class="hint" style="margin:4px 0 10px">The camera's own pictures are the best reference photos. Pick a person, let them walk towards the camera two or three times, with and without a mask; the clearest different views are kept (90 s, up to 8 faces). Only one person in view; their arrival is not recorded meanwhile.</div>
+      <div class="hint" style="margin:4px 0 10px">The camera's own pictures are the best reference photos. Pick a person and turn the screen towards them: the picture shows them what to do, step by step, and says when there is enough (90 s, up to 8 faces). One person in view; their arrival is not recorded meanwhile.</div>
       <form method="post" action="{{ url_for('enrol_start') }}" class="row" id="enrol-form" {% if enrol.active %}hidden{% endif %}>
         <select name="employee_id" required style="flex:1 1 160px">
           <option value="">Choose a person…</option>
@@ -62,10 +67,20 @@
         <button class="primary">{{ icon('play') }}Start</button>
       </form>
       <form method="post" action="{{ url_for('enrol_start') }}" class="row between" id="enrol-live" {% if not enrol.active %}hidden{% endif %}>
-        <div><strong id="enrol-name">{{ enrol.name }}</strong> · <span class="tnum" id="enrol-left">{{ enrol.seconds_left }}</span> s left</div>
-        <button name="action" value="stop">{{ icon('stop') }}Stop</button>
+        <div><strong id="enrol-name">{{ enrol.name }}</strong> · <span class="tnum" id="enrol-left">{{ enrol.seconds_left }}</span> s left · <span id="enrol-kept">{{ enrol.kept }}</span>/{{ enrol.max_faces }} faces</div>
+        <div class="btn-group">
+          <button name="action" value="skip" title="The current step cannot be done (no mask at hand): go on to the next">{{ icon('chevron-right') }}Skip step</button>
+          <button name="action" value="stop">{{ icon('stop') }}Stop</button>
+        </div>
       </form>
+      <div class="steps-list" id="enrol-steps">
+        {% for st in enrol.steps %}<div class="{{ 'done' if st.done == 'seen' else 'skipped' if st.done == 'skipped' else '' }}"><span class="n">{{ loop.index }}</span>{{ st.label }}</div>{% endfor %}
+      </div>
       <div class="hint" id="enrol-note" style="margin-top:8px">{{ enrol.note }}</div>
+      <form method="post" action="{{ url_for('enrol_start') }}" class="row" id="enrol-more" style="margin-top:8px" {% if not enrol.can_continue %}hidden{% endif %}>
+        <button name="action" value="more" class="primary">{{ icon('play') }}Continue 1 min</button>
+      </form>
+      <label class="row small" style="margin-top:10px;gap:6px;cursor:pointer"><input type="checkbox" id="enrol-voice"> Read the steps aloud</label>
     </div>
     <div class="card small">
       <div class="legend">
@@ -99,9 +114,12 @@
       const en = s.enrol || {};
       document.getElementById('enrol-form').hidden = !!en.active;
       document.getElementById('enrol-live').hidden = !en.active;
+      document.getElementById('enrol-more').hidden = !en.can_continue;
       document.getElementById('enrol-name').textContent = en.name || '';
       document.getElementById('enrol-left').textContent = en.seconds_left ?? 0;
+      document.getElementById('enrol-kept').textContent = en.kept ?? 0;
       document.getElementById('enrol-note').textContent = en.note || '';
+      showGuide(en);
       const fresh = s.frame_age !== null && s.frame_age < 10;
       if (fresh && !paused) frame.src = '{{ url_for("live_jpg") }}?t=' + Date.now();
       frame.style.display = fresh ? 'block' : 'none';
@@ -113,6 +131,43 @@
     }
   }
   refresh(); setInterval(refresh, 1000);
+
+  // The guide over the picture: big enough to read from the door, read aloud if wanted.
+  const voice = document.getElementById('enrol-voice');
+  try { voice.checked = localStorage.getItem('enrol-voice') === '1'; } catch (e) {}
+  voice.addEventListener('change', () => { try { localStorage.setItem('enrol-voice', voice.checked ? '1' : '0'); } catch (e) {} if (voice.checked) say('Ready.'); });
+  let lastSaid = '';
+  function say(text) {
+    if (!voice.checked || !('speechSynthesis' in window) || !text || text === lastSaid) return;
+    lastSaid = text;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.lang = 'en-US'; u.rate = 0.95;
+    speechSynthesis.speak(u);
+  }
+  function showGuide(en) {
+    const g = document.getElementById('guide');
+    const show = en.active || (en.ended_ago !== null && en.ended_ago !== undefined && en.ended_ago < 12 && en.instruction);
+    g.hidden = !show;
+    const current = (en.steps || []).findIndex(st => !st.done);
+    const cls = (st, i) => st.done === 'seen' ? 'done' : st.done === 'skipped' ? 'skipped' : (i === current && en.active ? 'now' : '');
+    const list = document.getElementById('enrol-steps');
+    const listHtml = (en.steps || []).map((st, i) => `<div class="${cls(st, i)}"><span class="n">${i + 1}</span>${st.label}</div>`).join('');
+    if (list.innerHTML !== listHtml) list.innerHTML = listHtml;
+    if (!show) { lastSaid = ''; return; }
+    document.getElementById('guide-steps').innerHTML = (en.steps || []).map((st, i) => {
+      return `<span class="step ${cls(st, i)}"><span class="n">${st.done === 'seen' ? '✓' : i + 1}</span>${st.label}</span>`;
+    }).join('');
+    const sayEl = document.getElementById('guide-say');
+    sayEl.className = 'say' + (en.complete ? ' done' : (!en.active ? ' over' : ''));
+    sayEl.innerHTML = '';
+    sayEl.append(en.instruction || '');
+    if (en.active && en.hint) { const sm = document.createElement('small'); sm.textContent = en.hint; sayEl.append(sm); }
+    document.getElementById('guide-note').textContent = en.note || '';
+    const left = document.getElementById('guide-left');
+    left.hidden = !en.active;
+    left.textContent = en.active ? `${en.seconds_left} s · ${en.kept}/${en.max_faces} faces` : '';
+    say(en.instruction);
+  }
 
   // Drag on the picture to choose the detection area (fractions of the picture, so any size works).
   let picking = false, start = null, paused = false;

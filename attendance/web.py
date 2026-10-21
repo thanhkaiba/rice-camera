@@ -522,9 +522,20 @@ def create_app(core: "App") -> Flask:
     @app.post("/live/enrol")
     def enrol_start():
         """Enrol at the door: the chosen person's next walks past the camera become reference photos."""
-        if request.form.get("action") == "stop":
+        action = request.form.get("action")
+        if action == "stop":
             core.enrolment.stop()
             store.log(service.now(), user(), "enrol at the door", "stopped")
+            return redirect(url_for("live_page"))
+        if action == "skip":
+            step = core.enrolment.skip()
+            if step:
+                store.log(service.now(), user(), "enrol at the door", f"skipped step: {step}")
+            return redirect(url_for("live_page"))
+        if action == "more":
+            if not core.enrolment.resume():
+                return failed("Nothing to continue; start again.", "live_page")
+            store.log(service.now(), user(), "enrol at the door", "continued for one more minute")
             return redirect(url_for("live_page"))
         if not cfg.camera.url:
             return failed("Set the camera address in Settings first.", "live_page")
