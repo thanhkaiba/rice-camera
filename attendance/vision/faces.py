@@ -173,7 +173,7 @@ class FaceLibrary:
 
         have = {r.image for r in self.store.references(self.model_id) if r.image}
         added = 0
-        for employee_id, image_rel, source in self.store.reference_images():
+        for employee_id, image_rel, source, created_at in self.store.reference_images():
             if image_rel in have or not (self.data_dir / image_rel).exists():
                 continue
             image = read_image(self.data_dir / image_rel)
@@ -181,7 +181,7 @@ class FaceLibrary:
             if face is None:
                 log.warning("No face found when re-embedding %s", image_rel)
                 continue
-            self.store.add_embedding(self.model_id, employee_id, face.embedding, source, self._now(), image_rel,
+            self.store.add_embedding(self.model_id, employee_id, face.embedding, source, created_at, image_rel,
                                      face.quality_ok, face.quality)
             added += 1
         if added:

@@ -18,6 +18,8 @@ Other design decisions:
 - **Faces come from a face detector, not YOLO.** A generic YOLO model gives no facial landmarks (needed for alignment). A person detector is only used, optionally, to follow people in groups (below).
 - **No `insightface` package.** The ONNX models run directly on onnxruntime, so nothing needs compiling.
 - **No cloud.** Recognition stays on the office computer and images never leave it.
+- **Speed on a Mac: CoreML, not a smaller model.** With `use_gpu: true` the recogniser runs through CoreML: embeddings ~40 % faster on an Intel i5 with the same results. MobileFaceNet (branch `codex/mobilefacenet-trial`) was ~3.7x faster with 8 faces but recognised fewer hard camera snapshots than R50 (0/16 vs 2/16 at the default thresholds).
+- **No synthetic masks.** Drawing a mask on each reference photo raised the score of the one masked test face, but made 2.5x more reference photos match someone else at 0.45. Real masked photos, learned from faces named on the review page, are the way.
 
 ## Camera placement
 

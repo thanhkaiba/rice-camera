@@ -6,6 +6,7 @@ import io
 import json
 import re
 import sqlite3
+import threading
 import time
 import zipfile
 from zoneinfo import ZoneInfo
@@ -455,6 +456,101 @@ def test_a_bad_seed_upload_reports_the_problem(core, tmp_path):
     status = wait_for_import(c)
     assert status["state"] == "failed" and "missing or changed" in status["message"]
     assert "Seed import failed" in c.get("/employees").get_data(as_text=True)
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_seed_import_stays_running_until_temporary_files_are_removed(core, tmp_path, monkeypatch, fail):
+    from attendance.cli import seed as seed_module
+
+    app, _, _ = core
+    archive = tmp_path / "seed.zip"
+    archive.write_bytes(zipped(make_seed(tmp_path / "seed")))
+    cleaning, release = threading.Event(), threading.Event()
+    real_cleanup = seed_module.shutil.rmtree
+
+    def cleanup(*args, **kwargs):
+        cleaning.set()
+        assert release.wait(5)
+        return real_cleanup(*args, **kwargs)
+
+    def importing(*args, **kwargs):
+        if fail:
+            raise ValueError("bad seed")
+        return {"imported": 0, "resolved": 0}
+
+    monkeypatch.setattr(seed_module.shutil, "rmtree", cleanup)
+    monkeypatch.setattr(seed_module, "import_seed", importing)
+    seed_module.start(app, archive)
+    try:
+        assert cleaning.wait(5)
+        assert seed_module.read_status(app)["state"] == "running"
+    finally:
+        release.set()
+        status = wait_for_import(client(app))
+    assert status["state"] == ("failed" if fail else "done")
+    assert not archive.exists() and not archive.with_suffix("").exists()
+    assert app.maintenance is None
+
+
+def test_seed_status_readers_keep_the_previous_state_until_the_write_finishes(core, monkeypatch):
+    from pathlib import Path
+    from attendance.cli import seed as seed_module
+
+    app, _, _ = core
+    observed = []
+    write_text = Path.write_text
+
+    def writing(path, data, *args, **kwargs):
+        write_text(path, "", *args, **kwargs)
+        observed.append(seed_module.read_status(app))
+        return write_text(path, data, *args, **kwargs)
+
+    with seed_module._running:
+        seed_module._write_status(app, state="running")
+        monkeypatch.setattr(Path, "write_text", writing)
+        seed_module._write_status(app, state="done", message="Imported")
+    assert observed[0]["state"] == "running"
+    assert seed_module.read_status(app)["state"] == "done"
+
+
+@pytest.mark.parametrize("outcome", ["done", "rejected", "failed"])
+def test_seed_cleanup_error_preserves_the_import_result(core, tmp_path, monkeypatch, outcome):
+    from pathlib import Path
+    from attendance.cli import seed as seed_module
+
+    app, _, _ = core
+    archive = tmp_path / "seed.zip"
+    archive.write_bytes(zipped(make_seed(tmp_path / "seed")))
+    report = {"employees": 2, "imported": 3, "expected_photos": 4, "warnings": [], "backup": "saved-backup"}
+
+    def importing(*args, **kwargs):
+        if outcome == "failed":
+            raise ValueError("bad seed")
+        if outcome == "rejected":
+            raise seed_module.PhotosRejected("1 photo rejected", report)
+        return report
+
+    unlink = Path.unlink
+
+    def cannot_remove_upload(path, *args, **kwargs):
+        if path == archive:
+            raise PermissionError("ZIP is held open")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(seed_module, "import_seed", importing)
+    monkeypatch.setattr(Path, "unlink", cannot_remove_upload)
+    seed_module._running.acquire()
+    seed_module._write_status(app, state="running")
+    seed_module._run(app, archive, False, "admin")
+    status = seed_module.read_status(app)
+    assert status["state"] == ("failed" if outcome == "failed" else "done")
+    assert ("bad seed" if outcome == "failed" else "1 photo rejected" if outcome == "rejected"
+            else "2 employees, 3/4 photos") in status["message"]
+    assert "ZIP is held open" in status["message"] and "interrupted" not in status["message"]
+    assert status["finished"] and app.maintenance is None and not seed_module._running.locked()
+    assert archive.exists() and not archive.with_suffix("").exists()
+    if outcome != "failed":
+        assert status["backup"] == "saved-backup"
 
 
 def test_seed_zip_is_found_inside_its_folder(tmp_path):

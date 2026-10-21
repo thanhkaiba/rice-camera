@@ -225,7 +225,7 @@ def import_seed(app, seed: Path, review_only: bool = False, progress: Callable[[
         app.store.put("employee_email_csv_imported", "1")
         for row in people:
             person = app.store.employee_by_email(row["email"])
-            for employee_id, image, source in app.store.reference_images():
+            for employee_id, image, source, _ in app.store.reference_images():
                 if employee_id == person.id and source == "enroll":
                     app.library.delete_photo(image)
             for path in photos[row["email"]]:
@@ -303,7 +303,10 @@ def read_status(app) -> dict:
 def _write_status(app, **fields) -> None:
     status = {} if fields.get("state") == "running" else read_status(app)
     status.update({k: v for k, v in fields.items() if v is not None})
-    (app.data_dir / STATUS_FILE).write_text(json.dumps(status, ensure_ascii=False), encoding="utf-8")
+    path = app.data_dir / STATUS_FILE
+    partial = path.with_suffix(".part")
+    partial.write_text(json.dumps(status, ensure_ascii=False), encoding="utf-8")
+    partial.replace(path)
 
 
 def start(app, archive: Path, review_only: bool = False, user: str = "admin") -> None:
@@ -323,24 +326,29 @@ def _run(app, archive: Path, review_only: bool, user: str) -> None:
     work = archive.with_suffix("")
     app.maintenance = "importing a seed"
     try:
-        seed = unpack(archive, work)
-        report = import_seed(app, seed, review_only, progress=lambda text: _write_status(app, progress=text))
-    except PhotosRejected as exc:  # done, with photos to look at: uploading again would redo all of it
-        _write_status(app, state="done", message=f"{summary(exc.report)} · {exc}", backup=exc.report.get("backup"),
-                      finished=dt.datetime.now().isoformat(timespec="seconds"))
-        app.store.log(app.service.now(), user, "import seed", f"{summary(exc.report)} · {exc}")
-    except Exception as exc:  # shown on the People page
-        log.exception("Seed import failed")
-        _write_status(app, state="failed", message=str(exc),
-                      finished=dt.datetime.now().isoformat(timespec="seconds"))
-    else:
-        _write_status(app, state="done", message=summary(report), backup=report.get("backup"),
-                      finished=dt.datetime.now().isoformat(timespec="seconds"))
-        app.store.log(app.service.now(), user, "import seed", summary(report))
+        try:
+            seed = unpack(archive, work)
+            report = import_seed(app, seed, review_only, progress=lambda text: _write_status(app, progress=text))
+        except PhotosRejected as exc:  # done, with photos to look at: uploading again would redo all of it
+            message = f"{summary(exc.report)} · {exc}"
+            app.store.log(app.service.now(), user, "import seed", message)
+            result = dict(state="done", message=message, backup=exc.report.get("backup"))
+        except Exception as exc:  # shown on the People page
+            log.exception("Seed import failed")
+            result = dict(state="failed", message=str(exc))
+        else:
+            app.store.log(app.service.now(), user, "import seed", summary(report))
+            result = dict(state="done", message=summary(report), backup=report.get("backup"))
+        finally:
+            app.maintenance = None
+            shutil.rmtree(work, ignore_errors=True)
+            try:
+                archive.unlink(missing_ok=True)
+            except OSError as exc:
+                log.warning("Could not remove seed upload %s: %s", archive, exc)
+                result["message"] += f" · Could not remove temporary upload: {exc}"
+        _write_status(app, **result, finished=dt.datetime.now().isoformat(timespec="seconds"))
     finally:
-        app.maintenance = None
-        shutil.rmtree(work, ignore_errors=True)
-        archive.unlink(missing_ok=True)
         _running.release()
 
 

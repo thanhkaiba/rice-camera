@@ -9,6 +9,7 @@ from attendance.live import FrameHealth
 from attendance.pipeline import App
 from conftest import DAY, at, face_image, person_vector
 from test_service import run_until
+from test_web import client
 
 SATURDAY = dt.date(2026, 10, 17)
 
@@ -151,11 +152,20 @@ def test_upload_learn_delete_and_look_alike_alert(core):
 
 def test_switching_model_reembeds_saved_photos(core):
     app, clock, _ = core
-    app.library.add_photo("C", face_image(3))
+    app.library.add_photo("C", face_image(3), source="admin")
+    original = app.store.references(app.library.model_id, "C")[-1]
+    clock.t += dt.timedelta(days=7)
+    app.store.add_embedding("later-copy", "C", original.vector, "admin", clock.t.astimezone(dt.timezone.utc),
+                            original.image)
     app.cfg.recognition.recognizer_model = "models/other_model.onnx"
     assert app.library.model_id == "other_model"
     assert app.library.reembed_missing() == 1
     assert app.gallery.counts() == {"C": 1}
+    [photo] = app.store.references(app.library.model_id, "C")
+    assert photo.created_at == original.created_at
+    assert photo.image == original.image and photo.source == "admin"
+    page = client(app).get("/employees/C").get_data(as_text=True)
+    assert "12/10/2026 – 18/10/2026" in page and "19/10/2026 – 25/10/2026" not in page
     assert app.library.reembed_missing() == 0
 
 

@@ -254,6 +254,31 @@ def test_onnx_sessions_do_not_spin(monkeypatch, tmp_path):
     assert options.entries == {"session.intra_op.allow_spinning": "0", "session.inter_op.allow_spinning": "0"}
 
 
+def test_coreml_runs_the_recogniser_only_and_falls_back_to_the_cpu(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    from attendance.vision import recognizer
+
+    calls = []
+
+    def session(path, sess_options, providers):
+        calls.append(providers[0] if isinstance(providers[0], str) else providers[0][0])
+        if calls[-1] == "CoreMLExecutionProvider" and "broken" in str(path):
+            raise RuntimeError("model not supported")
+
+    options = types.SimpleNamespace(add_session_config_entry=lambda *a: None)
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(
+        SessionOptions=lambda: options, InferenceSession=session,
+        get_available_providers=lambda: ["CoreMLExecutionProvider", "CPUExecutionProvider"]))
+    recognizer.onnx_session(tmp_path / "rec.onnx", use_gpu=True, coreml=True)
+    recognizer.onnx_session(tmp_path / "det.onnx", use_gpu=True)  # input size varies: never CoreML, and no CUDA here
+    recognizer.onnx_session(tmp_path / "rec.onnx", coreml=True)  # use_gpu off
+    recognizer.onnx_session(tmp_path / "broken.onnx", use_gpu=True, coreml=True)
+    assert calls == ["CoreMLExecutionProvider", "CPUExecutionProvider", "CPUExecutionProvider",
+                     "CoreMLExecutionProvider", "CPUExecutionProvider"]
+
+
 def test_routine_requests_are_not_logged():
     import logging
 

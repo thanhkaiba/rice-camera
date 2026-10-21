@@ -162,11 +162,20 @@ class EmployeeStoreMixin:
         """Whether a reference photo is sharp and frontal enough (for every model's embedding of it)."""
         self._exec("UPDATE embeddings SET quality_ok = ?, quality_score = ? WHERE image = ?", (int(ok), score, image))
 
-    def reference_images(self) -> list[tuple[str, str, str]]:
-        """(employee_id, image, source) of every stored reference photo, from any model."""
-        rows = self._all("SELECT employee_id, image, MIN(source) AS source FROM embeddings "
-                         "WHERE image IS NOT NULL GROUP BY employee_id, image")
-        return [(r["employee_id"], r["image"], r["source"]) for r in rows]
+    def reference_images(self) -> list[tuple[str, str, str, dt.datetime]]:
+        """(employee_id, image, source, first saved) across models; keep photo dates when re-embedding."""
+        # shortcut: offset-free legacy dates sort as UTC; normalize them before mixing timezone formats.
+        rows = self._all("SELECT employee_id, image, source, created_at FROM embeddings "
+                         "WHERE image IS NOT NULL ORDER BY julianday(created_at), id")
+        photos = {}
+        for r in rows:
+            key = (r["employee_id"], r["image"])
+            if key in photos:
+                source, stamp = photos[key]
+                photos[key] = (min(source, r["source"]), stamp)
+            else:
+                photos[key] = (r["source"], dt.datetime.fromisoformat(r["created_at"]))
+        return [(employee, image, source, stamp) for (employee, image), (source, stamp) in photos.items()]
 
     def delete_reference(self, ref_id: int) -> None:
         self._exec("DELETE FROM embeddings WHERE id = ?", (ref_id,))

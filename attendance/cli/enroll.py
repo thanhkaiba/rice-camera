@@ -44,7 +44,7 @@ def enroll(cfg: Config, faces_dir: Path) -> None:
         emp = person.id
         seen.add(emp)
         # Re-running replaces photos enrolled from folders; uploads and admin-confirmed faces are kept.
-        for employee_id, image, source in app.store.reference_images():
+        for employee_id, image, source, _ in app.store.reference_images():
             if employee_id == emp and source == "enroll":
                 app.library.delete_photo(image)
         added = 0

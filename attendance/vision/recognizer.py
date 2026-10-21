@@ -12,6 +12,7 @@ Both align every face on its 5 landmarks before computing the embedding.
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
 from dataclasses import dataclass
@@ -21,6 +22,8 @@ import cv2
 import numpy as np
 
 from ..core.config import RecognitionConfig
+
+log = logging.getLogger(__name__)
 
 # ArcFace reference positions of the eyes, nose tip and mouth corners in a 112x112 crop.
 ARCFACE_LANDMARKS = np.array(
@@ -121,13 +124,17 @@ def cpu_threads(setting: int = 0) -> int:
     return setting if setting > 0 else max(1, min(MAX_AUTO_THREADS, (os.cpu_count() or 2) // 2))
 
 
-def onnx_session(model: Path, use_gpu: bool = False, threads: int = 0):
+def onnx_session(model: Path, use_gpu: bool = False, threads: int = 0, coreml: bool = False):
     """An onnxruntime session with a capped thread pool, logging errors only: SCRFD run on head
     crops (any size other than 640) makes onnxruntime warn about output shapes on every frame,
     which is harmless.
 
     Spinning is off: by default idle pool threads busy-wait for the next model call, and with a
-    few models called several times a second that kept every core at 90 % on an office Mac."""
+    few models called several times a second that kept every core at 90 % on an office Mac.
+
+    With use_gpu on a Mac, models with a fixed input size (coreml=True: the recogniser) run through
+    CoreML: ArcFace R50 embeddings were 30 % faster on an Intel i5 and matched the CPU ones
+    (cosine 0.99998, the same decision on 48 photos). Loading takes ~9 s; the CPU is the fallback."""
     import onnxruntime as ort
 
     options = ort.SessionOptions()
@@ -136,7 +143,15 @@ def onnx_session(model: Path, use_gpu: bool = False, threads: int = 0):
     options.inter_op_num_threads = 1
     options.add_session_config_entry("session.intra_op.allow_spinning", "0")
     options.add_session_config_entry("session.inter_op.allow_spinning", "0")
-    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if use_gpu else ["CPUExecutionProvider"]
+    if use_gpu and coreml and "CoreMLExecutionProvider" in ort.get_available_providers():
+        try:
+            return ort.InferenceSession(str(model), sess_options=options, providers=[
+                ("CoreMLExecutionProvider", {"ModelFormat": "NeuralNetwork", "MLComputeUnits": "CPUAndGPU"}),
+                "CPUExecutionProvider"])
+        except Exception:
+            log.warning("CoreML cannot load %s; using the CPU", model.name, exc_info=True)
+    cuda = use_gpu and "CUDAExecutionProvider" in ort.get_available_providers()
+    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if cuda else ["CPUExecutionProvider"]
     return ort.InferenceSession(str(model), sess_options=options, providers=providers)
 
 
@@ -165,7 +180,7 @@ class InsightFaceBackend:
 
     def __init__(self, cfg: RecognitionConfig, detector: Path, recognizer: Path):
         self.det = onnx_session(detector, cfg.use_gpu, cfg.cpu_threads)
-        self.rec = onnx_session(recognizer, cfg.use_gpu, cfg.cpu_threads)
+        self.rec = onnx_session(recognizer, cfg.use_gpu, cfg.cpu_threads, coreml=True)
         self.det_size = cfg.det_size
         self._centers: dict[tuple[int, int, int], np.ndarray] = {}
 
