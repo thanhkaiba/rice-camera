@@ -336,10 +336,11 @@ class AttendanceService:
         if vector is None:
             return None, False
         v = self.gallery.prepare(vector)  # compared as the gallery compares faces
-        candidates = [(u, False) for u in self.store.unknowns()]
+        within = dt.timedelta(days=self.cfg.recognition.group_days)
+        # Only recent faces are read: pending faces pile up until they are reviewed or expire.
+        candidates = [(u, False) for u in self.store.unknowns(since=(ts - within).date())]
         candidates += [(u, True) for g in self.store.ignored_groups(ts.date()) for u in g]
         best, best_ignored, best_score = None, False, self.cfg.recognition.accept_score
-        within = dt.timedelta(days=self.cfg.recognition.group_days)
         for u, ignored in candidates:
             if u.vector is None or u.model != self.model_id or ts - self._local(u.ts) > within:
                 continue

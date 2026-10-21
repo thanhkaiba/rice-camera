@@ -283,7 +283,8 @@ class Store:
 
     def import_employees(self, csv_text: str) -> int:
         """Add or rename employees from CSV text with columns id,name and optionally chat_user
-        (Google Chat user ID, for @mentions). Nobody is removed."""
+        (Google Chat user ID, for @mentions). Nobody is removed, and someone switched off on the
+        People page stays off (switch them on there)."""
         reader = csv.DictReader(io.StringIO(csv_text.lstrip("\ufeff")))
         if not reader.fieldnames or not {"id", "name"} <= {f.strip().lower() for f in reader.fieldnames}:
             raise ValueError("the CSV needs a header row with the columns id,name")
@@ -299,7 +300,7 @@ class Store:
         with self._lock, self._db:
             self._db.executemany(
                 "INSERT INTO employees (id, name, active, chat_user) VALUES (?, ?, 1, ?) "
-                "ON CONFLICT(id) DO UPDATE SET name = excluded.name, active = 1, "
+                "ON CONFLICT(id) DO UPDATE SET name = excluded.name, "
                 "chat_user = CASE WHEN excluded.chat_user != '' THEN excluded.chat_user ELSE employees.chat_user END",
                 rows,
             )
@@ -618,11 +619,16 @@ class Store:
         rows = self._all("SELECT * FROM unknowns WHERE id = ?", (unknown_id,))
         return self._unknown(rows[0]) if rows else None
 
-    def unknowns(self, day: dt.date | None = None, status: str | None = "pending") -> list[Unknown]:
+    def unknowns(self, day: dt.date | None = None, status: str | None = "pending",
+                 since: dt.date | None = None) -> list[Unknown]:
+        """`since`: only faces from that day on (grouping looks back a limited number of days)."""
         sql, params = "SELECT * FROM unknowns WHERE 1 = 1", []
         if day is not None:
             sql += " AND day = ?"
             params.append(day.isoformat())
+        if since is not None:
+            sql += " AND day >= ?"
+            params.append(since.isoformat())
         if status is not None:
             sql += " AND status = ?"
             params.append(status)

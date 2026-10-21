@@ -24,6 +24,10 @@ log = logging.getLogger(__name__)
 
 STALE_AFTER_S = 5.0
 BUFFER_FRAMES = 6
+# A network stream that does not answer within these times is given up and reopened; without
+# them a dropped connection can leave the decoder waiting forever (the thread is then left behind).
+OPEN_TIMEOUT_MS = 10_000
+READ_TIMEOUT_MS = 15_000
 
 
 def focus(frame, regions) -> float:
@@ -92,10 +96,18 @@ class Camera:
         # Scored outside the lock so the reader thread is never held up mid-decode.
         return max(fresh, key=lambda ft: focus(ft[0], regions))
 
+    def _open(self):
+        if not isinstance(self.url, str):
+            return cv2.VideoCapture(self.url)  # a webcam
+        if "://" not in self.url:
+            return cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)  # a video file
+        return cv2.VideoCapture(self.url, cv2.CAP_FFMPEG, [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, OPEN_TIMEOUT_MS,
+                                                          cv2.CAP_PROP_READ_TIMEOUT_MSEC, READ_TIMEOUT_MS])
+
     def _run(self) -> None:
         backoff = 1.0
         while not self._stop.is_set():
-            cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG) if isinstance(self.url, str) else cv2.VideoCapture(self.url)
+            cap = self._open()
             if not cap.isOpened():
                 log.warning("Cannot open camera, retrying in %.0fs", backoff)
                 self._stop.wait(backoff)

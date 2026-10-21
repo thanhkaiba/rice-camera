@@ -41,7 +41,7 @@ The camera only runs during the camera hours (default 08:00–11:00). Someone wh
 - **Review:** faces the camera could not identify, grouped by person. Click one: *It's …*, pick a person, *New employee*, or *Skip*. Start without any photos this way: let the camera run a day, name each face once.
 - **People:** add or import (`id,name`, optional `chat_user`, `boss`), upload 5–10 photos each, switch *never count as late*.
 - **Reports:** late & absence per person and per day (CSV), recognition accuracy from your corrections, change log.
-- **Camera:** live picture with labelled faces; draw the **detection area** over the walkway.
+- **Camera:** live picture with labelled faces; draw the **detection area** over the walkway. **Enrol at the door:** pick a person and let them walk towards the camera two or three times, with and without a mask; the clearest different views the camera sees in the next 90 seconds become their reference photos (up to 8). The camera's own pictures beat ID photos as references, because they show the face as this camera sees it. Only one person may be in view, and their arrival is not recorded meanwhile.
 - **Settings:** hours, notifications, camera, access, HR system, recognition. Light/dark follows the system; the moon/sun button switches.
 
 ## HR system

@@ -107,12 +107,14 @@ def test_moving_a_sighting_to_the_right_person_learns_their_face(env):
     assert service.move_sighting(manual.id, "C") is False
 
 
-def test_unclear_face_like_someone_checked_in_is_reviewed_when_setting_is_zero(env):
+def test_unclear_face_like_someone_checked_in_is_reviewed_unless_setting_is_on(env):
     service, store, clock, sent = env
     service.on_identified("B", at(9, 0), 0.7, None)
-    assert service.on_unknown(at(9, 5), "a.jpg", person_vector(20), "B", 0.35) is None  # taken to be Bob again
-    service.cfg.recognition.seen_again_score = 0
-    assert service.on_unknown(at(9, 6), "b.jpg", person_vector(21), "B", 0.35) is not None
+    # Off by default: with masks, a colleague resembling Bob must still reach the review page.
+    assert service.cfg.recognition.seen_again_score == 0
+    assert service.on_unknown(at(9, 5), "a.jpg", person_vector(20), "B", 0.35) is not None
+    service.cfg.recognition.seen_again_score = 0.3
+    assert service.on_unknown(at(9, 6), "b.jpg", person_vector(21), "B", 0.35) is None  # taken to be Bob again
 
 
 def test_no_late_time_message_when_everyone_is_in(env):

@@ -84,6 +84,9 @@ def test_import_employees_handles_excel_bom_and_never_removes_anyone(tmp_path):
     store.import_employees("\ufeffid,name\nA,Ánh\nB,Bình\n")  # Excel BOM, accented names
     store.import_employees("ID , Name\nA,Ánh Nguyễn\n")
     assert store.employees() == {"A": "Ánh Nguyễn", "B": "Bình"}
+    store.update_employee("B", "Bình", False)  # left the company; a later import must not bring them back
+    store.import_employees("id,name\nA,Ánh\nB,Bình\nC,Chi\n")
+    assert store.employees() == {"A": "Ánh", "C": "Chi"}
     with pytest.raises(ValueError, match="id,name"):
         store.import_employees("code;full name\nA;X\n")
 

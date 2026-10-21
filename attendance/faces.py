@@ -97,12 +97,13 @@ class FaceLibrary:
             return AddResult(False, "No face found in this photo.")
         if face.det_score < MIN_DET_SCORE or face.size < MIN_FACE_PX:
             return AddResult(False, f"The face is too small or unclear ({face.size:.0f}px). Use a closer photo.")
+        if self.near_duplicate(employee_id, face.embedding, self.model_id):
+            return AddResult(False, f"Almost the same as a photo {name} already has; a different angle, light "
+                                    f"or expression adds more.")
         warnings = []
         if not face.quality_ok:
             warnings.append("The face is blurred or turned away; a sharper, frontal photo works better.")
-        image_rel = self._save(employee_id, encode_jpeg(crop_face(image, face.bbox)))
-        self.store.add_embedding(self.model_id, employee_id, face.embedding, source, self._now(), image_rel)
-        self.gallery.add(employee_id, face.embedding)
+        self._keep(employee_id, face.embedding, encode_jpeg(crop_face(image, face.bbox)), source, self.model_id)
         for other, score in self.similar_to(employee_id, face.embedding):
             other_name = self.store.employees().get(other, other)
             text = (f"This photo of {name} looks like {other_name} ({score:.0%} match), so the camera may "
@@ -116,17 +117,34 @@ class FaceLibrary:
         """Keep a face confirmed by the admin as a reference (copying the snapshot out of crops/).
         A face almost identical to one already kept adds nothing and is skipped, so the references
         stay varied instead of filling up with the same pose. Returns whether it was kept."""
+        if self.near_duplicate(employee_id, vector, model):
+            return False
+        jpeg = (self.data_dir / snapshot).read_bytes() if snapshot and (self.data_dir / snapshot).exists() else None
+        self._keep(employee_id, vector, jpeg, "admin", model)
+        return True
+
+    def keep_face(self, employee_id: str, vector: np.ndarray, image, source: str = "enrol") -> bool:
+        """Keep a face seen by the camera (its crop, as an image) as a reference photo, unless an
+        almost identical one is already kept. Returns whether it was kept."""
+        if self.near_duplicate(employee_id, vector, self.model_id):
+            return False
+        self._keep(employee_id, vector, encode_jpeg(image), source, self.model_id)
+        return True
+
+    def near_duplicate(self, employee_id: str, vector: np.ndarray, model: str) -> bool:
+        """Whether this person already has a reference almost identical to `vector` (same photo,
+        or the same frame twice): it would add nothing but weight to that one view."""
         v = vector / max(float(np.linalg.norm(vector)), 1e-12)
         for ref in self.store.references(model, employee_id):
             if float(np.dot(v, ref.vector / max(float(np.linalg.norm(ref.vector)), 1e-12))) >= NEAR_DUPLICATE:
-                return False
-        image_rel = None
-        if snapshot and (self.data_dir / snapshot).exists():
-            image_rel = self._save(employee_id, (self.data_dir / snapshot).read_bytes())
-        self.store.add_embedding(model, employee_id, vector, "admin", self._now(), image_rel)
+                return True
+        return False
+
+    def _keep(self, employee_id: str, vector: np.ndarray, jpeg: bytes | None, source: str, model: str) -> None:
+        image_rel = self._save(employee_id, jpeg) if jpeg else None
+        self.store.add_embedding(model, employee_id, vector, source, self._now(), image_rel)
         if model == self.model_id:
             self.gallery.add(employee_id, vector)
-        return True
 
     def delete_photo(self, image_rel: str) -> None:
         self.store.delete_reference_image(image_rel)

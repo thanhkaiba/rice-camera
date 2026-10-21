@@ -118,8 +118,11 @@ class RecognitionConfig:
     learn_per_group: int = 5  # reference photos taken from one confirmed group of unknown faces
     group_days: int = 14  # unknown faces are grouped with similar ones seen this recently
     # An unclear face at least this similar to someone already checked in today is taken to be that
-    # person passing again at a bad angle, and is not sent for review.
-    seen_again_score: float = 0.3
+    # person passing again at a bad angle, and is not sent for review. Off (0) by default: faces
+    # behind masks all look alike, so with masks a colleague who has not arrived yet could be
+    # mistaken for someone already in and silently dropped, then counted as not seen. Turn it on
+    # (0.3 or so) only when nobody wears a mask and review gets too many repeat faces.
+    seen_again_score: float = 0.0
 
     def model_files(self) -> tuple[str, str]:
         default_det, default_rec = DEFAULT_MODELS.get(self.backend, ("", ""))

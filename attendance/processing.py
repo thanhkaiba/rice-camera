@@ -14,13 +14,10 @@ from .tracker import Decision, FaceTracker, Observation, clear_match
 log = logging.getLogger(__name__)
 
 
-def _scene(whole, bbox):
-    """(whole frame, face box in whole-frame pixels) for the evidence picture, or None."""
-    if whole is None:
-        return None
-    frame, (ox, oy) = whole
-    x1, y1, x2, y2 = bbox
-    return frame, (float(x1 + ox), float(y1 + oy), float(x2 + ox), float(y2 + oy))
+def _shift(bbox, offset):
+    """A box in the analysed part of the picture -> the same box in whole-frame pixels."""
+    (ox, oy), (x1, y1, x2, y2) = offset, bbox
+    return float(x1 + ox), float(y1 + oy), float(x2 + ox), float(y2 + oy)
 
 
 class FrameProcessor:
@@ -52,28 +49,32 @@ class FrameProcessor:
                 log.error(self.person_error)
         return self._detector
 
-    def process(self, frame: np.ndarray, ts: dt.datetime, record: bool = True
+    def process(self, frame: np.ndarray, ts: dt.datetime, record: bool = True, raw: np.ndarray | None = None
                 ) -> tuple[list[Decision], list[tuple[DetectedFace, list, int | None]], list[PersonTrack]]:
         """Returns (decisions, faces with their gallery matches and person id, visible people).
         With record=False (camera preview) nothing is added to the trackers' decisions.
+
+        `raw`: the frame as the camera sent it, when `frame` was enhanced for analysis; the
+        evidence picture of a sighting is taken from it, untouched.
 
         Only camera.area of the frame is analysed when it is set; the boxes returned are in
         whole-frame pixels."""
         area = self.cfg.camera.area_box(frame.shape)
         if area is not None:
             x0, y0, x1, y1 = area
-            decisions, matched, people = self._process(frame[y0:y1, x0:x1], ts, record, (frame, (x0, y0)))
+            decisions, matched, people = self._process(frame[y0:y1, x0:x1], ts, record, (frame, (x0, y0)), raw)
             shift = np.array([x0, y0, x0, y0], dtype=np.float32)
             matched = [(dataclasses.replace(f, bbox=tuple(float(v) for v in np.add(f.bbox, shift)),
                                             landmarks=None if f.landmarks is None else f.landmarks + shift[:2]), c, pid)
                        for f, c, pid in matched]
             people = [dataclasses.replace(p, box=p.box + shift) for p in people]
             return decisions, matched, people
-        return self._process(frame, ts, record, (frame, (0, 0)))
+        return self._process(frame, ts, record, (frame, (0, 0)), raw)
 
-    def _process(self, frame: np.ndarray, ts: dt.datetime, record: bool, whole=None):
-        """`whole`: (the whole camera frame, where `frame` sits in it), kept with each observation so
-        the evidence picture of a sighting shows the entire scene."""
+    def _process(self, frame: np.ndarray, ts: dt.datetime, record: bool, whole, raw=None):
+        """`whole`: (the whole camera frame, where `frame` sits in it). The photo of the person
+        below a face is cut from the whole frame, so it is not cut off by the detection area,
+        and the evidence picture shows the entire scene (from `raw` when given)."""
         regions, people, followed, full_frame = (), [], None, True
         detector = self._detector_or_none() if self.mode == "person" else None
         if detector is not None:
@@ -94,8 +95,11 @@ class FrameProcessor:
                 self.app.pose.add(f.raw_yaw, f.raw_pitch)
         decisions = []
         if record:
+            whole_frame, offset = whole
+            scene_frame = whole_frame if raw is None else raw
             observations = [Observation(f.bbox, f.embedding, c, f.quality_ok, f.quality, crop_face(frame, f.bbox), pid,
-                                        f.size_ok, crop_body(frame, f.bbox), _scene(whole, f.bbox))
+                                        f.size_ok, crop_body(whole_frame, _shift(f.bbox, offset)),
+                                        (scene_frame, _shift(f.bbox, offset)))
                             for f, c, pid in matched]
             decisions = self.face_tracker.update(observations, ts, followed)
         self.people = people

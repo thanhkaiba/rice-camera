@@ -28,7 +28,16 @@ Placement matters more than any setting. Then draw a **detection area** on the C
 - The detector looks at the picture shrunk to `det_size` (640 px by default). A 1080p camera is shrunk three times, so an 80 px face becomes 27 px for the detector; if faces are small or far away, set `det_size: 960` in `config.yaml` (slower, more accurate).
 - **Light** should come from in front of people. Never point the camera at a glass door or window (backlight).
 - **Wi-Fi cameras on a desk** drop frames. A wired PoE camera is more reliable.
-- **Masks and sunglasses:** upload photos with masks; anything still uncertain goes to review rather than being guessed.
+- **Masks and sunglasses:** enrol people at the door with and without a mask (below); anything still uncertain goes to review rather than being guessed.
+
+## Reference photos: enrol at the door
+
+An ID photo (3x4, studio light, years old) is a poor reference for a door camera that sees faces from above, in backlight, half-covered by a mask and blurred by walking. The best references are pictures from that camera. Two ways to get them, both on the admin page:
+
+- **Enrol at the door** (Camera page): pick the person, let them walk towards the camera two or three times, with and without a mask. For 90 seconds the clearest faces in view that add a new view (turned a little, mask on or off) are kept as reference photos, up to 8. Nothing is kept while more than one face is in view, or when the face clearly matches another employee, and the walk is not recorded as an arrival. Do this for every new employee on their first day; two minutes each.
+- **Review page**: faces the camera could not name are grouped; naming a group keeps a few of its faces as references. This keeps teaching the system during normal use.
+
+Upload ID photos as well if you have them (People page): they help on the first day, before the camera has seen the person. A photo almost identical to one already kept is refused, so the references stay varied.
 
 **Camera angle.** Head turn and tilt are estimated from 5 points on the face, and a camera on a desk pointing up (or above a door pointing down) makes every face look tilted. The system therefore **learns how this camera normally sees faces** from the first ~30 clear matches, and judges turn and tilt relative to that (Settings → Recognition → Advanced shows what it learned; the Camera page too). After moving the camera, click *Learn again* there.
 
@@ -61,7 +70,7 @@ It uses faces moved to the right person, faces named on the review page, faces r
 
 `python -m attendance enroll --faces faces` imports the same folders as reference photos, as an alternative to uploading on the web page.
 
-**Review & learning settings** (Settings → Recognition → Advanced): whether a sighting moved to the right person on the Today page is learned as a reference photo (on by default), how many photos are learned per confirmed review group (5), over how many days look-alike unknown faces are grouped (14), and the *already-seen score* (0.3) above which an unclear face resembling someone checked in today is taken to be them and not sent for review (0 = always review).
+**Review & learning settings** (Settings → Recognition → Advanced): whether a sighting moved to the right person on the Today page is learned as a reference photo (on by default), how many photos are learned per confirmed review group (5), over how many days look-alike unknown faces are grouped (14), and the *already-seen score* above which an unclear face resembling someone checked in today is taken to be them and not sent for review. It is **off (0) by default**: faces behind masks all look alike, so with masks a colleague who has not arrived yet could be taken for someone already in, dropped without review and counted as not seen. Set it to about 0.3 only when nobody wears a mask and the review page keeps showing people who are already in.
 
 ## Groups of people (person tracking)
 

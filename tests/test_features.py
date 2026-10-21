@@ -76,6 +76,7 @@ def test_messages_about_past_days_carry_the_date(env):
 
 def test_unclear_face_of_someone_already_checked_in_is_not_reported(env):
     service, store, clock, _ = env
+    service.cfg.recognition.seen_again_score = 0.3  # off by default (masks); see test_service
     service.on_identified("A", at(9, 5), 0.8, None)
     assert service.on_unknown(at(9, 30), None, None, "A", 0.35) is None
     assert service.on_unknown(at(9, 31), None, None, "B", 0.35) is not None
@@ -129,7 +130,7 @@ def test_settings_apply_live_persist_and_reject_invalid_values(core):
 def test_upload_learn_delete_and_look_alike_alert(core):
     app, clock, sent = core
     lib = app.library
-    result = lib.add_photo("A", face_image(1))
+    result = lib.add_photo("A", face_image(4))  # a second, different photo of Alice
     assert result.ok and result.warnings == []
     refs = app.store.references(lib.model_id, "A")
     assert refs[-1].image.startswith("faces/A/") and (app.data_dir / refs[-1].image).exists()
@@ -138,7 +139,7 @@ def test_upload_learn_delete_and_look_alike_alert(core):
     assert not lib.add_photo("A", face_image(0)).ok  # no face
 
     # Bob's folder accidentally holds a photo of Alice.
-    result = lib.add_photo("B", face_image(1))
+    result = lib.add_photo("B", face_image(4))
     assert result.ok and "looks like Alice" in result.warnings[0]
     assert sent[-1].startswith("⚠️ Look-alike reference photos: Bob and Alice")
     assert [(p.a, p.b) for p in lib.look_alikes()] == [("A", "B")]
@@ -151,7 +152,7 @@ def test_upload_learn_delete_and_look_alike_alert(core):
 
 def test_switching_model_reembeds_saved_photos(core):
     app, clock, _ = core
-    app.library.add_photo("C", face_image(3))
+    app.library.add_photo("C", face_image(5))
     app.cfg.recognition.recognizer_model = "models/other_model.onnx"
     assert app.library.model_id == "other_model"
     assert app.library.reembed_missing() == 1
@@ -161,7 +162,7 @@ def test_switching_model_reembeds_saved_photos(core):
 
 def test_delete_employee_removes_face_data(core):
     app, _, _ = core
-    app.library.add_photo("C", face_image(3))
+    app.library.add_photo("C", face_image(5))
     app.library.delete_employee("C")
     assert app.store.employee("C") is None
     assert not (app.data_dir / "faces" / "C").exists()

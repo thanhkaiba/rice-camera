@@ -114,7 +114,9 @@ def create_app(core: "App") -> Flask:
         skipped = store.notice_time(day, "late_message_skipped")
         no_id = [a.name for a in service.late_people(day)
                  if not getattr(store.employee(a.employee_id), "chat_user", "")]
-        photo = service.late_photo_url(day)
+        # The picture is made (a slow step) for today and for days whose message went out, not for
+        # every past day someone browses to.
+        photo = service.late_photo_url(day) if day == service.now().date() or sent else None
         return {"enabled": True, "preview": service.late_text(day, preview=True),
                 "photo": photo, "photo_public": bool(photo and photo.startswith("https://")),
                 "sent": sent.astimezone(service.tz) if sent else None,
@@ -514,7 +516,24 @@ def create_app(core: "App") -> Flask:
 
     @app.get("/live")
     def live_page():
-        return render_template("live.html", cfg=cfg, in_window=service.in_window(service.now()))
+        return render_template("live.html", cfg=cfg, in_window=service.in_window(service.now()),
+                               employees=store.employees(), enrol=core.enrolment.status())
+
+    @app.post("/live/enrol")
+    def enrol_start():
+        """Enrol at the door: the chosen person's next walks past the camera become reference photos."""
+        if request.form.get("action") == "stop":
+            core.enrolment.stop()
+            store.log(service.now(), user(), "enrol at the door", "stopped")
+            return redirect(url_for("live_page"))
+        if not cfg.camera.url:
+            return failed("Set the camera address in Settings first.", "live_page")
+        try:
+            name = core.enrolment.start(request.form.get("employee_id", ""))
+        except ValueError as exc:
+            return failed(str(exc), "live_page")
+        store.log(service.now(), user(), "enrol at the door", name)
+        return redirect(url_for("live_page"))
 
     @app.get("/live.jpg")
     def live_jpg():
@@ -529,7 +548,7 @@ def create_app(core: "App") -> Flask:
         return jsonify(camera=live.camera_state, problem=live.problem, fps=round(live.fps, 1), faces=live.faces,
                        people=live.people if cfg.tracking.mode == "person" else None, pose=core.pose.describe(),
                        last_identified=live.last_identified, previewing=live.previewing,
-                       in_window=service.in_window(service.now()),
+                       in_window=service.in_window(service.now()), enrol=core.enrolment.status(),
                        frame_age=round(time.time() - frame_time, 1) if frame_time else None)
 
     @app.get("/models.json")

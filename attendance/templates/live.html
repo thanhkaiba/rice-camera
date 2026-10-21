@@ -51,6 +51,22 @@
       <div><span class="k">Last recognised</span><span class="v" id="last" style="font-weight:500">–</span></div>
       <div><span class="k" title="Learned from how this camera sees faces">Camera angle</span><span class="v small" id="pose" style="font-weight:500">–</span></div>
     </div>
+    <div class="card" id="enrol-card">
+      <strong class="row"><span style="color:var(--brand)">{{ icon('user-plus') }}</span>Enrol at the door</strong>
+      <div class="hint" style="margin:4px 0 10px">The camera's own pictures are the best reference photos. Pick a person, let them walk towards the camera two or three times, with and without a mask; the clearest different views are kept (90 s, up to 8 faces). Only one person in view; their arrival is not recorded meanwhile.</div>
+      <form method="post" action="{{ url_for('enrol_start') }}" class="row" id="enrol-form" {% if enrol.active %}hidden{% endif %}>
+        <select name="employee_id" required style="flex:1 1 160px">
+          <option value="">Choose a person…</option>
+          {% for id, name in employees.items() %}<option value="{{ id }}">{{ name }}</option>{% endfor %}
+        </select>
+        <button class="primary">{{ icon('play') }}Start</button>
+      </form>
+      <form method="post" action="{{ url_for('enrol_start') }}" class="row between" id="enrol-live" {% if not enrol.active %}hidden{% endif %}>
+        <div><strong id="enrol-name">{{ enrol.name }}</strong> · <span class="tnum" id="enrol-left">{{ enrol.seconds_left }}</span> s left</div>
+        <button name="action" value="stop">{{ icon('stop') }}Stop</button>
+      </form>
+      <div class="hint" id="enrol-note" style="margin-top:8px">{{ enrol.note }}</div>
+    </div>
     <div class="card small">
       <div class="legend">
         <div><span class="sw ok"></span>recognised</div>
@@ -80,12 +96,18 @@
       const p = document.getElementById('problem'); p.hidden = !s.problem; p.textContent = s.problem || '';
       document.getElementById('start').hidden = s.in_window || s.previewing;
       document.getElementById('stop').hidden = !s.previewing;
+      const en = s.enrol || {};
+      document.getElementById('enrol-form').hidden = !!en.active;
+      document.getElementById('enrol-live').hidden = !en.active;
+      document.getElementById('enrol-name').textContent = en.name || '';
+      document.getElementById('enrol-left').textContent = en.seconds_left ?? 0;
+      document.getElementById('enrol-note').textContent = en.note || '';
       const fresh = s.frame_age !== null && s.frame_age < 10;
       if (fresh && !paused) frame.src = '{{ url_for("live_jpg") }}?t=' + Date.now();
       frame.style.display = fresh ? 'block' : 'none';
       document.getElementById('no-frame').hidden = fresh;
       document.getElementById('no-frame-why').textContent =
-        s.in_window || s.previewing ? 'Waiting for the camera…' : 'Off outside camera hours · use Preview to check the position.';
+        s.in_window || s.previewing || en.active ? 'Waiting for the camera…' : 'Off outside camera hours · use Preview to check the position.';
     } catch (e) {
       const cam = document.getElementById('camera'); cam.textContent = 'cannot reach the program'; cam.className = 'badge bad';
     }

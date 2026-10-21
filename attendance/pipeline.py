@@ -11,6 +11,7 @@ from pathlib import Path
 from . import settings
 from .backup import Backup
 from .config import Config
+from .enrolment import DoorEnrolment
 from .faces import FaceLibrary
 from .gallery import Gallery
 from .leave_api import LeaveSync
@@ -54,6 +55,7 @@ class App:
         self.pose = PoseCalibration(self.store, lambda: cfg.recognition.auto_pose)
         self.backup = Backup(self.store, cfg, self.service.now, self.service.alert)
         self.service.backup = self.backup
+        self.enrolment = DoorEnrolment(self.library, self.store, cfg.recognition)
 
     def recognizer(self):
         if self._recognizer is None:
@@ -125,10 +127,11 @@ def _leave_sync_loop(app: App) -> None:
         time.sleep(30)
 
 
-def face_label(app: App, face, candidates) -> tuple[str, tuple[int, int, int]]:
-    """Text and BGR colour drawn on the live view for one face."""
+def face_label(app: App, face, candidates, names: dict[str, str] | None = None) -> tuple[str, tuple[int, int, int]]:
+    """Text and BGR colour drawn on the live view for one face. `names`: employee id -> name,
+    looked up once per frame by the caller."""
     rc = app.cfg.recognition
-    names = app.store.employees()
+    names = app.store.employees() if names is None else names
     person = vote_for(candidates, face.quality_ok, face.size_ok, rc)
     if person is not None:
         return f"{names.get(person, person)} {candidates[0][1]:.2f}", (60, 180, 60)
@@ -280,7 +283,8 @@ def run(cfg: Config) -> None:
         was_in_window = in_window
         camera_ok = True
 
-        if (in_window or live.previewing) and recognizer is not None and cfg.camera.url:
+        enrolling = app.enrolment.active
+        if (in_window or live.previewing or enrolling) and recognizer is not None and cfg.camera.url:
             if camera is None or camera.source != cfg.camera.url or camera.silent_for() > CAMERA_RESTART_S:
                 if camera is not None:
                     if camera.source == cfg.camera.url:
@@ -300,15 +304,26 @@ def run(cfg: Config) -> None:
                 problem = health.update(frame, frame_time)
                 camera_ok = problem is None
                 live.camera_state = f"problem: {problem}" if problem else "ok"
+                raw = frame
                 if cfg.camera.enhance_low_light:
                     frame = enhance_low_light(frame)
                 ts = dt.datetime.fromtimestamp(frame_time, service.tz)
-                decisions, matched, people = processor.process(frame, ts, record=in_window)
-                handle(decisions)
+                try:
+                    # An enrolment walk is a rehearsal: faces are kept as references, not as arrivals.
+                    decisions, matched, people = processor.process(frame, ts, record=in_window and not enrolling,
+                                                                   raw=raw if raw is not frame else None)
+                    if enrolling:
+                        app.enrolment.observe([(f, c) for f, c, _ in matched], frame)
+                    handle(decisions)
+                except Exception:
+                    # One bad frame must not stop the camera (a restart would lose every track).
+                    log.exception("Frame at %s could not be processed; skipping it", ts.strftime("%H:%M:%S"))
+                    decisions, matched, people = [], [], []
                 if processor.person_error and live.problem is None:
                     live.problem = processor.person_error
                 face_regions = [_grow(f.bbox, frame.shape) for f, _, _ in matched]
-                labelled = [(f, face_label(app, f, c)) for f, c, _ in matched]
+                names = app.store.employees()
+                labelled = [(f, face_label(app, f, c, names)) for f, c, _ in matched]
                 live.faces = [text for _, (text, _) in labelled]
                 live.people = len(people)
                 if live.wants_frame():

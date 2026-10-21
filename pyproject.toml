@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "face-attendance"
-version = "1.1.3"
+version = "1.1.6"
 description = "Camera attendance: recognises employees walking in, reports who is late, posts to Google Chat."
 requires-python = ">=3.10"
 dependencies = [
