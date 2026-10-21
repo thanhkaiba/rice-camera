@@ -12,7 +12,7 @@ late_evidence_days: 365        # photos of days on which a person was late are k
 
 schedule:
   window_start: "08:00"   # camera starts. People arriving earlier are only counted if they pass the camera again after this time.
-  late_after: "10:00"     # first seen before this = on time; not seen by then = late
+  late_after: "10:00"     # arrivals through 10:00:59 are on time; late starts at 10:01
   window_end: "11:00"     # camera stops, daily summary is sent
   work_days: [0, 1, 2, 3, 4]  # 0 = Monday ... 6 = Sunday
 
@@ -53,7 +53,7 @@ recognition:
   # Review and learning (also under Settings -> Recognition -> Advanced)
   learn_corrections: true # a face moved to the right person on the Today page is learned as a reference photo
   learn_per_group: 5      # reference photos taken from one confirmed group of faces on the review page
-  group_days: 14          # unknown faces are grouped with similar ones seen this recently
+  group_days: 14          # how far back to compare photos of faces ignored today; pending tracks stay separate
   seen_again_score: 0.3   # an unclear face this similar to someone already checked in today is not sent for review
   suggest_score: 0.35     # Review offers people from this similarity up as "Maybe" choices (never recorded by itself)
 

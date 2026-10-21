@@ -63,7 +63,7 @@ def register(app: Flask, core: "App") -> None:
             row["time"] = f"{ts:%H:%M}"
             if exempt or not workday or leave:
                 row["status"], row["kind"] = "Arrived", "ok"
-            elif ts >= w.late_after:
+            elif ts >= w.late_from:
                 row["status"], row["kind"] = f"Late {int((ts - w.late_after).total_seconds() // 60)} min", "late"
             else:
                 row["status"], row["kind"] = "On time", "ok"
@@ -72,7 +72,7 @@ def register(app: Flask, core: "App") -> None:
         elif not workday:
             row["status"] = row["status"] or note or "Not a work day"
         elif arrival is None and not exempt:
-            row["status"], row["kind"] = ("Not seen", "bad") if now >= w.late_after else ("", "info")
+            row["status"], row["kind"] = ("Not seen", "bad") if now >= w.late_from else ("", "info")
         return row
 
     @app.get("/p/<employee_id>/<sig>")

@@ -187,7 +187,7 @@ def build(service, day: dt.date, employee_id: str) -> Evidence:
     arrival = store.checkins(day).get(employee_id)
     corrections = list(reversed(store.audit_about(day, name, employee_id)))
     corrections = [(service._local(when), who, action, details) for when, who, action, details in corrections]
-    return Evidence(day, employee_id, name, status, minutes, rep.window.start, rep.window.late_after, rep.window.end,
+    return Evidence(day, employee_id, name, status, minutes, rep.window.start, rep.window.late_from, rep.window.end,
                     arrival, f"{service._local(arrival.first_seen):%H:%M:%S}" if arrival else None, items,
                     corrections, service.now(), cfg.timezone, names=names,
                     email=store.employee_emails().get(employee_id, ""))

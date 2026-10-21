@@ -1,9 +1,9 @@
 """Attendance rules, admin corrections and scheduled Google Chat notices.
 
 Rules for a work day (times from config.schedule):
-- First seen before late_after (e.g. 10:00): on time. Being seen again later changes nothing.
-- First seen at or after late_after: late, and announced as soon as they are seen.
-- At late_after: one alert listing everyone not seen yet.
+- First seen through the late_after minute (e.g. 10:00:59): on time. Later sightings change nothing.
+- First seen from the next minute (e.g. 10:01): late, and announced as soon as they are seen.
+- At that next minute: one alert listing everyone not seen yet.
 - At window_end (e.g. 11:00): daily summary.
 - People on leave are never counted as late or missing; holidays send nothing.
 - Exempt people (e.g. the boss) have their arrival recorded but are never counted as late or missing.
@@ -45,6 +45,10 @@ class Window:
     start: dt.datetime
     late_after: dt.datetime
     end: dt.datetime
+
+    @property
+    def late_from(self) -> dt.datetime:
+        return self.late_after + dt.timedelta(minutes=1)
 
 
 @dataclass
@@ -281,7 +285,8 @@ class AttendanceService:
             log.info("Unclear face at %s resembles %s (%.2f, next not checked in: %s), who is already checked in; "
                      "not reported", ts.strftime("%H:%M:%S"), guess_id, guess_score, again)
             return None
-        group_id, ignored = self._find_group(vector, ts)
+        group_id = self._ignored_group(vector, ts)
+        ignored = group_id is not None
         if ignored:
             log.info("Face at %s belongs to a group ignored today; not reported", ts.strftime("%H:%M:%S"))
         else:
@@ -313,24 +318,21 @@ class AttendanceService:
             return None  # could just as well be someone not in yet: let the admin decide
         return f"{rivals[0][0]} {rivals[0][1]:.2f}" if rivals else "none"
 
-    def _find_group(self, vector: np.ndarray | None, ts: dt.datetime) -> tuple[int | None, bool]:
-        """(group, ignored): the group of the most similar unknown face if it is clearly the same person,
-        and whether that group was ignored today. This way someone not enrolled yet shows up once to
-        review however often they pass, and a visitor ignored today stays hidden for the rest of the day."""
+    def _ignored_group(self, vector: np.ndarray | None, ts: dt.datetime) -> int | None:
+        """Match only faces skipped today. Pending tracks stay separate: look-alikes may be different people."""
         if vector is None:
-            return None, False
+            return None
         v = self.gallery.prepare(vector)  # compared as the gallery compares faces
-        candidates = [(u, False) for u in self.store.unknowns()]
-        candidates += [(u, True) for g in self.store.ignored_groups(ts.date()) for u in g]
-        best, best_ignored, best_score = None, False, self.cfg.recognition.accept_score
+        candidates = [u for g in self.store.ignored_groups(ts.date()) for u in g]
+        best, best_score = None, self.cfg.recognition.accept_score
         within = dt.timedelta(days=self.cfg.recognition.group_days)
-        for u, ignored in candidates:
+        for u in candidates:
             if u.source != "camera" or u.vector is None or u.model != self.model_id or ts - self._local(u.ts) > within:
                 continue
             score = float(np.dot(v, self.gallery.prepare(u.vector)))
             if score >= best_score:
-                best, best_ignored, best_score = u.group_id, ignored, score
-        return best, best_ignored
+                best, best_score = u.group_id, score
+        return best
 
     # admin actions -------------------------------------------------------------
 
@@ -388,20 +390,25 @@ class AttendanceService:
                         key=lambda item: item[1], reverse=True)
         return ranked, matches
 
-    def _pending_group(self, unknown_id: int) -> list:
+    def _pending_group(self, unknown_id: int, photo_ids: list[int] | None = None) -> list:
         u = self.store.unknown(unknown_id)
         members = self.store.group(u.group_id) if u is not None and u.status == "pending" else []
         if not members:
             raise ValueError("this face has already been handled")
+        if photo_ids is not None:
+            selected = set(photo_ids)
+            if not selected or not selected <= {u.id for u in members}:
+                raise ValueError("Choose at least one pending photo from this card. Reload if it has changed.")
+            members = [u for u in members if u.id in selected]
         return members
 
-    def resolve_unknown(self, unknown_id: int, employee_id: str, user: str = "admin") -> None:
-        """Admin says this face (and every face grouped with it) is `employee_id`: learn the face and
-        record the arrivals."""
+    def resolve_unknown(self, unknown_id: int, employee_id: str, user: str = "admin", *,
+                        photo_ids: list[int] | None = None) -> None:
+        """Confirm selected photos (or the whole group when omitted), learn them and record arrivals."""
         if employee_id not in self.store.employees():
             raise ValueError(f"unknown employee {employee_id}")
-        members = self._pending_group(unknown_id)
-        self.store.resolve_group(members[0].group_id, "assigned", employee_id)
+        members = self._pending_group(unknown_id, photo_ids)
+        self.store.resolve_group(members[0].group_id, "assigned", employee_id, photo_ids=[u.id for u in members])
         with_vector = [u for u in members if u.vector is not None and u.model]
         # Learn a few faces spread over the group (different visits, angles and light).
         per_group = self.cfg.recognition.learn_per_group
@@ -433,12 +440,15 @@ class AttendanceService:
             self.gallery.add(employee_id, vector)
         return True
 
-    def add_employee_from_unknown(self, unknown_id: int, email: str, name: str, user: str = "admin") -> None:
+    def add_employee_from_unknown(self, unknown_id: int, email: str, name: str, user: str = "admin", *,
+                                  photo_ids: list[int] | None = None) -> None:
         """Create a new employee from a face the camera collected, and confirm it as them."""
-        self._pending_group(unknown_id)
-        employee_id = self.store.add_employee(email, name)
-        self.store.log(self.now(), user, "add employee", f"{email.strip()} {name.strip()} (from camera)")
-        self.resolve_unknown(unknown_id, employee_id, user)
+        # Keep another request from handling these photos between validation and employee creation.
+        with self.store._lock:
+            self._pending_group(unknown_id, photo_ids)
+            employee_id = self.store.add_employee(email, name)
+            self.store.log(self.now(), user, "add employee", f"{email.strip()} {name.strip()} (from camera)")
+            self.resolve_unknown(unknown_id, employee_id, user, photo_ids=photo_ids)
 
     def ignore_unknown(self, unknown_id: int, user: str = "admin") -> None:
         """Hide this face for today only: later sightings today are ignored too, but if the person
@@ -448,19 +458,19 @@ class AttendanceService:
         self.store.log(self.now(), user, "ignore face (today)",
                        f"{len(members)} photo(s) from {self._local(members[0].ts):%Y-%m-%d %H:%M}")
 
-    def delete_unknown(self, unknown_id: int, user: str = "admin") -> None:
+    def delete_unknown(self, unknown_id: int, user: str = "admin", *, photo_ids: list[int] | None = None) -> None:
         """Discard unusable review photos without labelling a person or deleting source files."""
-        self.delete_unknowns([unknown_id], user)
+        self.delete_unknowns([unknown_id], user, photo_ids=photo_ids)
 
-    def delete_unknowns(self, unknown_ids: list[int], user: str = "admin") -> None:
+    def delete_unknowns(self, unknown_ids: list[int], user: str = "admin", *, photo_ids: list[int] | None = None) -> None:
         if not unknown_ids:
             raise ValueError("Choose at least one review card to delete")
         groups = {}
         for unknown_id in unknown_ids:
-            members = self._pending_group(unknown_id)
+            members = self._pending_group(unknown_id, photo_ids)
             groups[members[0].group_id] = members
         for group_id, members in groups.items():
-            self.store.resolve_group(group_id, "discarded", None)
+            self.store.resolve_group(group_id, "discarded", None, photo_ids=[u.id for u in members])
             self.store.log(self.now(), user, "delete review",
                            f"group {group_id}: {len(members)} photo(s) removed from review")
 
@@ -545,8 +555,8 @@ class AttendanceService:
         ts = self._local(after.first_seen)
         if ts.date() != self.now().date():
             return  # earlier days are corrected quietly
-        late = ts >= self.window(ts.date()).late_after
-        was_late = before is not None and self._local(before.first_seen) >= self.window(ts.date()).late_after
+        late = ts >= self.window(ts.date()).late_from
+        was_late = before is not None and self._local(before.first_seen) >= self.window(ts.date()).late_from
         if late != was_late or before is None:
             self._announce(employee_id, ts, suffix=suffix)
 
@@ -557,7 +567,7 @@ class AttendanceService:
             return
         w = self.window(day)
         when = f"{ts:%H:%M}" if day == self.now().date() else f"{ts:%H:%M} on {day:%Y-%m-%d}"
-        if ts >= w.late_after:
+        if ts >= w.late_from:
             if self.cfg.google_chat.notify_late_arrivals:
                 late = int((ts - w.late_after).total_seconds() // 60)
                 self._send(f"🟠 {self.who(employee_id)} arrived at {when}, {late} min late{suffix}.", day)
@@ -584,7 +594,7 @@ class AttendanceService:
                 continue
             if c is not None:
                 a = Arrival(emp_id, name, self._local(c.first_seen), c.source, c.image, c.score)
-                (rep.late if a.ts >= w.late_after else rep.on_time).append(a)
+                (rep.late if a.ts >= w.late_from else rep.on_time).append(a)
             elif emp_id in leave:
                 rep.on_leave.append((emp_id, name, LEAVE_KINDS.get(leave[emp_id], leave[emp_id])))
             else:
@@ -628,9 +638,9 @@ class AttendanceService:
     def deadline_text(self, rep: DayReport) -> str:
         w = rep.window
         if not rep.not_seen:
-            lines = [f"⏰ {w.late_after:%H:%M}: all {rep.total} people arrived on time 🎉"]
+            lines = [f"⏰ {w.late_from:%H:%M}: all {rep.total} people arrived on time 🎉"]
         else:
-            lines = [f"⏰ *{w.late_after:%H:%M}: {len(rep.not_seen)}/{rep.total} people not seen yet* (counted as late):"]
+            lines = [f"⏰ *{w.late_from:%H:%M}: {len(rep.not_seen)}/{rep.total} people not seen yet* (counted as late):"]
             lines += [f"• {self.who(emp_id, name)}" for emp_id, name in rep.not_seen]
         if rep.pending_unknowns:
             lines.append(f"❓ {rep.pending_unknowns} unidentified faces, possibly people on this list · "
@@ -669,7 +679,7 @@ class AttendanceService:
         the late time has passed; days that are not work days are skipped."""
         now = self.now()
         end = min(end, now.date())
-        if end == now.date() and now < self.window(end).late_after:
+        if end == now.date() and now < self.window(end).late_from:
             end -= dt.timedelta(days=1)
         people: dict[str, PersonSummary] = {}
         days = []
@@ -715,12 +725,12 @@ class AttendanceService:
             w = self.window(day)
             self._track_health(now, w, camera_ok, camera_state)
 
-            if (now >= w.late_after and not self.store.notice_sent(day, "deadline")
+            if (now >= w.late_from and not self.store.notice_sent(day, "deadline")
                     and not self.store.notice_sent(day, "deadline_skipped")):
                 rep = self.report(day)
                 if rep.all_in:
                     # Everyone was in before the late time: a list of nobody is just noise.
-                    log.info("Everyone arrived on time; no %s message", w.late_after.strftime("%H:%M"))
+                    log.info("Everyone arrived on time; no %s message", w.late_from.strftime("%H:%M"))
                     self.store.mark_notice(day, "deadline_skipped", now)
                 else:
                     if now < w.end:  # after window_end the summary covers it

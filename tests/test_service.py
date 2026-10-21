@@ -31,7 +31,7 @@ def test_not_seen_by_deadline_is_listed_then_late_arrival_announced(env):
     service, _, clock, sent = env
     run_until(service, clock, at(9, 30))
     service.on_identified("A", at(9, 25), 0.7, None)
-    run_until(service, clock, at(10, 0, 30))
+    run_until(service, clock, at(10, 1))
 
     deadline = [m for m in sent if m.startswith("⏰")]
     assert len(deadline) == 1

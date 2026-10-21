@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 
 from . import settings
@@ -58,7 +59,7 @@ class App:
         self.library = FaceLibrary(cfg, self.store, self.gallery, self.recognizer, self.recognizer_lock,
                                    alert=self.service.alert, now=self.service.now)
         self.service.library = self.library
-        self.leave_sync = LeaveSync(cfg, self.store, self.service.now, lambda d: self.service.window(d).late_after)
+        self.leave_sync = LeaveSync(cfg, self.store, self.service.now, lambda d: self.service.window(d).late_from)
         self.live = LiveStatus()
         self.maintenance: str | None = None  # e.g. a seed import: the camera pauses while it is set
         self.pose = PoseCalibration(self.store, lambda: cfg.recognition.auto_pose)
@@ -82,7 +83,7 @@ def save_crop(app: App, decision: Decision, ts: dt.datetime) -> str | None:
     from ..vision.faces import encode_jpeg
 
     who = decision.employee_id if decision.kind == "identified" else "unknown"
-    rel = Path("crops") / ts.strftime("%Y-%m-%d") / f"{ts:%H%M%S_%f}_{who}.jpg"
+    rel = Path("crops") / ts.strftime("%Y-%m-%d") / f"{ts:%H%M%S_%f}_{who}_{uuid.uuid4().hex}.jpg"
     path = app.data_dir / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(encode_jpeg(decision.crop))

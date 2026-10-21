@@ -38,7 +38,7 @@ def check_late_message_item(item: str) -> None:
 @dataclass
 class ScheduleConfig:
     window_start: str = "08:00"  # camera starts processing
-    late_after: str = "10:00"  # first seen at or after this time counts as late
+    late_after: str = "10:00"  # this whole minute is on time; late starts at 10:01
     window_end: str = "11:00"  # camera stops processing, daily summary is sent
     work_days: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])  # Monday = 0
 
@@ -123,7 +123,7 @@ class RecognitionConfig:
     # Review and learning. Faces named on the review page are always learned; these tune the rest.
     learn_corrections: bool = True  # also learn a face the admin moves to the right person on the Today page
     learn_per_group: int = 5  # reference photos taken from one confirmed group of unknown faces
-    group_days: int = 14  # unknown faces are grouped with similar ones seen this recently
+    group_days: int = 14  # how far back to compare photos of faces ignored today
     # An unclear face at least this similar to someone already checked in today is taken to be that
     # person passing again at a bad angle, and is not sent for review.
     seen_again_score: float = 0.3

@@ -213,9 +213,17 @@ class AttendanceStoreMixin:
             groups.setdefault(u.group_id, []).append(u)
         return sorted(groups.values(), key=lambda g: g[-1].ts, reverse=True)
 
-    def resolve_group(self, group_id: int, status: str, employee_id: str | None) -> None:
-        self._exec("UPDATE unknowns SET status = ?, employee_id = ? WHERE COALESCE(group_id, id) = ? AND status = 'pending'",
-                   (status, employee_id, group_id))
+    def resolve_group(self, group_id: int, status: str, employee_id: str | None, *,
+                      photo_ids: list[int] | None = None) -> None:
+        sql = "UPDATE unknowns SET status = ?, employee_id = ? WHERE COALESCE(group_id, id) = ? AND status = 'pending'"
+        params = [status, employee_id, group_id]
+        if photo_ids is not None:
+            sql += " AND id IN (" + ",".join("?" for _ in photo_ids) + ")"
+            params.extend(photo_ids)
+        with self._lock, self._db:
+            changed = self._db.execute(sql, params).rowcount
+            if photo_ids is not None and changed != len(set(photo_ids)):
+                raise ValueError("Some selected photos have already been handled. Reload and try again.")
 
     def pending_group_count(self, day: dt.date | None = None) -> int:
         sql, params = "SELECT COUNT(DISTINCT COALESCE(group_id, id)) AS n FROM unknowns WHERE status = 'pending'", []

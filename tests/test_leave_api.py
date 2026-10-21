@@ -95,7 +95,7 @@ def test_refresh_schedule_and_extra_refresh_before_the_late_time(core):
     clock.t = at(9, 50)
     app.leave_sync.sync()
     clock.t = at(9, 56)
-    assert app.leave_sync.due()  # just before the 10:00 late list
+    assert app.leave_sync.due()  # just before the 10:01 late list
     app.leave_sync.sync()
     clock.t = at(9, 58)
     assert not app.leave_sync.due()

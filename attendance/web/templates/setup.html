@@ -56,7 +56,7 @@
       <div class="timeline">
         {{ time24('window_start', 'Camera starts', cfg.schedule.window_start) }}
         <span class="arrow">→</span>
-        {{ time24('late_after', 'Late from', cfg.schedule.late_after, 'At or after = late') }}
+        {{ time24('late_after', 'On time through', cfg.schedule.late_after, 'This whole minute is on time; late starts in the next minute') }}
         <span class="arrow">→</span>
         {{ time24('window_end', 'Camera stops', cfg.schedule.window_end, 'Summary is sent') }}
       </div>

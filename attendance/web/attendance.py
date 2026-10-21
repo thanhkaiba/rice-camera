@@ -148,12 +148,14 @@ def register(app: Flask, core: "App") -> None:
             best, maybe = service.review_suggestions(members)
             email = store.get(f"seed_review_email:{members[-1].id}") if members[-1].source == "seed" else None
             person = store.employee_by_email(email) if email else None
-            photos = [u.image for u in reversed(members) if u.image][:6]
+            photos = [u.image for u in reversed(members) if u.image]
             groups.append({"id": members[-1].id, "members": members, "latest": members[-1], "photos": photos,
                            "source": members[-1].source,
                            "expected_id": person.id if person and person.active else None,
                            "expected_name": _review_name(person.name, person.email) if person else _review_name("", email or ""),
-                           "photo_urls": [url_for("media", path=p) for p in photos],
+                           "photo_urls": [{"id": u.id, "url": url_for("media", path=u.image) if u.image else None,
+                                           "when": f"{u.ts.astimezone(service.tz):%a %d %b %H:%M:%S}"}
+                                          for u in reversed(members)],
                            "body": next((body_photo(u.image) for u in reversed(members) if u.image
                                          and (core.data_dir / body_photo(u.image)).exists()), None),
                            "guess": best[0] if best else None, "guess_score": best[1] if best else None,
@@ -195,11 +197,21 @@ def register(app: Flask, core: "App") -> None:
             return failed("This sample has already been handled.", "unknowns")
         return done("Sample returned to manual review. Import will preserve your choice.", "unknowns")
 
+    def selected_photos(unknown_id: int) -> list[int]:
+        if "photo_selection" in request.form or "photo_id" in request.form:
+            try:
+                return [int(value) for value in request.form.getlist("photo_id")]
+            except ValueError:
+                raise ValueError("Invalid photo selection.") from None
+        face = store.unknown(unknown_id)
+        return [] if face and len(store.group(face.group_id)) > 1 else [unknown_id]
+
     @app.post("/unknowns/<int:unknown_id>/assign")
     def assign(unknown_id: int):
         face = store.unknown(unknown_id)
         try:
-            service.resolve_unknown(unknown_id, request.form.get("employee_id", ""), current_user(cfg))
+            service.resolve_unknown(unknown_id, request.form.get("employee_id", ""), current_user(cfg),
+                                    photo_ids=selected_photos(unknown_id))
         except ValueError as exc:
             return failed(str(exc), "unknowns")
         if face and face.source == "seed":
@@ -213,7 +225,8 @@ def register(app: Flask, core: "App") -> None:
         face = store.unknown(unknown_id)
         email, name = request.form.get("email", ""), request.form.get("name", "").strip()
         try:
-            service.add_employee_from_unknown(unknown_id, email, name, current_user(cfg))
+            service.add_employee_from_unknown(unknown_id, email, name, current_user(cfg),
+                                              photo_ids=selected_photos(unknown_id))
         except ValueError as exc:
             return failed(str(exc), "unknowns")
         label = _review_name(name, email.strip().lower())
@@ -247,7 +260,8 @@ def register(app: Flask, core: "App") -> None:
     @app.post("/unknowns/<int:unknown_id>/delete")
     def delete_unknown(unknown_id: int):
         try:
-            service.delete_unknown(unknown_id, current_user(cfg))
+            photo_ids = selected_photos(unknown_id) if "photo_selection" in request.form or "photo_id" in request.form else None
+            service.delete_unknown(unknown_id, current_user(cfg), photo_ids=photo_ids)
         except ValueError as exc:
             return failed(str(exc), "unknowns")
         return done("Removed from review. No attendance recorded or faces learned.", "unknowns")

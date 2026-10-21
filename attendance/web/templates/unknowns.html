@@ -58,16 +58,24 @@
       {% if g.expected_name %}<div class="small">Source label: <strong>{{ g.expected_name }}</strong> · check the photo</div>{% endif %}
       {% if guess and g.expected_id and g.expected_id != g.guess %}<div class="small">Model and source disagree · manual review required</div>{% endif %}
       {% if guess %}
+      {% if g.members|length == 1 %}
       <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
         <input type="hidden" name="employee_id" value="{{ g.guess }}">
         <button class="primary btn-sm btn-block" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ guess_label }}</button>
       </form>
+      {% else %}
+      <button type="button" class="primary btn-sm btn-block" onclick="openReview(this.closest('.face-card'), '{{ g.guess }}')">{{ icon('check') }}Confirm: {{ guess_label }} · select photos</button>
+      {% endif %}
       {% endif %}
       {% if not guess %}{% for pid, score in g.maybe %}
+      {% if g.members|length == 1 %}
       <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
         <input type="hidden" name="employee_id" value="{{ pid }}">
         <button class="btn-sm btn-block" title="Name this person and learn the face">{{ icon('check') }}It's {{ employee_labels.get(pid, '') }}</button>
       </form>
+      {% else %}
+      <button type="button" class="btn-sm btn-block" onclick="openReview(this.closest('.face-card'), '{{ pid }}')">{{ icon('check') }}It's {{ employee_labels.get(pid, '') }} · select photos</button>
+      {% endif %}
       {% endfor %}{% endif %}
       <button type="button" class="{{ 'primary' if not guess and not g.maybe }} btn-sm btn-block" onclick="openReview(this.closest('.face-card'))">{{ icon('help') }}{{ 'Someone else?' if guess else 'Who is this?' }}</button>
       <form method="post" action="{{ url_for('ignore', unknown_id=g.id) }}" class="focus-only">
@@ -136,15 +144,19 @@
       <a id="review-body-link" target="_blank" hidden><img id="review-body" class="body-photo" alt=""></a>
       <div class="strip" id="review-photos" style="margin-top:6px"></div>
       <div class="small muted" id="review-when" style="margin-top:8px"></div>
+      <p class="hint">Select the photos you can confirm, or select wrong photos to delete. Unselected photos stay in Review.</p>
+      <div class="small" id="photo-selection-count" aria-live="polite">0 photos selected</div>
     </div>
-    <form method="post" id="form-source" hidden>
+    <form method="post" id="form-source" class="photo-selection-form" hidden>
+      <input type="hidden" name="photo_selection" value="1">
       <strong id="source-name"></strong>
       <input type="hidden" name="employee_id" id="source-id">
-      <button type="submit" id="source-button">Confirm source label</button>
+      <button type="submit" id="source-button" disabled>Confirm source for selected photos</button>
       <span class="hint">Source label only; verify the photo before confirming. No attendance will be recorded.</span>
     </form>
     {% if employees %}
-    <form method="post" id="form-pick">
+    <form method="post" id="form-pick" class="photo-selection-form">
+      <input type="hidden" name="photo_selection" value="1">
       <strong id="pick-label">Someone else?</strong>
       <div class="form-row" style="flex-wrap:nowrap">
         <input id="pick-search" list="employee-options" required autocomplete="off" placeholder="Search by name or email…" aria-label="Choose an employee by name or email" style="flex:1; min-width:0">
@@ -152,26 +164,28 @@
         <datalist id="employee-options">
           {% for id in employees %}<option value="{{ employee_labels.get(id, '') }}" data-id="{{ id }}"></option>{% endfor %}
         </datalist>
-        <button title="Records their arrival on every day seen and learns the face">{{ icon('check') }}Confirm</button>
+        <button title="Records arrivals and learns faces only from the selected photos" disabled>{{ icon('check') }}Confirm selected</button>
       </div>
     </form>
     {% endif %}
     <details class="inline" id="new-employee"{% if not employees %} open{% endif %}>
       <summary>{{ icon('user-plus') }} New employee</summary>
-      <form method="post" id="form-new" style="margin-top:8px">
+      <form method="post" id="form-new" class="photo-selection-form" style="margin-top:8px">
+        <input type="hidden" name="photo_selection" value="1">
         <div class="form-row">
           <input type="email" name="email" required placeholder="Email" aria-label="Employee email" style="flex:1 1 200px">
           <input name="name" required placeholder="Full name" style="flex:1 1 160px">
         </div>
-        <div><button class="{{ 'primary' if not employees }}">{{ icon('user-plus') }}Add &amp; confirm</button></div>
+        <div><button class="{{ 'primary' if not employees }}" disabled>{{ icon('user-plus') }}Add &amp; confirm selected</button></div>
       </form>
     </details>
     <div class="divider" style="margin:0"></div>
     <form method="post" id="form-skip">
       <button class="btn-block" title="Hidden for the rest of today; shown again if seen another day">{{ icon('user-x') }}Skip · not an employee</button>
     </form>
-    <form method="post" id="form-delete" data-confirm="Remove these photos from review?">
-      <button class="danger btn-block" title="Remove blurry or unusable photos from review">{{ icon('trash') }}Delete from review</button>
+    <form method="post" id="form-delete" class="photo-selection-form" data-confirm="Remove the selected photos from review?">
+      <input type="hidden" name="photo_selection" value="1">
+      <button class="danger btn-block" title="Remove only the selected photos from review" disabled>{{ icon('trash') }}Delete selected</button>
     </form>
   </div>
 </dialog>
@@ -199,16 +213,46 @@
     skip: "{{ url_for('ignore', unknown_id=0) }}",
     delete: "{{ url_for('delete_unknown', unknown_id=0) }}",
   };
-  function openReview(card) {
+  const photoForms = [...review.querySelectorAll('.photo-selection-form')];
+  function updatePhotoSelection() {
+    const selected = [...review.querySelectorAll('.review-photo-select:checked')];
+    document.getElementById('photo-selection-count').textContent = selected.length + ' photo(s) selected';
+    photoForms.forEach(form => {
+      form.querySelectorAll('input[name="photo_id"]').forEach(input => input.remove());
+      selected.forEach(photo => {
+        const input = document.createElement('input');
+        input.type = 'hidden'; input.name = 'photo_id'; input.value = photo.value;
+        form.append(input);
+      });
+      form.querySelector('button').disabled = !selected.length;
+    });
+    document.getElementById('form-delete').dataset.confirm = 'Remove ' + selected.length + ' selected photo(s) from review?';
+  }
+  document.getElementById('review-photos').addEventListener('change', updatePhotoSelection);
+  function openReview(card, person = '') {
     const d = card.dataset, url = u => u.replace('/0/', '/' + d.id + '/');
     const bodyLink = document.getElementById('review-body-link');
     bodyLink.hidden = !d.body;
     if (d.body) { bodyLink.href = d.body; document.getElementById('review-body').src = d.body; }
     const photos = document.getElementById('review-photos');
-    photos.replaceChildren(...JSON.parse(d.photos).map(src => {
-      const a = document.createElement('a'); a.href = src; a.target = '_blank';
-      const img = document.createElement('img'); img.src = src; img.alt = '';
-      a.append(img); return a;
+    photos.replaceChildren(...JSON.parse(d.photos).map(photo => {
+      const item = document.createElement('div'); item.className = 'review-photo';
+      const label = document.createElement('label');
+      const input = document.createElement('input');
+      input.type = 'checkbox'; input.className = 'review-photo-select'; input.value = photo.id;
+      input.setAttribute('aria-label', 'Select photo from ' + photo.when);
+      label.append(input, ' ', photo.when);
+      item.append(label);
+      if (photo.url) {
+        const a = document.createElement('a'); a.href = photo.url; a.target = '_blank';
+        a.setAttribute('aria-label', 'Open photo from ' + photo.when + ' full size');
+        const img = document.createElement('img'); img.src = photo.url; img.alt = 'Face from ' + photo.when; img.loading = 'lazy';
+        a.append(img); item.append(a);
+      } else {
+        const missing = document.createElement('span'); missing.className = 'hint'; missing.textContent = 'No photo saved';
+        item.append(missing);
+      }
+      return item;
     }));
     document.getElementById('review-when').textContent = d.when + (d.count > 1 ? ' · seen ' + d.count + ' times' : '') +
       (d.seed === '1' ? ' · Seed sample · No attendance will be recorded' : '');
@@ -220,16 +264,18 @@
     const pick = document.getElementById('form-pick');
     if (pick) {
       pick.action = url(urls.assign);
-      pick.querySelector('button').title = d.seed === '1' ? 'Label this sample; no attendance is recorded' : 'Confirm this person and learn the face';
+      pick.querySelector('button').title = d.seed === '1' ? 'Label selected samples; no attendance is recorded' : 'Confirm and learn only the selected photos';
       document.getElementById('pick-label').textContent = d.guess ? 'Someone else?' : 'Which person?';
       pick.reset();
       pickSearch.setCustomValidity('');
+      const option = [...document.getElementById('employee-options').options].find(o => o.dataset.id === (person || d.guess));
+      if (option) { pickSearch.value = option.value; document.getElementById('pick-id').value = option.dataset.id; }
     }
     document.getElementById('form-new').action = url(urls.add);
     document.getElementById('form-skip').action = url(urls.skip);
     const remove = document.getElementById('form-delete');
     remove.action = url(urls.delete);
-    remove.dataset.confirm = 'Remove all ' + d.count + ' photo(s) on this card from review?';
+    updatePhotoSelection();
     review.showModal();
   }
   // One at a time: a single large card with Back / Next. On by default on phones; the choice and the
@@ -264,7 +310,7 @@
     });
     // Opening a card (also from the chat link) makes it the current one.
     const open = openReview;
-    openReview = card => { pos = cards.indexOf(card); show(); open(card); };
+    openReview = (card, person) => { pos = cards.indexOf(card); show(); open(card, person); };
     show();
   }
   {% if open_id %}

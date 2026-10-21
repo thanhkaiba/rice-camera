@@ -28,7 +28,7 @@
     <div class="eyebrow">{{ WEEKDAYS[rep.day.weekday()] }}{% if rep.day == today %} · today{% endif %}</div>
     <h1>{{ rep.day.strftime('%d %B %Y') }}</h1>
     <div class="chips">
-      <span class="chip" title="Seen at or after this time = late">{{ icon('clock') }}late from <strong>{{ rep.window.late_after.strftime('%H:%M') }}</strong></span>
+      <span class="chip" title="Seen at or after this time = late">{{ icon('clock') }}late from <strong>{{ rep.window.late_from.strftime('%H:%M') }}</strong></span>
       <span class="chip" title="Camera hours">{{ icon('camera') }}{{ rep.window.start.strftime('%H:%M') }}–{{ rep.window.end.strftime('%H:%M') }}</span>
     </div>
   </div>
@@ -47,7 +47,7 @@
 {% endif %}
 {% if rep.workday and rep.all_in and rep.last_arrival %}
   <div class="alert ok"><span class="ico">{{ icon('check') }}</span><span><strong>Everyone is in</strong> · last arrival {{ rep.last_arrival.time }}
-    {% if deadline.skipped %}· {{ rep.window.late_after.strftime('%H:%M') }} list skipped{% elif rep.day == today and not deadline.sent %}· no {{ rep.window.late_after.strftime('%H:%M') }} list if it stays so{% endif %}</span></div>
+    {% if deadline.skipped %}· {{ rep.window.late_from.strftime('%H:%M') }} list skipped{% elif rep.day == today and not deadline.sent %}· no {{ rep.window.late_from.strftime('%H:%M') }} list if it stays so{% endif %}</span></div>
 {% endif %}
 {% if rep.no_camera_data %}<div class="alert warn"><span class="ico">{{ icon('camera-off') }}</span><span>Camera was off all day · "not seen" does not mean absent.</span></div>{% endif %}
 {% if rep.outages and not rep.no_camera_data %}<div class="alert warn"><span class="ico">{{ icon('alert') }}</span><span>Camera down

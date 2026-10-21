@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 from html.parser import HTMLParser
 
 import pytest
@@ -13,11 +14,14 @@ class ReviewControls(HTMLParser):
         self.in_dialog = False
         self.forms = []
         self.inputs = []
+        self.cards = []
         self.form = None
         self.feed(page)
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        if tag == "div" and "face-card" in attrs.get("class", "").split() and "data-id" in attrs:
+            self.cards.append(attrs)
         if tag == "input":
             self.inputs.append(attrs)
         if tag == "dialog":
@@ -160,3 +164,124 @@ def test_bulk_delete_deduplicates_repeated_ids_and_members_of_the_same_group(cor
     assert response.status_code == 200
     assert app.store.unknown(first).status == app.store.unknown(second).status == "discarded"
     assert len([a for a in app.store.audit() if a[2] == "delete review"]) == 1
+
+
+@pytest.mark.parametrize("source", ["camera", "seed"])
+def test_confirm_selected_photos_leaves_other_people_pending(core, source):
+    app, _, sent = core
+    store = app.store
+    first = store.add_unknown(DAY, at(9, 5), None, app.service.model_id, person_vector(30), None, None, source=source)
+    chosen = store.add_unknown(DAY, at(9, 10), None, app.service.model_id, person_vector(31), None, None,
+                               group_id=first, source=source)
+    latest = store.add_unknown(DAY, at(9, 15), None, app.service.model_id, person_vector(32), None, None,
+                               group_id=first, source=source)
+    refs = len(store.references(app.service.model_id, "A"))
+    response = client(app).post(f"/unknowns/{latest}/assign",
+                                data={"employee_id": "A", "photo_selection": "1", "photo_id": [str(chosen)]})
+    assert response.status_code == 302
+    assert store.unknown(chosen).employee_id == "A" and store.unknown(chosen).status == "assigned"
+    assert store.unknown(first).status == store.unknown(latest).status == "pending"
+    learned = store.references(app.service.model_id, "A")[refs:]
+    assert len(learned) == 1
+    assert (learned[0].vector == person_vector(31)).all()
+    if source == "camera":
+        assert store.checkins(DAY)["A"].first_seen == at(9, 10)
+        assert len(store.sightings(DAY)) == 1
+    else:
+        assert not store.checkins(DAY) and not sent
+
+
+def test_delete_selected_photo_keeps_the_rest_of_its_group(core):
+    app, _, sent = core
+    first = app.store.add_unknown(DAY, at(9, 5), None, app.service.model_id, person_vector(30), None, None)
+    latest = app.store.add_unknown(DAY, at(9, 10), None, app.service.model_id, person_vector(31), None, None, group_id=first)
+    refs = len(app.store.references(app.service.model_id))
+    response = client(app).post(f"/unknowns/{latest}/delete",
+                                data={"photo_selection": "1", "photo_id": [str(first)]})
+    assert response.status_code == 302
+    assert app.store.unknown(first).status == "discarded"
+    assert app.store.unknown(latest).status == "pending"
+    assert len(app.store.references(app.service.model_id)) == refs
+    assert not app.store.checkins(DAY) and not app.store.sightings(DAY) and not sent
+
+
+@pytest.mark.parametrize("action", ["assign", "delete", "new-employee"])
+@pytest.mark.parametrize("selection", ["empty", "foreign", "handled", "not-an-id"])
+def test_invalid_photo_selection_changes_nothing(core, action, selection):
+    app, _, sent = core
+    first = app.store.add_unknown(DAY, at(9, 5), None, app.service.model_id, person_vector(30), None, None)
+    latest = app.store.add_unknown(DAY, at(9, 10), None, app.service.model_id, person_vector(31), None, None, group_id=first)
+    foreign = app.store.add_unknown(DAY, at(9, 15), None, app.service.model_id, person_vector(32), None, None)
+    if selection == "handled":
+        app.store.resolve_unknown(first, "discarded", None)
+    ids = {"empty": [], "foreign": [str(latest), str(foreign)], "handled": [str(latest), str(first)],
+           "not-an-id": [str(latest), "bad"]}[selection]
+    before = [(u.id, u.status) for u in app.store.unknowns(status=None)]
+    refs = len(app.store.references(app.service.model_id))
+    response = client(app).post(f"/unknowns/{latest}/{action}", data={"photo_selection": "1", "photo_id": ids,
+                                "employee_id": "A", "email": "new@example.com", "name": "New"}, follow_redirects=True)
+    assert 'data-flash="error"' in response.get_data(as_text=True)
+    assert [(u.id, u.status) for u in app.store.unknowns(status=None)] == before
+    assert app.store.employee_count() == 3 and len(app.store.references(app.service.model_id)) == refs
+    assert not app.store.checkins(DAY) and not sent
+
+
+def test_multi_photo_confirm_requires_selection_and_shows_every_photo(core):
+    app, _, _ = core
+    first = None
+    for minute in range(8):
+        uid = app.store.add_unknown(DAY, at(9, minute), f"crops/{minute}.jpg", app.service.model_id,
+                                    person_vector(1), None, None, group_id=first)
+        first = first or uid
+    c = client(app)
+    controls = ReviewControls(c.get("/unknowns").get_data(as_text=True))
+    assert len(json.loads(controls.cards[0]["data-photos"])) == 8
+    assert not [f for f in controls.forms if not f["in_dialog"] and f.get("action", "").endswith("/assign")]
+    response = c.post(f"/unknowns/{uid}/assign", data={"employee_id": "A"}, follow_redirects=True)
+    assert 'data-flash="error"' in response.get_data(as_text=True)
+    assert len(app.store.unknowns()) == 8 and not app.store.checkins(DAY)
+
+
+def test_new_employee_is_confirmed_only_for_selected_photo(core):
+    app, _, _ = core
+    first = app.store.add_unknown(DAY, at(9, 5), None, app.service.model_id, person_vector(30), None, None)
+    latest = app.store.add_unknown(DAY, at(9, 10), None, app.service.model_id, person_vector(31), None, None, group_id=first)
+    response = client(app).post(f"/unknowns/{latest}/new-employee", data={"email": "new@example.com", "name": "New",
+                                "photo_selection": "1", "photo_id": [str(latest)]})
+    assert response.status_code == 302
+    person = app.store.employee_by_email("new@example.com")
+    assert app.store.unknown(latest).employee_id == person.id
+    assert app.store.unknown(first).status == "pending"
+    assert app.store.checkins(DAY)[person.id].first_seen == at(9, 10)
+
+
+def test_overlapping_confirmations_do_not_learn_or_record_the_losing_selection(core, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    app, _, _ = core
+    first = app.store.add_unknown(DAY, at(9, 5), None, app.service.model_id, person_vector(30), None, None)
+    latest = app.store.add_unknown(DAY, at(9, 10), None, app.service.model_id, person_vector(31), None, None, group_id=first)
+    ready = Barrier(2)
+    pending = app.service._pending_group
+
+    def validate_together(*args, **kwargs):
+        members = pending(*args, **kwargs)
+        ready.wait(timeout=5)
+        return members
+
+    monkeypatch.setattr(app.service, "_pending_group", validate_together)
+    clients = [client(app), client(app)]
+
+    def confirm(index):
+        return clients[index].post(f"/unknowns/{latest}/assign", data={"employee_id": "AB"[index],
+                                    "photo_selection": "1", "photo_id": [str(first), str(latest)] if index else [str(first)]},
+                                    follow_redirects=True).get_data(as_text=True)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pages = list(pool.map(confirm, range(2)))
+    assert sum('data-flash="error"' in page for page in pages) == 1
+    winner = app.store.unknown(first).employee_id
+    assert set(app.store.checkins(DAY)) == {winner}
+    assert all(r.employee_id == winner for r in app.store.references(app.service.model_id) if r.source == "admin")
+    assert app.store.unknown(latest).status == ("assigned" if winner == "B" else "pending")

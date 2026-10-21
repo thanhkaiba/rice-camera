@@ -370,6 +370,11 @@ details.help p { margin: 8px 0 0; }
 .face-card .body .btn-block { white-space: normal; }
 .strip { display: flex; gap: 6px; flex-wrap: wrap; }
 .strip img { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); display: block; }
+.review-photo { width: calc(50% - 3px); padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+.review-photo:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+.review-photo label { display: block; cursor: pointer; font-size: .78em; margin-bottom: 6px; }
+.review-photo input { vertical-align: middle; }
+.strip .review-photo img { width: 100%; height: 120px; object-fit: contain; }
 .body-photo { width: 100%; max-height: 320px; object-fit: contain; background: var(--stage); border-radius: 12px; display: block; }
 
 /* settings ---------------------------------------------------------------------- */
