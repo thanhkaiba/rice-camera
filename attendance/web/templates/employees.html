@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% set title = 'People' %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>People</h1>
+    <div class="chips">
+      <span class="chip">{{ icon('employees') }}<strong>{{ people|selectattr('active')|list|length }}</strong> active</span>
+      <span class="chip" title="Photos per person for reliable recognition">{{ icon('image') }}5–10 photos each</span>
+      {% set needing = namespace(n=0) %}
+      {% for p in people if p.active %}{% set q = quality.get(p.id, (0, 0, 0)) %}{% if q[0] == 0 or (q[2] < q[0] and q[1] < good_photos) %}{% set needing.n = needing.n + 1 %}{% endif %}{% endfor %}
+      {% if needing.n %}<button type="button" class="chip" id="needs" aria-pressed="false" title="Show only people with fewer than {{ good_photos }} sharp, frontal photos">{{ icon('alert') }}<strong>{{ needing.n }}</strong> need photos</button>{% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    <div class="search" style="width:240px"><input type="search" id="search" placeholder="Search…" aria-label="Search by name or email"></div>
+    <a class="btn" href="{{ url_for('calendar_page') }}" title="Leave, holidays and extra work days">{{ icon('calendar') }}Leave &amp; holidays</a>
+    <button class="primary" type="button" onclick="document.getElementById('add').showModal(); document.getElementById('new-email').focus()">{{ icon('user-plus') }}Add</button>
+  </div>
+</div>
+
+<div class="card">{% include '_reference_quality.html' %}</div>
+
+{% if seed_status.state == 'running' %}
+  <div class="alert info" id="seed-running"><span class="ico">{{ icon('upload') }}</span><span><strong>Importing the seed</strong> · the camera is paused meanwhile.
+    <span id="seed-progress">{{ seed_status.progress }}</span></span></div>
+{% elif seed_status.state == 'done' %}
+  <div class="alert ok"><span class="ico">{{ icon('check') }}</span><span><strong>Seed imported</strong> ({{ seed_status.finished|replace('T', ' ') }}): {{ seed_status.message }}.
+    Backup from before: <code>{{ seed_status.backup }}</code></span></div>
+{% elif seed_status.state == 'failed' %}
+  <div class="alert error"><span class="ico">{{ icon('alert') }}</span><span><strong>Seed import failed</strong>: {{ seed_status.message }}</span></div>
+{% endif %}
+{% if people and not counts %}
+  <div class="alert info"><span class="ico">{{ icon('sparkles') }}</span><span><strong>No photos yet?</strong> Upload some, or let the camera run and name faces under <a href="{{ url_for('unknowns') }}">Review</a>.</span></div>
+{% endif %}
+{% for p in look_alikes %}
+  <div class="alert warn"><span class="ico">{{ icon('alert') }}</span><span><a href="{{ url_for('employee', employee_id=p.a) }}">{{ names.get(p.a, p.a) }}</a> and
+    <a href="{{ url_for('employee', employee_id=p.b) }}">{{ names.get(p.b, p.b) }}</a> have reference photos that look alike ({{ '%.0f'|format(p.score * 100) }}%):
+    check for a misplaced photo and add clearer ones.</span></div>
+{% endfor %}
+
+<div class="table-wrap">
+  <table id="people">
+    <thead><tr><th style="width:60px"></th><th>Person</th><th>{{ icon('image') }}Photos</th><th class="hide-sm">{{ icon('chat') }}Chat</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for p in people %}
+      {% set n = counts.get(p.id, 0) %}
+      {% set q = quality.get(p.id, (0, 0, 0)) %}
+      <tr class="link" data-name="{{ p.name|lower }} {{ p.email|lower }}" data-needs="{{ 1 if p.active and (n == 0 or (q[2] < n and q[1] < good_photos)) else 0 }}" onclick="location.href='{{ url_for('employee', employee_id=p.id) }}'">
+        <td>{% if thumbs.get(p.id) %}<img class="avatar" src="{{ url_for('media', path=thumbs[p.id]) }}" alt="" loading="lazy">{% else %}<span class="avatar empty">{{ p.name[:1] }}</span>{% endif %}</td>
+        <td><div class="cell-main">{{ p.name }}</div><div class="cell-sub">{{ p.email or "Add email" }}</div></td>
+        <td>{% if n == 0 %}<span class="badge bad plain">{{ icon('image') }}No photos</span>
+            {% elif q[2] == n %}<span class="badge info plain" title="{{ n }} photos · quality not checked yet">{{ icon('image') }}{{ n }}</span>
+            {% elif q[1] < good_photos %}<span class="badge late plain" title="{{ q[1] }} of {{ n }} photos are sharp and frontal · add {{ good_photos - q[1] }} more good ones">{{ icon('image') }}{{ q[1] }}/{{ n }} good</span>
+            {% else %}<span class="badge ok plain" title="{{ q[1] }} of {{ n }} photos are sharp and frontal">{{ icon('image') }}{{ q[1] }}/{{ n }} good</span>{% endif %}
+            {% set scores = photo_scores.get(p.id, []) %}
+            {% if scores %}<div class="cell-sub" title="Average image clarity, not recognition confidence.">Image {{ '%.0f'|format(scores|sum / scores|length * 100) }}/100 · {{ scores|length }}/{{ n }} scored</div>{% endif %}
+            {% set fit = recognition.get(p.id) %}
+            {% if fit %}<div class="small" title="Reference consistency: compared with other photos, excluding self and near-duplicates. Not measured camera accuracy.">
+              <span class="badge {{ 'late' if fit.review else 'ok' if fit.useful else 'info' }} plain">{{ fit.useful }} consistent{% if fit.review %} · {{ fit.review }} need review{% endif %}</span>
+              {% if fit.unverified %}<div class="cell-sub">{{ fit.unverified }} need more evidence</div>{% endif %}
+              {% if fit.duplicates %}<div class="cell-sub">{{ fit.duplicates }} near-duplicate</div>{% endif %}
+            </div>{% elif n %}<div class="cell-sub">Not evaluated · use Re-evaluate quality</div>{% endif %}</td>
+        <td class="hide-sm">{% if p.chat_user %}<span class="badge ok plain" title="Google Chat ID set · @mentions work">{{ icon('at') }}</span>{% else %}<span class="muted" title="No Google Chat ID">–</span>{% endif %}</td>
+        <td>{% if not p.active %}<span class="badge info">Not tracked</span>
+            {% elif on_leave.get(p.id) %}<span class="badge info">{{ leave_label(on_leave[p.id]) }} today</span>
+            {% elif p.exempt %}<span class="badge info plain" title="Never counted as late or absent">{{ icon('crown') }}Not counted</span>
+            {% else %}<span class="badge ok">Active</span>{% endif %}</td>
+        <td class="num"><a class="btn btn-sm ghost icon" href="{{ url_for('employee', employee_id=p.id) }}" title="Open" aria-label="Open {{ p.name }}">{{ icon('chevron-right') }}</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if not people %}<div class="empty-state"><span class="ico">{{ icon('employees') }}</span><strong>No people yet.</strong><span><strong>Add</strong> one, import a CSV, or let the camera collect faces.</span></div>{% endif %}
+  <div class="empty-state" id="empty" hidden><span class="ico">{{ icon('search') }}</span>Nobody matches.</div>
+</div>
+
+<dialog id="add">
+  <div class="dialog-head"><strong>Add people</strong><button type="button" class="close" data-close aria-label="Close">{{ icon('close') }}</button></div>
+  <div class="dialog-body">
+    <form method="post" action="{{ url_for('add_employee') }}">
+      <strong class="row">{{ icon('user-plus') }}One person</strong>
+      <div class="form-row">
+        <label class="field grow">Email<input type="email" name="email" id="new-email" required placeholder="person@example.com" autocomplete="email"></label>
+        <label class="field grow">Full name<input name="name" required placeholder="Nguyen Van An"></label>
+      </div>
+      <div><button class="primary">{{ icon('plus') }}Add</button></div>
+    </form>
+    <div class="divider" style="margin:0"></div>
+    <form method="post" action="{{ url_for('import_employees') }}" enctype="multipart/form-data">
+      <strong class="row">{{ icon('upload') }}CSV file</strong>
+      <label class="field"><span>Columns <code>email,name</code> · optional <code>chat_user</code> (Google Chat ID)</span>
+        <input type="file" name="file" accept=".csv,text/csv" required></label>
+      <div><button>{{ icon('upload') }}Import</button></div>
+    </form>
+    <div class="divider" style="margin:0"></div>
+    <form method="post" action="{{ url_for('import_seed') }}" enctype="multipart/form-data"
+          {% if in_window %}data-confirm="It is camera hours: the camera pauses for the few minutes the import takes. Import now?"{% endif %}>
+      <strong class="row">{{ icon('upload') }}Seed (.zip)</strong>
+      <label class="field"><span>People, reference photos and Review samples from another install (<code>seed/</code> with <code>manifest.json</code>).
+        Files are checked and everything is backed up first.</span>
+        <input type="file" name="file" accept=".zip,application/zip" required></label>
+      <label class="switch"><input type="checkbox" name="review_only"><span>Review samples only
+        <span class="hint">Keep people and reference photos as they are.</span></span></label>
+      <div><button {{ 'disabled' if seed_status.state == 'running' }}>{{ icon('upload') }}Import seed</button></div>
+    </form>
+  </div>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script>
+  const search = document.getElementById('search'), needs = document.getElementById('needs');
+  function filter() {
+    const q = search.value.trim().toLowerCase(), onlyNeeds = needs && needs.getAttribute('aria-pressed') === 'true';
+    let shown = 0;
+    document.querySelectorAll('#people tbody tr').forEach(tr => {
+      tr.hidden = (q && !tr.dataset.name.includes(q)) || (onlyNeeds && tr.dataset.needs !== '1');
+      if (!tr.hidden) shown++;
+    });
+    document.getElementById('empty').hidden = shown > 0 || !document.querySelector('#people tbody tr');
+  }
+  search.addEventListener('input', filter);
+  if (document.getElementById('seed-running')) {  // follow the import, then show the result
+    const poll = setInterval(async () => {
+      try {
+        const status = await (await fetch('{{ url_for('seed_status') }}')).json();
+        if (status.state !== 'running') { clearInterval(poll); location.reload(); }
+        else document.getElementById('seed-progress').textContent = status.progress || '';
+      } catch (e) { /* the page keeps trying */ }
+    }, 3000);
+  }
+  if (needs) needs.addEventListener('click', () => {
+    needs.setAttribute('aria-pressed', needs.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    filter();
+  });
+</script>
+{% endblock %}

@@ -47,6 +47,23 @@ def test_scene_picture_has_the_time_burned_in_and_is_hashed(core):
     assert s.sha256 == digest
 
 
+def test_unknown_faces_seen_at_the_same_time_keep_their_own_pictures(core):
+    app, _, _ = core
+    ts = at(9, 5)
+    first = Decision("unknown", ts, None, None, face_image(1, 80), person_vector(30),
+                     body=face_image(1, 120), scene=(face_image(1, 200), (40, 40, 120, 120)))
+    second = Decision("unknown", ts, None, None, face_image(2, 80), person_vector(31),
+                      body=face_image(2, 120), scene=(face_image(2, 200), (60, 60, 140, 140)))
+    image = save_crop(app, first, ts)
+    originals = {rel: (app.data_dir / rel).read_bytes() for rel in (image, body_photo(image), scene_photo(image))}
+    digest = evidence_digest(app.data_dir, image)
+    other = save_crop(app, second, ts)
+    assert other != image
+    assert all((app.data_dir / rel).read_bytes() == contents for rel, contents in originals.items())
+    assert evidence_digest(app.data_dir, image) == digest
+    assert (app.data_dir / other).read_bytes() != originals[image]
+
+
 def test_evidence_page_and_zip_tell_the_whole_story(core):
     app, clock, sent = core
     c = client(app)
@@ -79,7 +96,8 @@ def test_evidence_page_and_zip_tell_the_whole_story(core):
     assert summary["status"] == "Late" and summary["minutes_late"] == 15
     assert summary["sightings"][0]["integrity"] == "files unchanged since capture"
     assert set(summary["sightings"][0]["sha256_now"]) == {"scene", "face", "body"}
-    assert "Alice (A)" in z.read("summary.txt").decode()
+    assert summary["employee"] == {"email": "alice@example.com", "name": "Alice"}
+    assert "Alice (alice@example.com)" in z.read("summary.txt").decode()
     assert "export evidence" in c.get("/audit").get_data(as_text=True)
 
     # Someone edits a picture afterwards: the page says so.

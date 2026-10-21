@@ -51,7 +51,7 @@ try {
     if (-not (Test-Path $Py)) { Invoke-Checked $Uv @("venv", "--python", "3.12", $Venv) }
 
     Step "2/6 Program and libraries"
-    Invoke-Checked $Uv @("pip", "install", "--python", $Py, "--upgrade", "--reinstall-package", "face-attendance", $Src)
+    Invoke-Checked $Py @((Join-Path $Src "attendance\cli\launcher.py"), "--install", $Uv, $Src)
 
     Step "3/6 Settings file"
     if (Test-Path $Config) {

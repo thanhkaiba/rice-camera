@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+{% set title = 'Review' %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>Review</h1>
+    <p class="subtitle">Camera faces and seed samples awaiting review. Click one to name it.</p>
+  </div>
+  <div class="actions">
+    {% if groups %}<span class="badge bad" title="{{ groups|length }} to review">{{ groups|length }}</span>{% endif %}
+    {% set ready = groups|selectattr('guess')|list|length %}
+    {% if ready %}<span class="badge ok" title="Shown first: these only need Confirm">{{ ready }} ready to confirm</span>{% endif %}
+    {% if groups %}
+    <button type="button" id="focus-toggle" title="Show one face at a time, with large buttons (handy on a phone)">{{ icon('eye') }}<span>One at a time</span></button>
+    <form method="post" id="bulk-delete" action="{{ url_for('delete_unknowns') }}" data-confirm="Remove the selected cards from review?">
+      <button class="danger" id="delete-selected" disabled>{{ icon('trash') }}Delete selected (<span id="selected-count" aria-live="polite">0</span>)</button>
+    </form>
+    {% endif %}
+    <a class="btn" href="{{ url_for('unknowns') }}">{{ icon('refresh') }}Reload</a>
+  </div>
+</div>
+{% if no_photos %}
+  <div class="alert info"><span class="ico">{{ icon('sparkles') }}</span><span><strong>No photos yet?</strong> Let the camera run; name each person here once and it recognises them from then on.</span></div>
+{% endif %}
+{% if groups %}
+<div class="face-grid" id="review-grid">
+  {% for g in groups %}
+  {% set first, last = g.members[0], g.latest %}
+  {% set guess = employees.get(g.guess) if g.guess else None %}
+  {% set guess_label = employee_labels.get(g.guess, '') if guess else '' %}
+  {% set when = local(last.ts).strftime('%a %d %b %H:%M') if g.members|length == 1
+     else 'First ' ~ local(first.ts).strftime('%a %d %b %H:%M') ~ ' · last ' ~ local(last.ts).strftime('%a %d %b %H:%M') %}
+  <div class="face-card" style="animation-delay: {{ (loop.index0 % 8) * 40 }}ms"
+       data-id="{{ g.id }}" data-count="{{ g.members|length }}" data-when="{{ when }}"
+       data-seed="{{ 1 if g.source == 'seed' else 0 }}"
+       data-source-id="{{ g.expected_id or '' }}" data-source-name="{{ g.expected_name or '' }}"
+       data-guess="{{ g.guess or '' }}" data-guess-name="{{ guess_label }}"
+       data-score="{{ '%.2f'|format(g.guess_score) if guess else '' }}"
+       data-body="{{ url_for('media', path=g.body) if g.body else '' }}"
+       data-photos='{{ g.photo_urls|tojson|forceescape }}'
+       onclick="if (!event.target.closest('form, button, input, label')) openReview(this)">
+    <label class="face-select" title="Select this card for bulk deletion">
+      <input type="checkbox" class="review-select" name="unknown_id" value="{{ g.id }}" form="bulk-delete" aria-label="Select {{ g.members|length }} photo(s) from {{ when }}">
+    </label>
+    <div class="pic">
+      {% if g.body %}<img class="body" src="{{ url_for('media', path=g.body) }}" alt="" loading="lazy">
+      {% elif g.photos %}<img class="face" src="{{ url_for('media', path=g.photos[0]) }}" alt="" loading="lazy">{% endif %}
+      {% if g.members|length > 1 %}<span class="badge plain" title="Seen {{ g.members|length }} times">{{ icon('eye') }}{{ g.members|length }}</span>{% endif %}
+    </div>
+    {% set thumbs = g.photos if g.body else g.photos[1:] %}
+    {% if thumbs %}<div class="thumbs">{% for p in thumbs[:4] %}<img src="{{ url_for('media', path=p) }}" alt="" loading="lazy">{% endfor %}</div>{% endif %}
+    <div class="body">
+      {% if g.source == 'seed' %}<span class="badge info" title="No attendance will be recorded when this sample is labelled">Seed sample</span>{% endif %}
+      <div class="small muted tnum">{{ local(last.ts).strftime('%a %d %b %H:%M') }}</div>
+      {% if guess %}<div class="small">Looks like <strong>{{ guess_label }}</strong> <span class="muted" title="Similarity score, not a probability of identity">(similarity {{ '%.2f'|format(g.guess_score) }})</span></div>
+      {% elif g.maybe %}<div class="small">Maybe {% for pid, score in g.maybe %}<strong>{{ employee_labels.get(pid, '') }}</strong> <span class="muted tnum" title="Similarity score, not a probability of identity">{{ '%.2f'|format(score) }}</span>{{ ' · ' if not loop.last }}{% endfor %} <span class="muted">· not sure, check the photo</span></div>
+      {% else %}<div class="small muted">No clear suggestion · choose a person manually</div>{% endif %}
+      {% if g.expected_name %}<div class="small">Source label: <strong>{{ g.expected_name }}</strong> · check the photo</div>{% endif %}
+      {% if guess and g.expected_id and g.expected_id != g.guess %}<div class="small">Model and source disagree · manual review required</div>{% endif %}
+      {% if guess %}
+      {% if g.members|length == 1 %}
+      <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
+        <input type="hidden" name="employee_id" value="{{ g.guess }}">
+        <button class="primary btn-sm btn-block" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ guess_label }}</button>
+      </form>
+      {% else %}
+      <button type="button" class="primary btn-sm btn-block" onclick="openReview(this.closest('.face-card'), '{{ g.guess }}')">{{ icon('check') }}Confirm: {{ guess_label }} · select photos</button>
+      {% endif %}
+      {% endif %}
+      {% if not guess %}{% for pid, score in g.maybe %}
+      {% if g.members|length == 1 %}
+      <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
+        <input type="hidden" name="employee_id" value="{{ pid }}">
+        <button class="btn-sm btn-block" title="Name this person and learn the face">{{ icon('check') }}It's {{ employee_labels.get(pid, '') }}</button>
+      </form>
+      {% else %}
+      <button type="button" class="btn-sm btn-block" onclick="openReview(this.closest('.face-card'), '{{ pid }}')">{{ icon('check') }}It's {{ employee_labels.get(pid, '') }} · select photos</button>
+      {% endif %}
+      {% endfor %}{% endif %}
+      <button type="button" class="{{ 'primary' if not guess and not g.maybe }} btn-sm btn-block" onclick="openReview(this.closest('.face-card'))">{{ icon('help') }}{{ 'Someone else?' if guess else 'Who is this?' }}</button>
+      <form method="post" action="{{ url_for('ignore', unknown_id=g.id) }}" class="focus-only">
+        <button class="btn-sm btn-block" title="Hidden for the rest of today; shown again if seen another day">{{ icon('user-x') }}Skip · not an employee</button>
+      </form>
+      <form method="post" action="{{ url_for('delete_unknown', unknown_id=g.id) }}" data-confirm="Remove all {{ g.members|length }} photo(s) on this card from review?">
+        <button class="danger btn-sm btn-block" title="Remove blurry or unusable photos from review">{{ icon('trash') }}Delete from review</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<div class="focus-bar" id="focus-bar" hidden>
+  <button type="button" id="focus-prev" aria-label="Previous face">{{ icon('chevron-left') }}Back</button>
+  <span class="tnum muted" id="focus-pos" aria-live="polite"></span>
+  <button type="button" id="focus-next" aria-label="Next face">Next{{ icon('chevron-right') }}</button>
+</div>
+{% else %}
+<div class="card empty-state"><span class="ico">{{ icon('smile') }}</span><strong>Nothing to review.</strong></div>
+{% endif %}
+
+{% if auto_labelled %}
+<details class="panel" id="auto-labelled-seed" style="margin-top:20px">
+  <summary>Auto-labelled seed samples ({{ auto_labelled|length }})</summary>
+  <p class="hint">Strong reference matches agreeing with source labels. No attendance or reference photos were added. You can review any sample again.</p>
+  <div class="face-grid">
+    {% for sample in auto_labelled %}
+    <div class="face-card" style="cursor:default">
+      <div class="pic"><img class="face" src="{{ url_for('media', path=sample.image) }}" alt="" loading="lazy"></div>
+      <div class="body">
+        <strong class="small">{{ sample.name }}</strong>
+        <div class="small muted">Similarity {{ '%.2f'|format(sample.score) }} · check the photo</div>
+        <form method="post" action="{{ url_for('reopen_seed', unknown_id=sample.id) }}"><button class="btn-sm btn-block">Review again</button></form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+{% if ignored %}
+<details class="panel" style="margin-top:20px">
+  <summary>Ignored today ({{ ignored|length }})</summary>
+  <div>
+    <p class="hint" style="margin-top:0">Hidden until tomorrow, even if they pass again. Restore one if it was a mistake.</p>
+    <div class="face-grid" style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr))">
+      {% for g in ignored %}
+      <div class="face-card" style="cursor:default; opacity:.85">
+        <div class="pic">{% if g.photo %}<img class="face" src="{{ url_for('media', path=g.photo) }}" alt="" loading="lazy">{% endif %}
+          {% if g.count > 1 %}<span class="badge plain" title="Seen {{ g.count }} times">{{ icon('eye') }}{{ g.count }}</span>{% endif %}</div>
+        <div class="body">
+          <span class="small muted tnum">{{ local(g.latest.ts).strftime('%H:%M') }}</span>
+          <form method="post" action="{{ url_for('restore', unknown_id=g.id) }}"><button class="btn-sm btn-block">{{ icon('undo') }}Restore</button></form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</details>
+{% endif %}
+
+<dialog id="review">
+  <div class="dialog-head"><strong>Who is this?</strong><button type="button" class="close" data-close aria-label="Close">{{ icon('close') }}</button></div>
+  <div class="dialog-body">
+    <div>
+      <a id="review-body-link" target="_blank" hidden><img id="review-body" class="body-photo" alt=""></a>
+      <div class="strip" id="review-photos" style="margin-top:6px"></div>
+      <div class="small muted" id="review-when" style="margin-top:8px"></div>
+      <p class="hint">Select the photos you can confirm, or select wrong photos to delete. Unselected photos stay in Review.</p>
+      <div class="small" id="photo-selection-count" aria-live="polite">0 photos selected</div>
+    </div>
+    <form method="post" id="form-source" class="photo-selection-form" hidden>
+      <input type="hidden" name="photo_selection" value="1">
+      <strong id="source-name"></strong>
+      <input type="hidden" name="employee_id" id="source-id">
+      <button type="submit" id="source-button" disabled>Confirm source for selected photos</button>
+      <span class="hint">Source label only; verify the photo before confirming. No attendance will be recorded.</span>
+    </form>
+    {% if employees %}
+    <form method="post" id="form-pick" class="photo-selection-form">
+      <input type="hidden" name="photo_selection" value="1">
+      <strong id="pick-label">Someone else?</strong>
+      <div class="form-row" style="flex-wrap:nowrap">
+        <input id="pick-search" list="employee-options" required autocomplete="off" placeholder="Search by name or email…" aria-label="Choose an employee by name or email" style="flex:1; min-width:0">
+        <input type="hidden" name="employee_id" id="pick-id">
+        <datalist id="employee-options">
+          {% for id in employees %}<option value="{{ employee_labels.get(id, '') }}" data-id="{{ id }}"></option>{% endfor %}
+        </datalist>
+        <button title="Records arrivals and learns faces only from the selected photos" disabled>{{ icon('check') }}Confirm selected</button>
+      </div>
+    </form>
+    {% endif %}
+    <details class="inline" id="new-employee"{% if not employees %} open{% endif %}>
+      <summary>{{ icon('user-plus') }} New employee</summary>
+      <form method="post" id="form-new" class="photo-selection-form" style="margin-top:8px">
+        <input type="hidden" name="photo_selection" value="1">
+        <div class="form-row">
+          <input type="email" name="email" required placeholder="Email" aria-label="Employee email" style="flex:1 1 200px">
+          <input name="name" required placeholder="Full name" style="flex:1 1 160px">
+        </div>
+        <div><button class="{{ 'primary' if not employees }}" disabled>{{ icon('user-plus') }}Add &amp; confirm selected</button></div>
+      </form>
+    </details>
+    <div class="divider" style="margin:0"></div>
+    <form method="post" id="form-skip">
+      <button class="btn-block" title="Hidden for the rest of today; shown again if seen another day">{{ icon('user-x') }}Skip · not an employee</button>
+    </form>
+    <form method="post" id="form-delete" class="photo-selection-form" data-confirm="Remove the selected photos from review?">
+      <input type="hidden" name="photo_selection" value="1">
+      <button class="danger btn-block" title="Remove only the selected photos from review" disabled>{{ icon('trash') }}Delete selected</button>
+    </form>
+  </div>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script>
+  const review = document.getElementById('review');
+  const selections = [...document.querySelectorAll('.review-select')];
+  selections.forEach(box => box.addEventListener('change', () => {
+    const selected = selections.filter(input => input.checked);
+    document.getElementById('delete-selected').disabled = !selected.length;
+    document.getElementById('selected-count').textContent = selected.length;
+    const photos = selected.reduce((total, input) => total + Number(input.closest('.face-card').dataset.count), 0);
+    document.getElementById('bulk-delete').dataset.confirm = 'Remove all ' + photos + ' photo(s) on ' + selected.length + ' selected card(s) from review?';
+  }));
+  const pickSearch = document.getElementById('pick-search');
+  pickSearch?.addEventListener('input', () => {
+    const selected = [...document.getElementById('employee-options').options].find(o => o.value === pickSearch.value);
+    document.getElementById('pick-id').value = selected ? selected.dataset.id : '';
+    pickSearch.setCustomValidity(selected ? '' : 'Choose an employee from the suggestions.');
+  });
+  const urls = {
+    assign: "{{ url_for('assign', unknown_id=0) }}",
+    add: "{{ url_for('new_employee_from_face', unknown_id=0) }}",
+    skip: "{{ url_for('ignore', unknown_id=0) }}",
+    delete: "{{ url_for('delete_unknown', unknown_id=0) }}",
+  };
+  const photoForms = [...review.querySelectorAll('.photo-selection-form')];
+  function updatePhotoSelection() {
+    const selected = [...review.querySelectorAll('.review-photo-select:checked')];
+    document.getElementById('photo-selection-count').textContent = selected.length + ' photo(s) selected';
+    photoForms.forEach(form => {
+      form.querySelectorAll('input[name="photo_id"]').forEach(input => input.remove());
+      selected.forEach(photo => {
+        const input = document.createElement('input');
+        input.type = 'hidden'; input.name = 'photo_id'; input.value = photo.value;
+        form.append(input);
+      });
+      form.querySelector('button').disabled = !selected.length;
+    });
+    document.getElementById('form-delete').dataset.confirm = 'Remove ' + selected.length + ' selected photo(s) from review?';
+  }
+  document.getElementById('review-photos').addEventListener('change', updatePhotoSelection);
+  function openReview(card, person = '') {
+    const d = card.dataset, url = u => u.replace('/0/', '/' + d.id + '/');
+    const bodyLink = document.getElementById('review-body-link');
+    bodyLink.hidden = !d.body;
+    if (d.body) { bodyLink.href = d.body; document.getElementById('review-body').src = d.body; }
+    const photos = document.getElementById('review-photos');
+    photos.replaceChildren(...JSON.parse(d.photos).map(photo => {
+      const item = document.createElement('div'); item.className = 'review-photo';
+      const label = document.createElement('label');
+      const input = document.createElement('input');
+      input.type = 'checkbox'; input.className = 'review-photo-select'; input.value = photo.id;
+      input.setAttribute('aria-label', 'Select photo from ' + photo.when);
+      label.append(input, ' ', photo.when);
+      item.append(label);
+      if (photo.url) {
+        const a = document.createElement('a'); a.href = photo.url; a.target = '_blank';
+        a.setAttribute('aria-label', 'Open photo from ' + photo.when + ' full size');
+        const img = document.createElement('img'); img.src = photo.url; img.alt = 'Face from ' + photo.when; img.loading = 'lazy';
+        a.append(img); item.append(a);
+      } else {
+        const missing = document.createElement('span'); missing.className = 'hint'; missing.textContent = 'No photo saved';
+        item.append(missing);
+      }
+      return item;
+    }));
+    document.getElementById('review-when').textContent = d.when + (d.count > 1 ? ' · seen ' + d.count + ' times' : '') +
+      (d.seed === '1' ? ' · Seed sample · No attendance will be recorded' : '');
+    const source = document.getElementById('form-source');
+    source.hidden = !d.sourceId || d.sourceId === d.guess;
+    source.action = url(urls.assign);
+    document.getElementById('source-id').value = d.sourceId;
+    document.getElementById('source-name').textContent = d.sourceName;
+    const pick = document.getElementById('form-pick');
+    if (pick) {
+      pick.action = url(urls.assign);
+      pick.querySelector('button').title = d.seed === '1' ? 'Label selected samples; no attendance is recorded' : 'Confirm and learn only the selected photos';
+      document.getElementById('pick-label').textContent = d.guess ? 'Someone else?' : 'Which person?';
+      pick.reset();
+      pickSearch.setCustomValidity('');
+      const option = [...document.getElementById('employee-options').options].find(o => o.dataset.id === (person || d.guess));
+      if (option) { pickSearch.value = option.value; document.getElementById('pick-id').value = option.dataset.id; }
+    }
+    document.getElementById('form-new').action = url(urls.add);
+    document.getElementById('form-skip').action = url(urls.skip);
+    const remove = document.getElementById('form-delete');
+    remove.action = url(urls.delete);
+    updatePhotoSelection();
+    review.showModal();
+  }
+  // One at a time: a single large card with Back / Next. On by default on phones; the choice and the
+  // position are kept in this browser, so after naming a face the next one is shown.
+  const grid = document.getElementById('review-grid');
+  if (grid) {
+    const cards = [...grid.querySelectorAll('.face-card')], bar = document.getElementById('focus-bar');
+    const toggle = document.getElementById('focus-toggle');
+    const stored = (k, v) => { try { if (v === undefined) return sessionStorage.getItem(k); sessionStorage.setItem(k, v); } catch (e) {} };
+    let focus = stored('review-focus') ? stored('review-focus') === '1' : matchMedia('(max-width: 640px)').matches;
+    let pos = Number(stored('review-pos')) || 0;
+    function show() {
+      pos = Math.max(0, Math.min(pos, cards.length - 1));
+      grid.classList.toggle('focus', focus);
+      bar.hidden = !focus;
+      cards.forEach((c, i) => c.classList.toggle('current', i === pos));
+      document.getElementById('focus-pos').textContent = (pos + 1) + ' / ' + cards.length;
+      document.getElementById('focus-prev').disabled = pos === 0;
+      document.getElementById('focus-next').disabled = pos === cards.length - 1;
+      toggle.querySelector('span').textContent = focus ? 'Show all' : 'One at a time';
+      stored('review-focus', focus ? '1' : '0');
+      stored('review-pos', pos);
+    }
+    const go = by => { pos += by; show(); if (focus) cards[pos].scrollIntoView({ block: 'nearest' }); };
+    document.getElementById('focus-prev').addEventListener('click', () => go(-1));
+    document.getElementById('focus-next').addEventListener('click', () => go(1));
+    toggle.addEventListener('click', () => { focus = !focus; show(); });
+    document.addEventListener('keydown', e => {
+      if (!focus || review.open || e.target.closest('input, textarea, select')) return;
+      if (e.key === 'ArrowLeft') go(-1);
+      if (e.key === 'ArrowRight') go(1);
+    });
+    // Opening a card (also from the chat link) makes it the current one.
+    const open = openReview;
+    openReview = (card, person) => { pos = cards.indexOf(card); show(); open(card, person); };
+    show();
+  }
+  {% if open_id %}
+  const first = document.querySelector('.face-card[data-id="{{ open_id }}"]');
+  if (first) openReview(first);
+  {% endif %}
+</script>
+{% endblock %}

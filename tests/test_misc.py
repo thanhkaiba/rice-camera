@@ -81,13 +81,10 @@ def test_sweep_and_recommend_pick_safest_setting_with_no_wrong_matches():
 
 def test_import_employees_handles_excel_bom_and_never_removes_anyone(tmp_path):
     store = Store(tmp_path / "db")
-    store.import_employees("\ufeffid,name\nA,Ánh\nB,Bình\n")  # Excel BOM, accented names
-    store.import_employees("ID , Name\nA,Ánh Nguyễn\n")
-    assert store.employees() == {"A": "Ánh Nguyễn", "B": "Bình"}
-    store.update_employee("B", "Bình", False)  # left the company; a later import must not bring them back
-    store.import_employees("id,name\nA,Ánh\nB,Bình\nC,Chi\n")
-    assert store.employees() == {"A": "Ánh", "C": "Chi"}
-    with pytest.raises(ValueError, match="id,name"):
+    store.import_employees("\ufeffemail,name\nanh@example.com,Ánh\nbinh@example.com,Bình\n")
+    store.import_employees("Email , Name\nANH@example.com,Ánh Nguyễn\n")
+    assert {p.email: p.name for p in store.all_employees()} == {"anh@example.com": "Ánh Nguyễn", "binh@example.com": "Bình"}
+    with pytest.raises(ValueError, match="email,name"):
         store.import_employees("code;full name\nA;X\n")
 
 
@@ -218,3 +215,188 @@ def test_visit_votes_like_the_live_tracker():
     frames += [Sample(None, "A", 0.3, 0.1, "stranger")]  # rejected: below threshold
     r = visits(frames, 0.5, 0.08, votes_required=3)
     assert (r.correct, r.wrong, r.rejected, r.employees) == (1, 0, 2, 2)
+
+
+def test_inference_threads_default_to_physical_cores(monkeypatch):
+    from attendance.vision import recognizer
+
+    monkeypatch.setattr(recognizer.os, "cpu_count", lambda: 12)  # 6 cores with hyper-threading
+    assert recognizer.cpu_threads() == 6
+    monkeypatch.setattr(recognizer.os, "cpu_count", lambda: 32)
+    assert recognizer.cpu_threads() == recognizer.MAX_AUTO_THREADS
+    monkeypatch.setattr(recognizer.os, "cpu_count", lambda: 1)
+    assert recognizer.cpu_threads() == 1
+    assert recognizer.cpu_threads(3) == 3  # an explicit setting wins
+
+
+def test_onnx_sessions_do_not_spin(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    from attendance.vision import recognizer
+
+    seen = {}
+
+    class Options:
+        def __init__(self):
+            self.entries = {}
+
+        def add_session_config_entry(self, key, value):
+            self.entries[key] = value
+
+    def session(path, sess_options, providers):
+        seen.update(options=sess_options, providers=providers)
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(SessionOptions=Options, InferenceSession=session))
+    recognizer.onnx_session(tmp_path / "m.onnx", threads=4)
+    options = seen["options"]
+    assert options.intra_op_num_threads == 4 and options.inter_op_num_threads == 1
+    assert options.entries == {"session.intra_op.allow_spinning": "0", "session.inter_op.allow_spinning": "0"}
+
+
+def test_coreml_runs_the_recogniser_only_and_falls_back_to_the_cpu(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    from attendance.vision import recognizer
+
+    calls = []
+
+    def session(path, sess_options, providers):
+        calls.append(providers[0] if isinstance(providers[0], str) else providers[0][0])
+        if calls[-1] == "CoreMLExecutionProvider" and "broken" in str(path):
+            raise RuntimeError("model not supported")
+
+    options = types.SimpleNamespace(add_session_config_entry=lambda *a: None)
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(
+        SessionOptions=lambda: options, InferenceSession=session,
+        get_available_providers=lambda: ["CoreMLExecutionProvider", "CPUExecutionProvider"]))
+    recognizer.onnx_session(tmp_path / "rec.onnx", use_gpu=True, coreml=True)
+    recognizer.onnx_session(tmp_path / "det.onnx", use_gpu=True)  # input size varies: never CoreML, and no CUDA here
+    recognizer.onnx_session(tmp_path / "rec.onnx", coreml=True)  # use_gpu off
+    recognizer.onnx_session(tmp_path / "broken.onnx", use_gpu=True, coreml=True)
+    assert calls == ["CoreMLExecutionProvider", "CPUExecutionProvider", "CPUExecutionProvider",
+                     "CoreMLExecutionProvider", "CPUExecutionProvider"]
+
+
+def test_routine_requests_are_not_logged():
+    import logging
+
+    from attendance.web import QuietRoutineRequests
+
+    def record(msg):
+        return logging.LogRecord("werkzeug", logging.INFO, __file__, 1, msg, None, None)
+
+    quiet = QuietRoutineRequests()
+    assert not quiet.filter(record('192.168.10.77 - - [20/Oct/2026 09:25:21] "GET /live.jpg?t=1 HTTP/1.1" 200 -'))
+    assert not quiet.filter(record('1.2.3.4 - - [x] "\x1b[36mGET /static/app.css?v=1 HTTP/1.1\x1b[0m" 304 -'))
+    assert quiet.filter(record('1.2.3.4 - - [x] "GET /media/crops/a.jpg HTTP/1.1" 404 -'))  # failures stay
+    assert quiet.filter(record('1.2.3.4 - - [x] "GET /unknowns HTTP/1.1" 200 -'))  # pages stay
+    assert quiet.filter(record('1.2.3.4 - - [x] "POST /settings HTTP/1.1" 302 -'))
+
+
+def test_service_log_is_rotated_when_large(tmp_path):
+    from attendance.cli.launcher import rotate
+
+    log = tmp_path / "service.log"
+    log.write_text("x" * 20)
+    rotate(log, max_bytes=100)
+    assert log.exists()
+    rotate(log, max_bytes=10)
+    assert not log.exists() and (tmp_path / "service.log.1").read_text() == "x" * 20
+    rotate(tmp_path / "missing.log")  # nothing to do
+
+
+def test_camera_opens_with_short_timeouts(monkeypatch):
+    from attendance.vision import camera
+
+    calls = []
+    monkeypatch.setattr(camera.cv2, "VideoCapture", lambda *a: calls.append(a))
+    camera.open_capture("rtsp://cam/stream", 2)
+    url, backend, params = calls[0]
+    assert dict(zip(params[::2], params[1::2])) == {camera.cv2.CAP_PROP_OPEN_TIMEOUT_MSEC: camera.OPEN_TIMEOUT_MS,
+                                                    camera.cv2.CAP_PROP_READ_TIMEOUT_MSEC: camera.READ_TIMEOUT_MS}
+
+
+def test_camera_page_picture_is_sharp_enough_and_full_size_is_available(core):
+    import cv2
+    import numpy as np
+
+    from attendance.core.pipeline import PREVIEW_WIDTH, draw
+    from attendance.web import create_app
+
+    app, _, _ = core
+    frame = np.zeros((1616, 2880, 3), dtype=np.uint8)
+    preview = cv2.imdecode(np.frombuffer(draw(frame, []), np.uint8), cv2.IMREAD_COLOR)
+    assert preview.shape[1] == PREVIEW_WIDTH > 960
+    c = create_app(app).test_client()
+    assert c.get("/live/full.jpg").status_code == 404  # nothing analysed yet
+    app.live.set_frame(draw(frame, []), frame)
+    full = c.get("/live/full.jpg")
+    assert full.status_code == 200
+    assert cv2.imdecode(np.frombuffer(full.data, np.uint8), cv2.IMREAD_COLOR).shape[:2] == (1616, 2880)
+
+
+def test_faces_below_the_vote_score_are_followed_but_cannot_vote():
+    """Masks and side views lower the detector's confidence (0.5-0.65): such a face is still
+    returned, so it is tracked and reviewed when unknown, but it never votes anyone in."""
+    from attendance.recognizer import FaceRecognizer
+    from attendance.tracker import vote_for
+
+    kps = np.array([[60, 70], [140, 70], [100, 110], [70, 150], [130, 150]], np.float32)
+
+    class Backend:
+        def __init__(self, score):
+            self.score = score
+
+        def detect(self, frame, threshold=0.5, det_size=None):
+            return [(np.array([20, 20, 180, 200]), self.score, kps)]
+
+        def embed(self, frame, landmarks):
+            return np.ones(8, np.float32)
+
+    rec = FaceRecognizer.__new__(FaceRecognizer)
+    frame = np.random.default_rng(0).integers(0, 255, (220, 220, 3), dtype=np.uint8)
+    rec.cfg, rec.backend = config.RecognitionConfig(), Backend(0.55)
+    face, = rec.analyze(frame)
+    assert not face.size_ok and not face.quality_ok
+    assert vote_for([("A", 0.95), ("B", 0.1)], face.quality_ok, face.size_ok, rec.cfg) is None  # however strong
+    rec.backend = Backend(0.7)
+    assert rec.analyze(frame)[0].quality_ok
+
+
+def test_a_lower_detection_setting_reaches_the_detector():
+    from attendance.recognizer import FaceRecognizer
+
+    seen = {}
+
+    class Backend:
+        def detect(self, frame, threshold=0.5, det_size=None):
+            seen["threshold"] = threshold
+            return []
+
+    rec = FaceRecognizer.__new__(FaceRecognizer)
+    rec.cfg, rec.backend = config.RecognitionConfig(), Backend()
+    rec.analyze(np.zeros((50, 50, 3), np.uint8))
+    assert seen["threshold"] == 0.5  # the detectors' own cut-off with the default 0.65
+    rec.cfg.min_det_score = 0.4
+    rec.analyze(np.zeros((50, 50, 3), np.uint8))
+    assert seen["threshold"] == 0.4
+
+
+def test_camera_page_labels_use_email_names(core):
+    from attendance.core.pipeline import face_label
+
+    app, _, _ = core
+    app.store._db.execute("UPDATE employees SET name = 'Lương Thế Hùng', email = 'enzo@example.com' WHERE id = 'B'")
+    app.store._db.commit()
+
+    class Face:
+        quality_ok = size_ok = True
+        size, sharpness, yaw, pitch, det_score = 120, 200, 0, 0, 0.9
+
+    text, _ = face_label(app, Face(), [("B", 0.8), ("A", 0.2)])
+    assert text.startswith("Enzo ") and "Lương" not in text
+    Face.quality_ok = Face.size_ok = False  # behind a mask (0.55): followed, but does not count
+    Face.det_score = 0.55
+    assert face_label(app, Face(), [("B", 0.8), ("A", 0.2)])[0] == "? unclear"

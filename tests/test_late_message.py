@@ -92,9 +92,9 @@ def test_config_checks_send_time_and_placeholders(tmp_path):
 
 def test_chat_ids_from_csv_and_employee_page(core):
     app, clock, _ = core
-    app.store.import_employees("id,name,chat_user\nA,Alice,123\nD,Dan,\n")
-    assert app.store.employee("A").chat_user == "123" and app.store.employee("D").chat_user == ""
-    app.store.import_employees("id,name\nA,Alice Nguyen\n")
+    app.store.import_employees("email,name,chat_user\nalice@example.com,Alice,123\ndan@example.com,Dan,\n")
+    assert app.store.employee("A").chat_user == "123" and app.store.employee_by_email("dan@example.com").chat_user == ""
+    app.store.import_employees("email,name\nalice@example.com,Alice Nguyen\n")
     assert app.store.employee("A").chat_user == "123"  # not wiped by a CSV without the column
 
     flask_app = create_app(app)
@@ -177,9 +177,9 @@ def test_chat_ids_are_normalised_and_checked(core):
     with pytest.raises(ValueError, match="number"):
         app.store.update_employee("A", "Alice", True, "alice@example.com")
     assert app.store.employee("A").chat_user == "456"  # nothing changed
-    with pytest.raises(ValueError, match="row B"):
-        app.store.import_employees("id,name,chat_user\nB,Bob,bob\n")
-    app.store.import_employees("id,name,chat_user\nB,Bob,users/789\n")
+    with pytest.raises(ValueError, match="row 2"):
+        app.store.import_employees("email,name,chat_user\nbob@example.com,Bob,bob\n")
+    app.store.import_employees("email,name,chat_user\nbob@example.com,Bob,users/789\n")
     assert app.store.employee("B").chat_user == "789"
 
     flask_app = create_app(app)
@@ -194,7 +194,7 @@ def test_picture_of_the_late_people(core):
     import numpy as np
     from test_evidence import seen
 
-    from attendance import latephoto
+    from attendance.core import latephoto
 
     app, clock, _ = core
     payloads = []
@@ -271,7 +271,7 @@ def test_picture_is_served_by_its_token_without_the_password(core):
 def test_pictures_of_late_people_follow_the_evidence_retention(core):
     from test_evidence import seen
 
-    from attendance import latephoto
+    from attendance.core import latephoto
 
     app, clock, _ = core
     old = DAY - dt.timedelta(days=100)  # within late_evidence_days
@@ -287,7 +287,7 @@ def test_pictures_of_late_people_follow_the_evidence_retention(core):
 
 
 def test_labels_are_drawn_without_accents():
-    from attendance.latephoto import ascii_label
+    from attendance.core.latephoto import ascii_label
 
     assert ascii_label("Nguyễn Văn Đức") == "Nguyen Van Duc"
     assert ascii_label("Trần Thị Hồng đào") == "Tran Thi Hong dao"
@@ -299,7 +299,7 @@ def test_background_picture_is_uploaded_and_removed_on_the_settings_page(core):
 
     import numpy as np
 
-    from attendance import latephoto
+    from attendance.core import latephoto
 
     app, _, _ = core
     c = client(app)
@@ -325,7 +325,7 @@ def test_cutout_without_the_model_and_the_pieces_of_the_scene():
     import cv2
     import numpy as np
 
-    from attendance import latephoto
+    from attendance.core import latephoto
 
     # A dark figure in the middle of a light photo: GrabCut keeps the figure, the sides go.
     photo = np.full((360, 160, 3), 230, np.uint8)
@@ -340,3 +340,60 @@ def test_cutout_without_the_model_and_the_pieces_of_the_scene():
     drawn = latephoto.load_background(None, 1280, 720)
     assert drawn.shape == (720, 1280, 3) and drawn[700, 10].tolist() != drawn[10, 10].tolist()
     assert latephoto.load_background(latephoto.Path("/nowhere.jpg"), 640, 360).shape == (360, 640, 3)
+def test_people_can_be_called_by_their_email_name(core):
+    from attendance.core.service import email_name
+
+    assert email_name("ruby@offspringdigital.com") == "Ruby"
+    assert email_name("tan.nguyen@offspringdigital.com") == "Tan Nguyen"
+    app, clock, sent = core
+    app.store._db.execute("UPDATE employees SET name = 'Lương Thế Hùng', email = 'enzo@example.com' WHERE id = 'B'")
+    app.store._db.commit()
+    clock.t = at(10, 40)
+    late(app, "B", 10, 15)
+    late(app, "C", 10, 32)
+    assert app.service.late_text(DAY) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)"  # the default
+    app.cfg.google_chat.names = "name"
+    assert app.service.late_text(DAY) == "Morning, coming late today: @Lương Thế Hùng (10:15), and @Carol (10:32)"
+    app.cfg.google_chat.names = "email"
+    assert app.service.late_text(DAY) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)"
+    assert app.service.late_text(DAY, preview=True) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)"
+    app.cfg.google_chat.mention_people = False
+    assert app.service.who("B") == "*Enzo*"
+
+
+def test_email_names_setting_is_validated_and_saved(core):
+    app, _, _ = core
+    app.cfg.google_chat.names = "nickname"
+    with pytest.raises(ValueError):
+        app.cfg.validate()
+    app.cfg.google_chat.names = "name"
+    client = create_app(app).test_client()
+    page = client.get("/settings").get_data(as_text=True)
+    assert 'name="google_chat.names"' in page
+
+
+def test_summary_lists_use_email_names(core):
+    app, clock, _ = core
+    app.store._db.execute("UPDATE employees SET name = 'Lương Thế Hùng', email = 'enzo@example.com' WHERE id = 'B'")
+    app.store._db.commit()
+    clock.t = at(11, 30)
+    late(app, "A", 10, 15)
+    text = app.service.summary_text(app.service.report(DAY))
+    assert "• @Alice: 10:15" in text and "• @Enzo" in text and "Lương" not in text  # late and not-seen lists
+
+
+def test_messages_tag_people_by_their_chat_id(core):
+    app, clock, sent = core
+    app.store.update_employee("A", "Alice", True, "1001")
+    app.store.update_employee("B", "Bob", True, "1002")
+    clock.t = at(11, 30)
+    late(app, "A", 10, 15)
+    text = app.service.summary_text(app.service.report(DAY))
+    assert "• <users/1001>: 10:15" in text and "• <users/1002>" in text  # late, and not seen
+    app.store._db.execute("UPDATE employees SET email = 'cee@example.com' WHERE id = 'C'")
+    app.store._db.commit()
+    # Carol has no Chat ID: she is called by her email name instead
+    assert "• @Cee" in app.service.summary_text(app.service.report(DAY))
+    app.cfg.google_chat.mention_people = False  # switched off: email names in bold
+    text = app.service.summary_text(app.service.report(DAY))
+    assert "• *Alice*: 10:15" in text and "<users/" not in text

@@ -1,6 +1,6 @@
 onnxruntime>=1.17          # use onnxruntime-gpu instead on a machine with an NVIDIA GPU
-opencv-python-headless>=4.9
+opencv-python-headless>=4.9,<=4.11.0.86  # Keep FFmpeg; allow older wheels for macOS 12.
 numpy>=1.26
-Flask>=3.0
+Flask>=3.1  # request.max_content_length per upload (seed import)
 PyYAML>=6.0
 tzdata; sys_platform == "win32"

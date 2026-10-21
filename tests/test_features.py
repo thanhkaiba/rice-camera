@@ -9,6 +9,7 @@ from attendance.live import FrameHealth
 from attendance.pipeline import App
 from conftest import DAY, at, face_image, person_vector
 from test_service import run_until
+from test_web import client
 
 SATURDAY = dt.date(2026, 10, 17)
 
@@ -50,7 +51,7 @@ def test_admin_can_add_move_and_delete_arrivals_with_audit_trail(env):
     service.reassign_arrival(DAY, "A", "C", user="hr")
     assert set(store.checkins(DAY)) == {"C"}
     assert store.checkins(DAY)["C"].image == "crops/x.jpg"
-    assert sent[-1] == "✅ Update: *Carol* arrived at 09:10 (corrected by admin), not late."
+    assert sent[-1] == "✅ Update: @Carol arrived at 09:10 (corrected by admin), not late."
 
     # Bob forgot to look at the camera; HR enters his arrival.
     service.set_arrival(DAY, "B", dt.time(9, 45), user="hr")
@@ -71,7 +72,7 @@ def test_messages_about_past_days_carry_the_date(env):
     run_until(service, clock, at(10, 1))
     clock.t = at(9, 0, day=DAY + dt.timedelta(days=1))
     service.set_arrival(DAY, "B", dt.time(9, 30))
-    assert sent[-1] == "✅ Update: *Bob* arrived at 09:30 on 2026-10-14 (entered by admin), not late."
+    assert sent[-1] == "✅ Update: @Bob arrived at 09:30 on 2026-10-14 (entered by admin), not late."
 
 
 def test_unclear_face_of_someone_already_checked_in_is_not_reported(env):
@@ -152,11 +153,20 @@ def test_upload_learn_delete_and_look_alike_alert(core):
 
 def test_switching_model_reembeds_saved_photos(core):
     app, clock, _ = core
-    app.library.add_photo("C", face_image(5))
+    app.library.add_photo("C", face_image(3), source="admin")
+    original = app.store.references(app.library.model_id, "C")[-1]
+    clock.t += dt.timedelta(days=7)
+    app.store.add_embedding("later-copy", "C", original.vector, "admin", clock.t.astimezone(dt.timezone.utc),
+                            original.image)
     app.cfg.recognition.recognizer_model = "models/other_model.onnx"
     assert app.library.model_id == "other_model"
     assert app.library.reembed_missing() == 1
     assert app.gallery.counts() == {"C": 1}
+    [photo] = app.store.references(app.library.model_id, "C")
+    assert photo.created_at == original.created_at
+    assert photo.image == original.image and photo.source == "admin"
+    page = client(app).get("/employees/C").get_data(as_text=True)
+    assert "12/10/2026 – 18/10/2026" in page and "19/10/2026 – 25/10/2026" not in page
     assert app.library.reembed_missing() == 0
 
 
@@ -240,7 +250,7 @@ def test_correcting_a_wrong_sighting_brings_back_the_real_later_arrival(env):
     assert arrivals["A"].first_seen == at(9, 20) and arrivals["A"].source == "corrected"
     assert arrivals["B"].first_seen == at(10, 15) and arrivals["B"].image == "crops/bob.jpg"
     assert sent[-2:] == ["🟠 @Bob arrived at 10:15, 15 min late (corrected by admin).",
-                         "✅ Update: *Alice* arrived at 09:20 (corrected by admin), not late."]
+                         "✅ Update: @Alice arrived at 09:20 (corrected by admin), not late."]
     assert [d.employee_id for d in service.report(DAY).late] == ["B"]
 
 

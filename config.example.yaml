@@ -1,7 +1,7 @@
 # Copy to config.yaml and edit. Always quote times ("09:00"), otherwise YAML may misread them.
 timezone: Asia/Ho_Chi_Minh
 data_dir: data                 # database, face crops, logs
-employees_file: employees.csv  # columns: id,name; imported once when there are no employees yet
+employees_file: employees.csv  # columns: email,name; initial import or attaching emails to legacy employees
 healthcheck_url: ""            # e.g. https://hc-ping.com/<uuid>; pinged every minute so you get an alert if this PC stops
 retention_days: 90             # camera photos of arrivals and unknown faces are deleted after this many days
 late_evidence_days: 365        # photos of days on which a person was late are kept this long, as evidence
@@ -12,7 +12,7 @@ late_evidence_days: 365        # photos of days on which a person was late are k
 
 schedule:
   window_start: "08:00"   # camera starts. People arriving earlier are only counted if they pass the camera again after this time.
-  late_after: "10:00"     # first seen before this = on time; not seen by then = late
+  late_after: "10:00"     # arrivals through 10:00:59 are on time; late starts at 10:01
   window_end: "11:00"     # camera stops, daily summary is sent
   work_days: [0, 1, 2, 3, 4]  # 0 = Monday ... 6 = Sunday
 
@@ -21,6 +21,7 @@ camera:
   # (101 = main stream, use this; 102 = low-resolution sub stream; some models use /H.264)
   url: "rtsp://admin:ABCDEF@192.168.1.64:554/Streaming/Channels/101"
   process_fps: 5          # frames analysed per second; lower it if the CPU cannot keep up
+  decode_threads: 2       # CPU threads decoding the video (0 = all cores); 2 roughly halves the CPU for a 3K stream
   area: ""                # part of the picture to analyse, "left,top,right,bottom" fractions; set it on the Live camera page
   enhance_low_light: true
 
@@ -33,11 +34,11 @@ recognition:
   detector_model: ""      # empty = default file in models/ (python -m attendance download-models)
   recognizer_model: ""
   det_size: 640           # detector input (multiple of 32). A 1080p picture is shrunk 3x at 640; use 960 if faces look small
-  use_gpu: false
-  cpu_threads: 0          # 0 = all CPUs but one (left for video decoding and the admin page)
+  use_gpu: false          # NVIDIA: needs onnxruntime-gpu. Mac: runs the recognizer through CoreML (~40% faster, ~9 s longer start)
+  cpu_threads: 0          # 0 = one per physical core, at most 6 (the rest is left for video decoding and the admin page)
   # A frame only votes if the face is big, sharp and roughly frontal enough:
   min_face_px: 60
-  min_det_score: 0.65
+  min_det_score: 0.65     # a frame votes for a person from this detector confidence up (masks score 0.5-0.65)
   min_sharpness: 40
   max_yaw: 35
   max_pitch: 30
@@ -52,10 +53,9 @@ recognition:
   # Review and learning (also under Settings -> Recognition -> Advanced)
   learn_corrections: true # a face moved to the right person on the Today page is learned as a reference photo
   learn_per_group: 5      # reference photos taken from one confirmed group of faces on the review page
-  group_days: 14          # unknown faces are grouped with similar ones seen this recently
-  seen_again_score: 0     # an unclear face this similar to someone already checked in today is not sent for review.
-                          # 0 = off (safe with masks: masked faces look alike, so a colleague could be dropped as
-                          # "already in"). Try 0.3 only when nobody wears a mask and review repeats the same faces.
+  group_days: 14          # how far back to compare photos of faces ignored today; pending tracks stay separate
+  seen_again_score: 0.3   # an unclear face this similar to someone already checked in today is not sent for review
+  suggest_score: 0.35     # Review offers people from this similarity up as "Maybe" choices (never recorded by itself)
 
 tracking:
   # face:   follow faces between frames (light; fine for one or two people at a time).
@@ -72,6 +72,7 @@ google_chat:
   mention_people: true    # @mention late and missing people (needs each employee's Google Chat user ID)
   notify_late_arrivals: true
   unknown_batch_minutes: 5   # group unknown-face notices instead of one message per face
+  names: email            # how people are called in messages: email (ruby@... -> Ruby) or name (People page)
 
 late_message:             # one message a day listing who came late
   enabled: true

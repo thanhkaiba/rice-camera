@@ -13,11 +13,13 @@ Download the installer for your computer from the newest [release](https://githu
 
 The program starts at login, restarts itself if it stops, and opens the **Setup** page the first time. Opening it again just opens the page.
 
-**Automatic updates are off by default.** Tick the box in *Settings → Access → Updates* and every 6 hours the program looks for a newer release, downloads it into the data folder and, outside camera hours, restarts into it. That page shows the version and has *Check now*. Data and settings are kept. Coming from the install script below: install over it; it uses the same data folder and stops the old copy.
+**Automatic updates are on by default** in the installed program (untick the box in *Settings → Access → Updates* to stop them; an install whose Settings page saved them off stays off). Every 6 hours the program looks for a newer release, downloads it into the data folder and, outside camera hours, restarts into it. That page shows the version and has *Check now*. Data and settings are kept. If a new version misbehaves, *Go back to version …* on the same page restarts into the previous one (the last two downloaded versions and the installed program are kept); the version gone back from is not installed again, the next newer release is, and *Use version … again* returns to the newest. Coming from the install script below: install over it; it uses the same data folder and stops the old copy.
 
 ## Install script (from the source folder)
 
 No commands needed, and no admin rights. The script gets its own Python, the libraries and the models, starts the program now and at every login, puts a shortcut on the Desktop and opens the **Setup** page.
+
+The launcher selects prebuilt libraries compatible with this computer's OS, CPU and Python. It checks that ONNX Runtime and OpenCV's FFmpeg backend load before installing the program and starting it. If no compatible wheels are available, or the libraries fail to load, installation stops with an error.
 
 1. Download this repository (on GitHub: *Code → Download ZIP*) and unzip it.
 2. Double-click the installer in the unzipped folder:
@@ -49,6 +51,10 @@ python -m attendance run
 Allow Python on private networks when the firewall asks, so the page can be opened from other computers at `http://<computer IP>:8000`. On Linux with an NVIDIA GPU, install `onnxruntime-gpu` instead of `onnxruntime` and set `use_gpu: true`.
 
 ## First-time setup
+
+For the prepared employee/photo/review seed, follow [Nhập employee và ảnh sau khi pull code](seed-import.md). It covers transferring the ignored `seed/` directory, importing employees by email, and updating an existing system.
+
+People are identified by a unique email and a display name. Add them on People or import a CSV with `email,name` columns; emails are trimmed and lowercased. Names can repeat, and editing a name or email keeps the person's photos and attendance history. For older installations, the configured employee CSV attaches emails to existing records only when the name matches exactly one legacy person and one CSV row. Ambiguous matches stop the import; set those emails individually on People first. Invalid or old `id,name` CSV files are skipped at startup, so People stays available. After a successful import, restarts keep your edits; import again on People to apply later CSV changes.
 
 The Setup page walks through it: camera address (for Ezviz, `rtsp://admin:<VERIFICATION_CODE>@<CAMERA_IP>:554/Streaming/Channels/101`; the code is the 6 capital letters on the camera label; give the camera a fixed IP in the router), working hours, the Google Chat webhook (space name → *Apps & integrations* → *Webhooks* → *Add webhook*), a password, the address other computers use, and the employees.
 
@@ -130,6 +136,8 @@ WantedBy=multi-user.target
 - script or source install: `python -m attendance --config config.yaml restore "<backup folder>"`
 
 It puts back the newest database copy (`--snapshot 2026-10-01` picks an older one), the photos, and `config.yaml` when the new computer has none. Start the program again and check the camera address and *Address of this page* in Settings: the new computer may have another IP address.
+
+**Setting up another computer the same way** (a second office, a new computer without the old data): *Settings → Access → Configuration file → Export* writes config.yaml and everything saved on the Settings page, including the detection area, the password, the Google Chat webhook and the HR token, so keep the file private. *Import* on the other computer checks it, saves that computer's current configuration to `data/config-backups/before-import-<time>.json` (import that file to undo), keeps its data folder and *Address of this page*, and restarts the program. People and photos are not in the file: use a backup or the [seed import](seed-import.md). From a terminal: `export-config <file>` and `import-config <file>` (e.g. `python -m attendance --config config.yaml import-config conf.json`), then restart the program.
 
 **By hand** works too: the data folder (see the table above) is self-contained, so copying it to the same place on the new computer is a complete move.
 

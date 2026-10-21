@@ -9,9 +9,9 @@ description = "Camera attendance: recognises employees walking in, reports who i
 requires-python = ">=3.10"
 dependencies = [
     "onnxruntime>=1.17",
-    "opencv-python-headless>=4.9",
+    "opencv-python-headless>=4.9,<=4.11.0.86",  # Keep FFmpeg; allow older wheels for macOS 12.
     "numpy>=1.26",
-    "Flask>=3.0",
+    "Flask>=3.1",
     "PyYAML>=6.0",
     "tzdata; sys_platform == 'win32'",
 ]
@@ -20,7 +20,15 @@ dependencies = [
 face-attendance = "attendance.__main__:main"
 
 [tool.setuptools]
-packages = ["attendance"]
+packages = [
+    "attendance",
+    "attendance.core",
+    "attendance.store",
+    "attendance.vision",
+    "attendance.integrations",
+    "attendance.web",
+    "attendance.cli",
+]
 
 [tool.setuptools.package-data]
-attendance = ["templates/*.html", "static/*"]
+"attendance.web" = ["templates/*.html", "static/*"]

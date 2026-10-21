@@ -31,7 +31,7 @@ def test_not_seen_by_deadline_is_listed_then_late_arrival_announced(env):
     service, _, clock, sent = env
     run_until(service, clock, at(9, 30))
     service.on_identified("A", at(9, 25), 0.7, None)
-    run_until(service, clock, at(10, 0, 30))
+    run_until(service, clock, at(10, 1))
 
     deadline = [m for m in sent if m.startswith("⏰")]
     assert len(deadline) == 1
@@ -46,8 +46,8 @@ def test_not_seen_by_deadline_is_listed_then_late_arrival_announced(env):
     summary = sent[-1]
     assert summary.startswith("📋")
     assert "On time: 1 · Late: 1 · Not seen: 1" in summary
-    assert "• Bob: 10:23 (23 min late)" in summary
-    assert "• Carol" in summary
+    assert "• @Bob: 10:23 (23 min late)" in summary
+    assert "• @Carol" in summary
 
 
 def test_notices_are_sent_once_even_after_restart(env, tmp_path):
@@ -73,7 +73,7 @@ def test_unknown_faces_are_batched_and_admin_can_resolve(env):
 
     # Admin confirms the 9:12 face was C: on time, with a correction in the chat.
     service.resolve_unknown(uid, "C")
-    assert sent[-1] == "✅ Update: *Carol* arrived at 09:12 (confirmed by admin), not late."
+    assert sent[-1] == "✅ Update: @Carol arrived at 09:12 (confirmed by admin), not late."
     rep = service.report(DAY)
     assert "C" in [a.employee_id for a in rep.on_time]
     assert service.gallery.counts()["C"] == 2  # the confirmed face was learned
@@ -110,11 +110,11 @@ def test_moving_a_sighting_to_the_right_person_learns_their_face(env):
 def test_unclear_face_like_someone_checked_in_is_reviewed_unless_setting_is_on(env):
     service, store, clock, sent = env
     service.on_identified("B", at(9, 0), 0.7, None)
-    # Off by default: with masks, a colleague resembling Bob must still reach the review page.
-    assert service.cfg.recognition.seen_again_score == 0
-    assert service.on_unknown(at(9, 5), "a.jpg", person_vector(20), "B", 0.35) is not None
-    service.cfg.recognition.seen_again_score = 0.3
-    assert service.on_unknown(at(9, 6), "b.jpg", person_vector(21), "B", 0.35) is None  # taken to be Bob again
+    like_bob = person_vector(2) + 0.6 * person_vector(20)  # Bob, unclear
+    like_bob /= np.linalg.norm(like_bob)
+    assert service.on_unknown(at(9, 5), "a.jpg", like_bob, "B", 0.35) is None  # taken to be Bob again
+    service.cfg.recognition.seen_again_score = 0
+    assert service.on_unknown(at(9, 6), "b.jpg", like_bob, "B", 0.35) is not None
 
 
 def test_no_late_time_message_when_everyone_is_in(env):
@@ -240,3 +240,42 @@ def test_exempt_people_are_recorded_but_never_late_or_missing(env):
     assert not any("Carol" in m for m in sent)
     assert "Carol" not in (service.late_text(DAY) or "")
     assert "C" not in [p.employee_id for p in service.period_report(DAY, DAY).people]
+
+
+def test_confirming_several_faces_of_a_late_person_posts_once(env):
+    service, store, clock, sent = env
+    run_until(service, clock, at(10, 40))
+    first = service.on_unknown(at(10, 30), "b1.jpg", person_vector(21), None, None)  # unlike each other:
+    second = service.on_unknown(at(10, 29), "b2.jpg", person_vector(22), None, None)  # two separate groups
+    service.resolve_unknown(first, "B")
+    service.resolve_unknown(second, "B")  # an earlier visit, still late
+    late_posts = [m for m in sent if m.startswith("🟠")]
+    assert len(late_posts) == 1 and "10:30" in late_posts[0]
+    assert store.checkins(DAY)["B"].first_seen == at(10, 29)
+    early = service.on_unknown(at(9, 50), "b3.jpg", person_vector(23), None, None)
+    service.resolve_unknown(early, "B")  # turns out B was on time after all: that is worth a post
+    assert [m for m in sent if "Bob" in m][-1] == "✅ Update: @Bob arrived at 09:50 (confirmed by admin), not late."
+
+
+def test_unclear_face_also_like_someone_not_in_yet_is_reviewed(env):
+    """A mask or a side view makes a face only somewhat like several people: once one of them is in,
+    it must not be dropped as "them again" while it may be the arrival of someone not in yet."""
+    service, store, clock, sent = env
+    service.on_identified("B", at(9, 0), 0.7, None)
+    both = person_vector(2) + person_vector(3)  # as like Bob (in) as Carol (not in yet)
+    both /= np.linalg.norm(both)
+    (bob, score), = [m for m in service.gallery.match(both, k=3) if m[0] == "B"]
+    assert service.on_unknown(at(9, 5), "m.jpg", both, "B", score) is not None
+    mostly_bob = person_vector(2) + 0.2 * person_vector(3)
+    mostly_bob /= np.linalg.norm(mostly_bob)
+    (_, score), = [m for m in service.gallery.match(mostly_bob, k=3) if m[0] == "B"]
+    assert service.on_unknown(at(9, 6), "b.jpg", mostly_bob, "B", score) is None  # clearly Bob again
+
+
+def test_seen_again_margin_uses_scores_from_the_same_picture(env):
+    service, store, clock, sent = env
+    service.on_identified("B", at(9, 0), 0.7, None)
+    both = person_vector(2) + person_vector(3)  # this picture is as like Carol (not in) as Bob
+    both /= np.linalg.norm(both)
+    # Another frame of the track matched Bob at 0.95: still not "Bob again", as this picture shows.
+    assert service.on_unknown(at(9, 5), "m.jpg", both, "B", 0.95) is not None

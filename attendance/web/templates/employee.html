@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% set title = person.name %}
+{% block body %}
+<div class="crumbs"><a href="{{ url_for('employees') }}">People</a> {{ icon('chevron-right') }} <span>{{ person.name }}</span></div>
+<div class="page-head">
+  <div class="row" style="gap:14px; align-items:center">
+    {% set thumb = (refs|selectattr('image')|first) %}
+    {% if thumb %}<img class="avatar lg" src="{{ url_for('media', path=thumb.image) }}" alt="">{% else %}<span class="avatar lg empty">{{ person.name[:1] }}</span>{% endif %}
+    <div>
+      <h1>{{ person.name }}</h1>
+      <p class="subtitle row" style="gap:8px"><span>{{ person.email or "Add email" }}</span>
+        {% if not person.active %}<span class="badge info">Not tracked</span>
+        {% elif refs|length == 0 %}<span class="badge bad plain" title="Cannot be recognised yet">{{ icon('image') }}No photos</span>
+        {% elif good < good_photos %}<span class="badge late plain" title="{{ good }} of {{ refs|length }} photos are sharp and frontal · add {{ good_photos - good }} more good ones">{{ icon('image') }}{{ good }}/{{ refs|length }} good photos</span>
+        {% else %}<span class="badge ok plain" title="Ready">{{ icon('image') }}{{ good }}/{{ refs|length }} good photos</span>{% endif %}
+        {% if person.exempt %}<span class="badge brand plain" title="Never counted as late or absent">{{ icon('crown') }}Not counted</span>{% endif %}</p>
+    </div>
+  </div>
+</div>
+
+{% for other, score in look_alikes %}
+  <div class="alert warn"><span class="ico">{{ icon('alert') }}</span><span>Reference photos of {{ person.name }} look like
+    <a href="{{ url_for('employee', employee_id=other) }}">{{ names.get(other, other) }}</a> ({{ '%.0f'|format(score * 100) }}%), so the camera may confuse them:
+    check for a misplaced photo and add clearer ones.</span></div>
+{% endfor %}
+
+<div class="grid-2">
+  <div>
+    <div class="card">
+      <div class="card-head"><h2 class="row">{{ icon('image') }}Reference photos</h2>
+        <a class="btn btn-sm" href="{{ url_for('live_page') }}" title="Take a photo with the door camera: open the camera page and use Capture faces">{{ icon('camera') }}From camera</a></div>
+      <form method="post" action="{{ url_for('upload_photos', employee_id=person.id) }}" enctype="multipart/form-data" id="upload">
+        <label id="drop" class="dropzone">
+          <input type="file" name="photos" id="photos" accept="image/*" multiple required hidden>
+          <div class="ico">{{ icon('upload') }}</div>
+          <strong>Drop photos here or click</strong>
+          <div class="hint" style="margin-top:4px">5–10 clear photos: straight, slightly left and right, with and without glasses. Door-camera frames work best.</div>
+        </label>
+        <div id="preview" class="photo-grid" style="grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); margin-top:12px"></div>
+        <div id="upload-bar" class="row" hidden style="margin-top:12px"><button class="primary" id="upload-btn">{{ icon('upload') }}<span>Upload</span></button>
+          <button type="button" class="ghost" onclick="clearFiles()">{{ icon('close') }}Cancel</button></div>
+      </form>
+    </div>
+
+    {% if refs %}
+    <div class="card">
+      <h2>Recognition check</h2>
+      {% include '_reference_quality.html' %}
+      <p class="small" style="margin:0">Each photo is compared with different photos of this person and active colleagues.
+        A photo and its near-duplicates cannot validate each other. These checks help find misplaced, ambiguous or redundant references;
+        they are not measured camera accuracy. Check the identity before deleting: a different angle can still be useful.</p>
+      <p class="hint" style="margin-bottom:0">Current recognition thresholds: same person ≥ {{ '%.2f'|format(recognition_params.accept_score) }},
+        gap over the closest colleague ≥ {{ '%.2f'|format(recognition_params.min_margin) }}.</p>
+    </div>
+    <form method="post" action="{{ url_for('delete_photo', employee_id=person.id) }}" id="delete-low-score-photos"
+          class="card" data-confirm="Delete reference photos below the chosen Image score? Their face data will also be removed.">
+      <div class="form-row">
+        <label class="field">Delete photos with an Image score below
+          <input type="number" name="below_score" id="below-score" value="20" min="0" max="100" step="1" required></label>
+        <button class="danger" id="delete-below-score" disabled>{{ icon('trash') }}Delete below score (<span id="low-score-count">0</span>)</button>
+      </div>
+      <p class="hint" style="margin-bottom:0">Uses the displayed Image score out of 100. Photos at the threshold and photos without a score are kept.</p>
+    </form>
+    <form method="post" action="{{ url_for('delete_photo', employee_id=person.id) }}" id="bulk-delete-photos"
+          class="row" style="justify-content:space-between; margin-bottom:12px" data-confirm="Delete the selected reference photos?">
+      <label class="check"><input type="checkbox" id="select-all-photos">Select all photos</label>
+      <button class="danger btn-sm" id="delete-selected-photos" disabled>{{ icon('trash') }}Delete selected (<span id="selected-photo-count">0</span>)</button>
+    </form>
+    {% for start, end, photos in photo_groups %}
+    {% set group_id = 'week-' ~ start.isoformat() if start else 'other-reference-photos' %}
+    <section class="{{ 'reference-week' if start else 'reference-other' }}" aria-labelledby="{{ group_id }}">
+      <div class="card-head">
+        <h3 id="{{ group_id }}">{% if start %}Camera · {{ start.strftime('%d/%m/%Y') }} – {{ end.strftime('%d/%m/%Y') }}{% else %}Uploaded &amp; imported photos{% endif %}</h3>
+        <span class="hint">{{ photos|length }} {{ 'photo' if photos|length == 1 else 'photos' }}</span>
+      </div>
+      <div class="photo-grid reference-grid">
+      {% for r in photos %}
+      <div class="reference-card" id="reference-{{ r.id }}">
+      <div class="photo">
+        <label class="face-select" title="Select this reference for deletion">
+          <input type="checkbox" class="photo-select" name="ref_id" value="{{ r.id }}" form="bulk-delete-photos" data-image-score="{{ r.image_score if r.image_score is not none else '' }}" aria-label="Select reference photo {{ r.id }}">
+        </label>
+        {% if r.image %}<img src="{{ url_for('media', path=r.image) }}" alt="" loading="lazy">
+        {% else %}<div class="empty-state" style="height:100%">No image</div>{% endif %}
+        <div class="meta">
+          <span>{{ {'upload': 'Uploaded', 'enroll': 'From folder', 'admin': 'Confirmed', 'capture': 'From camera'}.get(r.source.split(':')[0], r.source) }}{% if r.quality_ok is false %} · <span title="Blurred or turned away: a weaker reference">blurred</span>{% endif %}
+            <br><span title="Image clarity: face size, detection, sharpness and pose. Not recognition confidence.">{% if r.image_score is not none %}Image {{ r.image_score }}/100{% elif r.image %}Image not scored yet{% else %}Image score unavailable{% endif %}</span></span>
+          <form method="post" action="{{ url_for('delete_photo', employee_id=person.id) }}" data-confirm="Delete this photo?">
+            <input type="hidden" name="{{ 'image' if r.image else 'ref_id' }}" value="{{ r.image or r.id }}">
+            <button title="Delete photo" aria-label="Delete photo">{{ icon('trash') }}</button>
+          </form>
+        </div>
+      </div>
+      {% set check = checks.get(r.id) %}
+      <div class="reference-check">
+        {% if check %}
+          <span class="badge {{ {'useful': 'ok', 'review': 'late', 'unverified': 'info'}[check.status] }}">{{ {'useful': 'Consistent reference', 'review': 'Needs review', 'unverified': 'Not enough evidence'}[check.status] }}</span>
+          <div>{{ check.reason }}</div>
+          {% if check.duplicate_of is not none %}<div class="small"><strong>Near-duplicate:</strong> <a href="#reference-{{ check.duplicate_of }}">a similar reference</a> already covers this face. Check whether keeping both adds a useful angle.</div>{% endif %}
+          <div class="small tnum" title="Similarity scores, not probabilities. Uses the same matching rule and thresholds as recognition.">
+            Same person: {{ '%.2f'|format(check.own) if check.own is not none else '–' }}
+            {% if check.other is not none %}<br>Other: <a href="{{ url_for('employee', employee_id=check.other_id) }}">{{ names.get(check.other_id, check.other_id) }}</a> · {{ '%.2f'|format(check.other) }}{% endif %}
+            {% if check.margin is not none and check.other is not none %}<br>Gap: {{ '%+.2f'|format(check.margin) }}{% endif %}
+          </div>
+        {% else %}<span class="muted">Not evaluated. Use Re-evaluate quality above.</span>{% endif %}
+      </div>
+      </div>
+      {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+    {% endif %}
+  </div>
+
+  <div>
+    <div class="card">
+      <h2 class="row">{{ icon('edit') }}Details</h2>
+      <form method="post" action="{{ url_for('update_employee', employee_id=person.id) }}" class="stack" style="margin:0">
+        <label class="field">Email<input type="email" name="email" value="{{ person.email }}" required autocomplete="email"></label>
+        <label class="field">Name<input name="name" value="{{ person.name }}" required></label>
+        <label class="field">Google Chat user ID<input name="chat_user" value="{{ person.chat_user }}" placeholder="e.g. 112233445566778899000" autocomplete="off">
+          <span class="hint">For @mentions · the number at the end of the user's page address in Google Admin.</span></label>
+        <label class="switch"><input type="checkbox" name="active" {{ 'checked' if person.active }}><span>Tracked by the camera
+          <span class="hint">Untick for people who left; their data is kept.</span></span></label>
+        <label class="switch"><input type="checkbox" name="exempt" {{ 'checked' if person.exempt }}><span>Never count as late or absent
+          <span class="hint">Boss, part-timers, guests: arrival recorded, left out of alerts and reports.</span></span></label>
+        <div class="btn-group"><button class="primary">{{ icon('check') }}Save</button>
+          {% if person.chat_user %}<button formaction="{{ url_for('test_mention', employee_id=person.id) }}" title="Send a test @mention to Google Chat">{{ icon('send') }}Test mention</button>{% endif %}</div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2 class="row">{{ icon('calendar') }}Upcoming leave</h2>
+        <a class="btn btn-sm ghost" href="{{ url_for('calendar_page') }}" title="Everyone's leave, holidays and extra work days">{{ icon('calendar') }}All</a></div>
+      <div class="list">
+      {% for l in leaves %}
+        <div><span class="tnum">{{ l.start.strftime('%d %b') }}{% if l.end != l.start %} – {{ l.end.strftime('%d %b') }}{% endif %}
+            {% if l.note %}<span class="small muted">· {{ l.note }}</span>{% endif %}</span>
+          <span class="row" style="gap:6px"><span class="badge info">{{ leave_label(l.kind) }}</span>
+            {% if l.source == 'manual' %}<form method="post" action="{{ url_for('delete_leave', leave_id=l.id) }}" data-confirm="Remove this leave?">
+              <input type="hidden" name="back" value="{{ request.path }}">
+              <button class="btn-sm icon ghost" title="Remove" aria-label="Remove leave">{{ icon('trash') }}</button></form>
+            {% else %}<span class="badge plain" title="From the HR system; change it there">{{ icon('hr') }}HR</span>{% endif %}</span></div>
+      {% else %}<p class="muted" style="margin:0">None.</p>{% endfor %}
+      </div>
+      <details class="inline" style="margin-top:10px">
+        <summary>{{ icon('plus') }} Add leave</summary>
+        <form method="post" action="{{ url_for('add_leave') }}" class="stack" style="margin:8px 0 0; gap:8px">
+          <input type="hidden" name="employee_id" value="{{ person.id }}">
+          <input type="hidden" name="back" value="{{ request.path }}">
+          <div class="form-row">
+            <label class="field">From<input type="date" name="start" required></label>
+            <label class="field">Until<input type="date" name="end"></label>
+          </div>
+          <div class="form-row">
+            <label class="field"><select name="kind" aria-label="Kind of leave">{% for k, label in leave_kinds.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select></label>
+            <label class="field grow"><input name="note" maxlength="200" placeholder="Note (optional)" aria-label="Note"></label>
+          </div>
+          <div><button class="primary">{{ icon('check') }}Save leave</button></div>
+        </form>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2 class="row">{{ icon('link') }}Personal page</h2>
+      <p class="small" style="margin-top:0">{{ person.name }} can see their own arrivals and leave there and write a note for a day, without the admin password. It shows nobody else.</p>
+      {% set link = personal_link(person.id) %}
+      <div class="form-row" style="flex-wrap:nowrap">
+        <input id="personal-link" value="{{ link }}" readonly aria-label="Personal page link" style="flex:1; min-width:0" onclick="this.select()">
+        <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('personal-link').value).then(() => this.textContent = 'Copied')">{{ icon('link') }}Copy</button>
+      </div>
+      <form method="post" action="{{ url_for('renew_personal_link', employee_id=person.id) }}" data-confirm="Make a new link? The current one stops working." style="margin-top:8px">
+        <button class="btn-sm ghost" title="If the link was shared with the wrong person">{{ icon('refresh') }}New link</button>
+      </form>
+    </div>
+
+    <details class="panel danger-zone">
+      <summary>{{ icon('trash') }}Delete this person</summary>
+      <div>
+        <p class="small">Removes {{ person.name }}, their photos and face data. Past attendance records are kept.</p>
+        <form method="post" action="{{ url_for('delete_employee', employee_id=person.id) }}" class="stack" style="margin:0; gap:8px">
+          <label class="field">Type <strong>{{ person.email }}</strong> to confirm<input name="confirm" required autocomplete="off"></label>
+          <div><button class="danger">{{ icon('trash') }}Delete</button></div>
+        </form>
+      </div>
+    </details>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const input = document.getElementById('photos'), drop = document.getElementById('drop');
+  const preview = document.getElementById('preview'), bar = document.getElementById('upload-bar');
+  function showFiles() {
+    preview.innerHTML = '';
+    for (const f of input.files) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(f);
+      img.style.cssText = 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:10px; border:1px solid var(--line)';
+      img.title = f.name;
+      preview.appendChild(img);
+    }
+    bar.hidden = input.files.length === 0;
+    document.querySelector('#upload-btn span').textContent = `Upload ${input.files.length}`;
+  }
+  function clearFiles() { input.value = ''; showFiles(); }
+  input.addEventListener('change', showFiles);
+  ['dragenter', 'dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', ev => { input.files = ev.dataTransfer.files; showFiles(); });
+
+  const selections = [...document.querySelectorAll('.photo-select')];
+  const selectAll = document.getElementById('select-all-photos');
+  function updateSelection() {
+    const count = selections.filter(box => box.checked).length;
+    document.getElementById('selected-photo-count').textContent = count;
+    document.getElementById('delete-selected-photos').disabled = count === 0;
+    selectAll.checked = count === selections.length;
+    selectAll.indeterminate = count > 0 && count < selections.length;
+    document.getElementById('bulk-delete-photos').dataset.confirm = `Delete ${count} selected reference photo(s)? Their face data will also be removed.`;
+  }
+  if (selectAll) {
+    selections.forEach(box => box.addEventListener('change', updateSelection));
+    selectAll.addEventListener('change', () => {
+      selections.forEach(box => { box.checked = selectAll.checked; });
+      updateSelection();
+    });
+    updateSelection();
+  }
+  const scoreLimit = document.getElementById('below-score');
+  function updateLowScore() {
+    const threshold = Number(scoreLimit.value);
+    const valid = scoreLimit.value.trim() !== '' && Number.isInteger(threshold) && threshold >= 0 && threshold <= 100;
+    const count = valid ? selections.filter(box => box.dataset.imageScore !== '' && Number(box.dataset.imageScore) < threshold).length : 0;
+    document.getElementById('low-score-count').textContent = count;
+    document.getElementById('delete-below-score').disabled = !count;
+    document.getElementById('delete-low-score-photos').dataset.confirm = `Delete ${count} reference photo(s) with an Image score below ${threshold}/100? Their face data will also be removed.`;
+  }
+  if (scoreLimit) {
+    scoreLimit.addEventListener('input', updateLowScore);
+    updateLowScore();
+  }
+</script>
+{% endblock %}

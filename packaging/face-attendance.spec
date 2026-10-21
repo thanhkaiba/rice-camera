@@ -13,13 +13,12 @@ a = Analysis(
     [str(root / "packaging" / "entry.py")],
     pathex=[str(root)],
     binaries=collect_dynamic_libs("onnxruntime"),
-    datas=[(str(root / "attendance" / "templates"), "attendance/templates"),
-           (str(root / "attendance" / "static"), "attendance/static"),
-           (str(root / "config.example.yaml"), "."),
-           (str(root / "employees.example.csv"), ".")]
+    datas=[(str(root / "attendance" / "web" / "templates"), "attendance/web/templates"),
+           (str(root / "attendance" / "web" / "static"), "attendance/web/static"),
+           (str(root / "config.example.yaml"), ".")]
           + collect_data_files("certifi")
           + (collect_data_files("tzdata") if sys.platform == "win32" else []),  # elsewhere the system's time zones
-    hiddenimports=["attendance.__main__", "attendance.pipeline", "attendance.web", "certifi"],
+    hiddenimports=["attendance.__main__", "attendance.core.pipeline", "attendance.web", "certifi"],
     excludes=["tkinter", "matplotlib", "PyQt5", "PySide6", "IPython", "pytest"],
 )
 if sys.platform == "win32":

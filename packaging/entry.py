@@ -1,4 +1,4 @@
-"""Entry point of the packaged program (PyInstaller); see attendance/launcher.py."""
+"""Entry point of the packaged program (PyInstaller); see attendance/cli/launcher.py."""
 import os
 
 try:  # the packaged Python cannot rely on the computer's certificate files (macOS especially)
@@ -8,7 +8,7 @@ try:  # the packaged Python cannot rely on the computer's certificate files (mac
 except ImportError:
     pass
 
-from attendance.launcher import main
+from attendance.cli.launcher import main
 
 if __name__ == "__main__":
     main()

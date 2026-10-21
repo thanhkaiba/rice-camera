@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% set title = 'Status' %}
+{% macro tile(label, value, sub='', kind='') %}
+  <div class="card stat-tile {{ kind }}"><div class="k">{{ label }}</div><div class="v">{{ value }}</div>{% if sub %}<div class="hint">{{ sub }}</div>{% endif %}</div>
+{% endmacro %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>Status</h1>
+    <div class="chips"><span class="chip">{{ icon('info') }}Version {{ st.version }}</span>
+      <span class="chip" title="Free space where the database and photos are kept">{{ icon('database') }}{{ st.disk.free_gb }} GB free</span></div>
+  </div>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('diagnostics_zip') }}" title="Logs, settings and state with passwords and keys removed: send it when asking for help">{{ icon('download') }}Download diagnostics</a>
+  </div>
+</div>
+
+{% set cam = st.camera %}
+<div class="stat-grid">
+  {% if cam.ok %}{{ tile('Camera', 'Working', cam.fps ~ ' of ' ~ cam.target_fps ~ ' frames/s analysed'
+                                              ~ (' · camera sends ' ~ cam.source_fps ~ '/s' if cam.source_fps else ''), 'ok') }}
+  {% elif not cam.configured %}{{ tile('Camera', 'Not set up', 'No camera address in Settings', 'bad') }}
+  {% elif cam.in_window %}{{ tile('Camera', 'Not working', cam.state, 'bad') }}
+  {% else %}{{ tile('Camera', 'Off', 'Runs only during the camera hours', '') }}{% endif %}
+  {% set u = st.usage %}
+  {{ tile('Computer load', u.cpu_percent ~ '% CPU', 'of one core · ' ~ u.cores ~ ' cores' ~ (' · peak ' ~ u.memory_mb ~ ' MB memory' if u.memory_mb else ''),
+          'late' if u.cpu_percent > 50 * u.cores else '') }}
+  {% set b = st.backup %}
+  {% if not b.folder %}{{ tile('Backup', 'Off', 'No backup folder', 'bad') }}
+  {% elif not b.at %}{{ tile('Backup', 'Not yet', 'First one at ' ~ cfg.backup.time, '') }}
+  {% else %}{{ tile('Backup', 'OK' if b.ok else 'Failed', b.at|replace('T', ' ')|truncate(16, True, '') ~ (' · ' ~ b.warning if b.warning else ''),
+                  'ok' if b.ok and not b.warning else 'bad') }}{% endif %}
+  {% set up = st.update %}
+  {{ tile('Updates', 'Automatic' if up.enabled else 'Manual',
+          ('Checked ' ~ up.checked_at|replace('T', ' ')|truncate(16, True, '') ~ ' · newest ' ~ (up.latest or st.version)) if up.checked_at else ('Not checked yet' if st.packaged else 'Runs from source'),
+          'bad' if up.error else ('ok' if up.enabled else 'late')) }}
+  {% set ph = st.photos %}
+  {{ tile('People', ph.people, (ph.few|length ~ ' with fewer than ' ~ few_photos ~ (' good' if ph.quality_known else '') ~ ' photos') if ph.few else 'Everyone has enough photos',
+          'late' if ph.few else 'ok') }}
+  {{ tile('Disk', st.disk.free_gb ~ ' GB free', 'of ' ~ st.disk.total_gb ~ ' GB', 'bad' if st.disk.low else '') }}
+  {% set pw = st.power %}
+  {% if pw %}{{ tile('Power', ('Mains' if pw.on_ac else 'Battery') ~ (' · ' ~ pw.adapter_w ~ ' W' if pw.on_ac and pw.adapter_w else ''),
+                   ('Battery ' ~ pw.battery ~ '%' ~ (' charging' if pw.charging else ' not charging') if pw.battery is not none else '')
+                   ~ (' · CPU at ' ~ pw.speed_limit ~ '% speed' if pw.speed_limit is not none else ''),
+                   'bad' if pw.problems else 'ok') }}{% endif %}
+</div>
+{% if st.public_url %}<div class="alert warn"><span class="ico">{{ icon('alert') }}</span><span>{{ st.public_url.text }}</span></div>{% endif %}
+
+{% if cam.problem %}<div class="alert error"><span class="ico">{{ icon('alert') }}</span><span>{{ cam.problem }}</span></div>{% endif %}
+{% if up.error %}<div class="alert warn"><span class="ico">{{ icon('alert') }}</span><span>{{ up.error }}</span></div>{% endif %}
+{% if up.state %}<div class="alert info"><span class="ico">{{ icon('download') }}</span><span>{{ up.state }}</span></div>{% endif %}
+
+<div class="grid-2">
+  <section class="card">
+    <h2 class="row">{{ icon('camera') }}Camera during camera hours · last {{ st.uptime|length }} work days</h2>
+    {% if st.uptime %}
+    <table class="uptime">
+      {% for r in st.uptime %}
+      <tr><td>{{ WEEKDAYS[r.day.weekday()] }} {{ r.day.strftime('%d %b') }}</td>
+        <td style="width:50%">{% if r.share is not none %}<div class="meter"><span style="width:{{ (r.share * 100)|round(0, 'floor') }}%"
+          class="{{ 'ok' if r.share >= 0.98 else ('late' if r.share >= 0.8 else 'bad') }}"></span></div>{% endif %}</td>
+        <td>{% if r.share is none %}<span class="muted">{{ r.note }}</span>{% else %}{{ '%.0f'|format(r.share * 100) }}%
+          {% if r.down_min %}<span class="hint">· {{ r.down_min }} min down</span>{% endif %}{% if r.note %} <span class="hint">{{ r.note }}</span>{% endif %}{% endif %}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="hint">No camera hours yet.</p>{% endif %}
+  </section>
+  <section class="card">
+    <h2 class="row">{{ icon('image') }}Fewest photos</h2>
+    {% if ph.few %}
+    <p class="hint" style="margin-top:0">Recognition needs about {{ few_photos }}–10 clear, frontal photos per person.</p>
+    <ul class="plain">
+      {% for p in ph.few[:15] %}<li><a href="{{ url_for('employee', employee_id=p.id) }}">{{ p.name }}</a> <span class="hint">· {{ p.photos }}</span></li>{% endfor %}
+      {% if ph.few|length > 15 %}<li class="hint">and {{ ph.few|length - 15 }} more on the <a href="{{ url_for('employees') }}">People</a> page</li>{% endif %}
+    </ul>
+    {% else %}<p class="hint">Everyone has at least {{ few_photos }} photos.</p>{% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <h2 class="row">{{ icon('camera') }}Faces the camera saw · last {{ st.uptime|length or 7 }} days</h2>
+  {% if st.placement %}
+  <p class="hint" style="margin-top:0">Every face found in an analysed frame during the camera hours, counted once per frame. Recognition needs {{ st.min_face_px }} px or more, sharp and roughly frontal.</p>
+  <div style="overflow-x:auto"><table class="uptime">
+    <tr><th>Day</th><th>Faces</th><th>Typical size</th><th>Too small</th><th>From the side</th><th>Blurred</th><th>Usable</th></tr>
+    {% for r in st.placement %}
+    <tr><td>{{ WEEKDAYS[r.day.weekday()] }} {{ r.day.strftime('%d %b') }}<div class="hint">{{ r.connected_min }} min of picture</div></td>
+      <td>{{ r.faces }}</td><td>{{ (r.median_px ~ ' px') if r.median_px else '–' }}</td>
+      {% for k in ('small', 'pose', 'blur', 'good') %}<td>{{ ('%.0f%%'|format(r[k] * 100)) if r[k] is not none else '–' }}</td>{% endfor %}</tr>
+    {% for h in r.hints %}<tr><td colspan="7" class="hint">{{ h }}</td></tr>{% endfor %}
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="hint">No camera hours recorded yet.</p>{% endif %}
+</section>
+{% endblock %}

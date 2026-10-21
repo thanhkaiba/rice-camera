@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="same-origin">
+<title>{{ person.name }} · Attendance</title>
+<script>
+  try { const t = localStorage.getItem('theme'); document.documentElement.dataset.theme =
+    t || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) {}
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ asset_version }}">
+</head>
+<body class="personal">
+<div class="toasts" id="toasts">
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+    <div class="toast {{ category }}" data-flash="{{ category }}" role="status">
+      <span class="ico">{{ icon('check' if category == 'ok' else 'alert') }}</span>
+      <span class="msg">{{ message }}</span>
+      <button class="close" type="button" aria-label="Close">{{ icon('close') }}</button>
+    </div>
+  {% endfor %}
+</div>
+<main>
+  <div class="page-head">
+    <div>
+      <div class="eyebrow">Your attendance</div>
+      <h1>{{ person.name }}</h1>
+      <p class="subtitle">Arrivals the door camera recorded for you in the last 30 days. Only you have this link: keep it to yourself.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="row">{{ icon('edit') }}Note for a day</h2>
+    <form method="post" action="{{ url_for('personal_note', employee_id=person.id, sig=sig) }}" class="stack" style="margin:0">
+      <div class="form-row">
+        <label class="field">Day<input type="date" name="day" value="{{ today.isoformat() }}" min="{{ first.isoformat() }}" max="{{ last.isoformat() }}" required></label>
+        <label class="field grow">Note<input name="note" maxlength="200" placeholder="e.g. business trip, at the client, doctor in the morning"></label>
+      </div>
+      <div><button class="primary">{{ icon('check') }}Save note</button></div>
+      <span class="hint">The office sees it next to your name. Save an empty note to remove it. A note does not change your arrival; ask the office to enter leave.</span>
+    </form>
+  </div>
+
+  {% if leaves or upcoming %}
+  <div class="card">
+    <h2 class="row">{{ icon('calendar') }}Coming up</h2>
+    <div class="list">
+      {% for l in leaves %}
+      <div><span class="tnum">{{ l.start.strftime('%a %d %b') }}{% if l.end != l.start %} – {{ l.end.strftime('%a %d %b') }}{% endif %}</span>
+        <span class="badge info">{{ leave_label(l.kind) }}</span></div>
+      {% endfor %}
+      {% for d, note in upcoming %}
+      <div><span class="tnum">{{ d.strftime('%a %d %b') }}</span><span class="small muted">{{ note }}</span></div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Day</th><th>Status</th><th class="num">Arrived</th></tr></thead>
+      <tbody>
+      {% for d in days %}
+        <tr>
+          <td><div class="cell-main tnum">{{ WEEKDAYS[d.day.weekday()] }} {{ d.day.strftime('%d %b') }}{% if d.day == today %} · today{% endif %}</div>
+            {% if d.note %}<div class="cell-sub">{{ icon('edit') }} {{ d.note }}</div>{% endif %}</td>
+          <td>{% if d.status %}<span class="badge {{ d.kind }}">{{ d.status }}</span>{% endif %}</td>
+          <td class="num tnum">{{ d.time or '–' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</main>
+<script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}"></script>
+</body>
+</html>

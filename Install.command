@@ -37,7 +37,7 @@ if [ ! -x "$PY" ]; then
 fi
 
 step "2/6 Program and libraries"
-"$UV" pip install --python "$PY" --upgrade --reinstall-package face-attendance "$SRC"
+"$PY" "$SRC/attendance/cli/launcher.py" --install "$UV" "$SRC"
 
 step "3/6 Settings file"
 if [ -f config.yaml ]; then
