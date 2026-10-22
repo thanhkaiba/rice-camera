@@ -13,15 +13,12 @@ YOLOX = "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc
 PERSON_MODELS = ("yolox_tiny", "yolox_s")
 # U²-Net (small): cuts people out of their photo for the picture in the late message. Optional:
 # without it OpenCV's GrabCut is used, which is rougher.
-CUTOUT = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx"
-CUTOUT_MODEL = "u2netp.onnx"
 
 LICENCES = {
     "insightface": "InsightFace pretrained models: non-commercial research use only. "
                    "Commercial use requires a licence from InsightFace (contact@insightface.ai).",
     "opencv": "YuNet: MIT licence. SFace: Apache 2.0 licence. Free for commercial use.",
     "person": "YOLOX: Apache 2.0 licence. Free for commercial use.",
-    "cutout": "U²-Net: Apache 2.0 licence. Free for commercial use.",
 }
 
 # Called with (bytes done, total bytes or 0 if unknown) while a file downloads.
@@ -62,25 +59,6 @@ def missing(cfg) -> list[Path]:
     if cfg.tracking.mode == "person":
         files.append(cfg.path(cfg.tracking.person_model))
     return [f for f in files if not f.exists()]
-
-
-def cutout_file(cfg) -> Path | None:
-    """The cutout model when it is on disk, else None (GrabCut is used then)."""
-    path = cfg.path("models") / CUTOUT_MODEL
-    return path if path.exists() else None
-
-
-def cutout_wanted(cfg) -> bool:
-    """The picture in the late message is on and its cutout model is not here yet."""
-    return cfg.late_message.photo and cutout_file(cfg) is None
-
-
-def download_cutout(models_dir: Path, progress: Progress | None = None) -> None:
-    models_dir.mkdir(parents=True, exist_ok=True)
-    dest = models_dir / CUTOUT_MODEL
-    _fetch_to(CUTOUT, dest, progress)
-    print(f"Saved to {dest}")
-    print(f"Licence: {LICENCES['cutout']}")
 
 
 def ensure(cfg, progress: Progress | None = None) -> bool:

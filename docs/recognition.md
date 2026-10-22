@@ -86,7 +86,6 @@ When several people walk in together, faces turn away and cover each other for a
 
 **Person** mode (Settings → Camera → Groups of people, or `tracking.mode: person`) also detects and follows whole bodies:
 - [YOLOX](https://github.com/Megvii-BaseDetection/YOLOX) person detector (Apache-2.0) and [ByteTrack](https://github.com/ifzhang/ByteTrack) (MIT, re-implemented in numpy). A half-hidden person is kept by low-confidence detections instead of being dropped.
-- [U²-Net](https://github.com/xuebinqin/U-2-Net) small (`u2netp.onnx`, Apache-2.0) cuts the late people out of their photos for the picture in the late message; it is not used for recognition. Downloaded on the first start, or with `download-models --cutout`.
 - A face track stays attached to its person while the face is out of sight, so votes from every frame where the face was visible add up, and faces of two people are never merged.
 - Faces are also searched in each person's head region at full resolution, which finds the small faces at the back of a group.
 - The arrival time is when the person first appeared, not when their face was first sharp.

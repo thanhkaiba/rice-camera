@@ -209,7 +209,6 @@ def fetch_models(app: App, retry_s: float = 60.0) -> None:
 
     live = app.live
     if not models.missing(app.cfg):
-        _fetch_cutout_model(app)
         return
 
     def progress(done: int, total: int) -> None:
@@ -222,26 +221,12 @@ def fetch_models(app: App, retry_s: float = 60.0) -> None:
             models.ensure(app.cfg, progress)
             live.models = None
             log.info("Models downloaded to %s", app.cfg.path("models"))
-            _fetch_cutout_model(app)
             return
         except Exception as exc:
             live.models = (f"Could not download the face recognition models ({exc}). "
                            f"Check the internet connection; trying again in a minute")
             log.error(live.models)
             time.sleep(retry_s)
-
-
-def _fetch_cutout_model(app: App) -> None:
-    """The model that cuts people out for the late message's picture: small, optional, tried once
-    per start (the picture is made with GrabCut until it is here)."""
-    from ..vision import models
-
-    if not models.cutout_wanted(app.cfg):
-        return
-    try:
-        models.download_cutout(app.cfg.path("models"), progress=lambda done, total: None)
-    except Exception as exc:
-        log.warning("Could not download the cutout model (%s); the late message's picture is made without it", exc)
 
 
 def run(cfg: Config) -> None:

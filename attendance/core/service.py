@@ -22,7 +22,6 @@ import numpy as np
 
 from . import latephoto
 from ..integrations import leave_api
-from ..vision import models
 from .config import Config, parse_clock
 from ..vision.gallery import Gallery
 from ..vision.tracker import vote_for
@@ -272,7 +271,7 @@ class AttendanceService:
             latephoto.remove(data_dir, day)
             return None
         try:
-            return latephoto.write(data_dir, day, items, f"Late on {day:%A %d %b %Y}", models.cutout_file(self.cfg))
+            return latephoto.write(data_dir, day, items, f"Late on {day:%A %d %b %Y}")
         except Exception:
             log.exception("Could not make the picture of the late people")
             return None

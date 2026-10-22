@@ -111,7 +111,6 @@ def test_missing_models_are_downloaded_with_progress(tmp_path, monkeypatch):
         det.write_bytes(b"x")
         rec.write_bytes(b"x")
     monkeypatch.setattr(models, "download", fake_download)
-    monkeypatch.setattr(models, "download_cutout", lambda models_dir, progress=None: None)  # no network here
 
     seen = []
 

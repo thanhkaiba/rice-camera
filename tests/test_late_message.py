@@ -208,8 +208,9 @@ def test_picture_of_the_late_people(core):
     assert rel == f"late/{DAY}.jpg"
     picture = cv2.imread(str(app.data_dir / rel))
     assert picture.shape == (latephoto.HEIGHT, latephoto.MIN_WIDTH, 3)
-    sky = lambda p: np.abs(p[0, 1000].astype(int) - (252, 190, 120)).max() <= 6  # noqa: E731  (JPEG is not exact)
-    assert sky(picture)  # the drawn scene: no background picture was uploaded
+    scene = latephoto.draw_background(latephoto.MIN_WIDTH, latephoto.HEIGHT, seed=DAY.toordinal())
+    sky = lambda p: np.abs(p[0, 1000].astype(int) - scene[0, 1000]).max() <= 6  # noqa: E731  (JPEG is not exact)
+    assert sky(picture)  # the day's drawn scene: no background picture was uploaded
     key = (app.data_dir / rel).with_suffix(".key").read_text()
 
     # Unchanged arrivals: the same file. A correction, or a new background: the picture is made again.
@@ -321,25 +322,29 @@ def test_background_picture_is_uploaded_and_removed_on_the_settings_page(core):
     assert not latephoto.background_path(app.data_dir).exists()
 
 
-def test_cutout_without_the_model_and_the_pieces_of_the_scene():
+def test_cards_in_rows_on_a_scene_that_changes_by_day():
     import cv2
     import numpy as np
 
     from attendance.core import latephoto
 
-    # A dark figure in the middle of a light photo: GrabCut keeps the figure, the sides go.
-    photo = np.full((360, 160, 3), 230, np.uint8)
-    cv2.rectangle(photo, (55, 40), (105, 340), (30, 40, 50), -1)
-    cv2.circle(photo, (80, 40), 25, (30, 40, 50), -1)
-    image, alpha = latephoto.cutout(photo, None)
-    assert alpha.shape == image.shape[:2] and 40 <= image.shape[1] <= 80 and image.shape[0] >= 300
-    # A missing model file falls back to GrabCut rather than failing.
-    image2, _ = latephoto.cutout(photo, latephoto.Path("/nowhere/u2netp.onnx"))
-    assert image2.shape == image.shape
-    # The background picture is cropped to fill the canvas; a missing one is drawn.
-    drawn = latephoto.load_background(None, 1280, 720)
-    assert drawn.shape == (720, 1280, 3) and drawn[700, 10].tolist() != drawn[10, 10].tolist()
+    # Up to six in a row; more go on further rows, as evenly as possible.
+    assert latephoto.layout(1) == (1, 1) and latephoto.layout(6) == (1, 6)
+    assert latephoto.layout(7) == (2, 4) and latephoto.layout(13) == (3, 5)
+    # Each person is the whole photo as a card: nothing of it is cut away.
+    card, alpha = latephoto._card(latephoto.Person("Enzo", "09:31", 31, None))  # no photo: a placeholder
+    assert card.shape == (latephoto.CARD_H, latephoto.CARD_W, 3) and alpha[latephoto.CARD_H // 2, latephoto.CARD_W // 2] == 1
+    # The drawn background differs from day to day and fills the canvas; a missing picture is drawn.
+    a, b = latephoto.draw_background(1280, 720, seed=1), latephoto.draw_background(1280, 720, seed=2)
+    assert a.shape == (720, 1280, 3) and not np.array_equal(a, b)
+    assert len({latephoto.draw_background(1280, 720, seed=d)[5, 5].tobytes() for d in range(5)}) == 5  # five scenes
     assert latephoto.load_background(latephoto.Path("/nowhere.jpg"), 640, 360).shape == (360, 640, 3)
+    # Thirteen people: three rows, a taller picture, and every name tag keeps its room.
+    people = [latephoto.Person(f"Person{i}", "09:10", 10, None) for i in range(13)]
+    picture = cv2.imdecode(np.frombuffer(latephoto.compose(people, "Late"), np.uint8), cv2.IMREAD_COLOR)
+    assert picture.shape[0] > latephoto.HEIGHT and picture.shape[1] == latephoto.MIN_WIDTH
+
+
 def test_people_can_be_called_by_their_email_name(core):
     from attendance.core.service import email_name
 
@@ -397,36 +402,3 @@ def test_messages_tag_people_by_their_chat_id(core):
     app.cfg.google_chat.mention_people = False  # switched off: email names in bold
     text = app.service.summary_text(app.service.report(DAY))
     assert "• *Alice*: 10:15" in text and "<users/" not in text
-
-
-def test_cutout_model_session_loads_through_the_shared_helper(monkeypatch, tmp_path):
-    """The import path was wrong (core.recognizer), so the cutout model never loaded."""
-    from attendance.core import latephoto
-    from attendance.vision import recognizer
-
-    monkeypatch.setattr(recognizer, "onnx_session", lambda model, threads=0: ("session", model, threads))
-    latephoto._sessions.clear()
-    assert latephoto._session(tmp_path / "cutout.onnx") == ("session", tmp_path / "cutout.onnx", 1)
-    latephoto._sessions.clear()
-
-
-def test_cutout_keeps_the_head_found_from_the_face_crop():
-    """Dark hair on a dark wall made the cutters drop the head; the face crop says where it is."""
-    import cv2
-    import numpy as np
-
-    from attendance.core import latephoto
-
-    rng = np.random.default_rng(1)
-    body = np.full((360, 160, 3), 60, np.uint8)  # dark wall
-    cv2.rectangle(body, (40, 110), (120, 340), (200, 120, 60), -1)  # shirt and trousers
-    cv2.circle(body, (80, 70), 28, (40, 40, 40), -1)  # dark hair, like the wall
-    cv2.ellipse(body, (80, 80), (20, 24), 0, 0, 360, (150, 180, 220), -1)  # face
-    body = np.clip(body + rng.normal(0, 3, body.shape), 0, 255).astype(np.uint8)
-    face = body[45:115, 52:108].copy()  # the sighting's face crop, cut from the same frame
-    where = latephoto.find_face(body, face)
-    assert where == (52, 45, 56, 70)
-    image, alpha = latephoto.cutout(body, None, where)
-    assert image.shape[0] >= 300  # cropped to the person, and the head (from y=42) is still there
-    assert alpha[:60].max() > 0.5
-    assert latephoto.find_face(body, np.zeros((10, 10, 3), np.uint8)) is None  # not this photo's face
