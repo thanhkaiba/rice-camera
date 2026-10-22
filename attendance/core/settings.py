@@ -26,7 +26,7 @@ EDITABLE: dict[str, list[str]] = {
     "google_chat": ["webhook_url", "mention_people", "notify_late_arrivals", "late_time_list", "daily_summary",
                     "unknown_batch_minutes", "names"],
     "leave_api": ["url", "token", "refresh_minutes"],
-    "late_message": ["enabled", "intro", "item", "auto_send", "send_at", "photo"],
+    "late_message": ["enabled", "intro", "item", "auto_send", "send_at", "photo", "occasions"],
     "web": ["public_url", "password", "viewer_username", "viewer_password"],
     "updates": ["enabled"],
     "backup": ["folder", "time", "keep_days", "include_photos"],

@@ -101,14 +101,17 @@
       {{ time24('late_message', 'send_at', '', required=false) }}
       <span class="hint">Empty = when the camera stops · must be after the late time</span>
     </div>
-    <div class="stack" style="margin-top:14px">{{ check('late_message', 'photo', 'Attach a picture of the late people: each one cut out of the camera photo and put on a cheerful background, with a name tag') }}</div>
+    <div class="stack" style="margin-top:14px">{{ check('late_message', 'photo', 'Attach a picture of the late people: their camera photos as cards with name tags, on a cheerful background') }}
+      {{ check('late_message', 'occasions', 'Holiday backgrounds', 'Tết, Valentine, 8/3, Easter, Giỗ Tổ, 30/4–1/5, 1/6, 2/9, Trung thu, 20/10, Halloween, 20/11, Christmas, New Year: from 5 days before to 5 after, 10 for the big ones') }}</div>
+    <p class="hint" style="margin:4px 0 0">{% if occasion %}Now: <strong>{{ occasion.name }}</strong> background. {% endif %}Next: {% for o, d in upcoming %}{{ o.name }} {{ d.strftime('%d/%m') }}{{ ', ' if not loop.last }}{% endfor %}.
+      Your own pictures for one: in the data folder, <code>late/backgrounds/&lt;name&gt;/</code>, e.g. <code>tet</code>, <code>mid_autumn</code>, <code>christmas</code>, <code>halloween</code>.</p>
     <p class="hint" style="margin:4px 0 0">Google Chat shows the picture only when the address of this page (Access tab) is https and reachable from the internet, e.g. with Tailscale Funnel; otherwise the message links to it.</p>
     <div class="form-row" style="margin-top:14px; align-items:center">
       <label class="field grow">Background picture
         <input type="file" name="background" accept="image/*" form="late-bg">
-        <span class="hint">{% if late_background %}Your picture is used (<a href="{{ url_for('late_background_jpg') }}" target="_blank">view</a>).{% else %}Empty = a drawn morning scene.{% endif %} Landscape, about 1280×720, is best.</span></label>
+        <span class="hint">{% if late_background %}Your picture is used every day, holidays too (<a href="{{ url_for('late_background_jpg') }}" target="_blank">view</a>).{% else %}Empty = old paintings, a different one each day, and holiday pictures around holidays.{% endif %} Landscape, about 1280×720, is best.</span></label>
       <button class="btn" form="late-bg" title="Save the chosen picture">{{ icon('upload') }}Use</button>
-      {% if late_background %}<button class="btn ghost" form="late-bg" name="remove" value="1" title="Back to the drawn scene">{{ icon('trash') }}Remove</button>{% endif %}
+      {% if late_background %}<button class="btn ghost" form="late-bg" name="remove" value="1" title="Back to the paintings of each day">{{ icon('trash') }}Remove</button>{% endif %}
     </div>
   </section>
 

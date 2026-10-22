@@ -28,6 +28,7 @@ FOLDER = "late"  # under the data folder: late/<day>.jpg, late/background.jpg
 BACKGROUND_FILE = "background.jpg"
 BACKGROUNDS = "backgrounds"  # late/backgrounds/*.jpg|png: the admin's own pictures, one a day, in turn
 BUNDLED = Path(__file__).resolve().parents[1] / "web" / "static" / "late"  # old public-domain pictures
+OCCASIONS = "occasions"  # BUNDLED/occasions/<key>*.jpg: a holiday's own pictures (see occasions.py)
 HEIGHT = 720  # the picture is at least this tall, taller when there are several rows
 MIN_WIDTH = 1280
 CARD_W, CARD_H = 170, 340  # a person's photo card (the camera's body photo is about 4:9)
@@ -319,15 +320,31 @@ def draw_extras(canvas: np.ndarray, free: list[tuple[int, int, int, int]], seed:
             draw[str(kind)](canvas, int(rng.integers(x1, x2)), int(rng.integers(y1, y2)), rng)
 
 
-def day_background(data_dir: Path, day: dt.date) -> Path | None:
-    """The picture behind the day's cards: the admin's single background if uploaded, else one of the
-    pictures in late/backgrounds (or the bundled old pictures: the Dong Ho mice's wedding and rooster,
-    roses, cherry blossoms, parrots), a different one each day. None: draw a scene."""
+def day_background(data_dir: Path, day: dt.date, occasions: bool = True) -> Path | None:
+    """The picture behind the day's cards: the admin's single background if uploaded; else around a
+    holiday (occasions.py) its picture, the admin's own in late/backgrounds/<key>/ before the bundled
+    ones; else one of the pictures in late/backgrounds (or the bundled old pictures: the Dong Ho
+    mice's wedding and rooster, roses, cherry blossoms, parrots), a different one each day.
+    None: draw a scene."""
+    from .occasions import occasion_on
+
     own = background_path(data_dir)
     if own.exists():
         return own
-    def pictures(folder: Path) -> list[Path]:
-        return sorted(p for p in folder.glob("*") if p.suffix.lower() in (".jpg", ".jpeg", ".png")) if folder.is_dir() else []
+
+    def pictures(folder: Path, key: str = "") -> list[Path]:
+        """The pictures in `folder`; with `key`, those named <key>.jpg or <key>-<n>.jpg."""
+        if not folder.is_dir():
+            return []
+        return sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png")
+                      and (not key or p.stem == key or p.stem.startswith(key + "-")))
+
+    occasion = occasion_on(day) if occasions else None
+    choice = []
+    if occasion is not None:
+        choice = pictures(data_dir / FOLDER / BACKGROUNDS / occasion.key) or pictures(BUNDLED / OCCASIONS, occasion.key)
+        if choice:  # the same picture all through the occasion, another one next year
+            return choice[day.year % len(choice)]
     choice = pictures(data_dir / FOLDER / BACKGROUNDS) or pictures(BUNDLED)
     return choice[day.toordinal() % len(choice)] if choice else None
 
@@ -490,12 +507,13 @@ def fingerprint(people: list[Person], background: Path | None) -> str:
     return hashlib.sha256(repr(parts).encode()).hexdigest()
 
 
-def write(data_dir: Path, day: dt.date, people: list[Person], title: str) -> str:
-    """Make (or refresh, when something changed) the day's picture; returns its path under data_dir."""
+def write(data_dir: Path, day: dt.date, people: list[Person], title: str, occasions: bool = True) -> str:
+    """Make (or refresh, when something changed) the day's picture; returns its path under data_dir.
+    `occasions`: holiday backgrounds around holidays."""
     rel = photo_path(day)
     path = data_dir / rel
     key = path.with_suffix(".key")
-    background = day_background(data_dir, day)
+    background = day_background(data_dir, day, occasions)
     fp = fingerprint(people, background)
     if path.exists() and key.exists() and key.read_text() == fp:
         return rel

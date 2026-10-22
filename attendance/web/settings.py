@@ -10,7 +10,7 @@ from flask import Flask, Response, abort, jsonify, redirect, render_template, re
 
 from .. import __version__
 from ..cli import updater
-from ..core import latephoto, settings, transfer
+from ..core import latephoto, occasions, settings, transfer
 from ..vision.faces import decode_image, encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
 
@@ -123,6 +123,8 @@ def register(app: Flask, core: "App") -> None:
         return render_template("settings.html", s=settings.current(cfg), cfg=cfg, leave=leave_status(core),
                                overrides=settings.overrides(cfg, store),
                                late_background=latephoto.background_path(core.data_dir).exists(),
+                               occasion=occasions.occasion_on(service.now().date()),
+                               upcoming=occasions.upcoming(service.now().date()),
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
                                update=updater.read_status(core.data_dir), backup=core.backup.status(),
                                versions=versions())

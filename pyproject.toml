@@ -31,4 +31,4 @@ packages = [
 ]
 
 [tool.setuptools.package-data]
-"attendance.web" = ["templates/*.html", "static/*"]
+"attendance.web" = ["templates/*.html", "static/*", "static/late/*", "static/late/occasions/*"]

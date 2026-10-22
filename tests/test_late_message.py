@@ -308,7 +308,7 @@ def test_background_picture_is_uploaded_and_removed_on_the_settings_page(core):
     app, _, _ = core
     c = client(app)
     page = c.get("/settings").get_data(as_text=True)
-    assert "Empty = a drawn morning scene" in page and 'form="late-bg"' in page
+    assert "Empty = old paintings" in page and 'form="late-bg"' in page
     assert c.get("/settings/late-background.jpg").status_code == 404
     resp = c.post("/settings/late-background", data={"background": (io.BytesIO(b"not a picture"), "x.png")},
                   content_type="multipart/form-data", follow_redirects=True)
@@ -416,13 +416,13 @@ def test_backgrounds_take_turns_by_day_and_the_admins_own_come_first(tmp_path):
     from attendance.core import latephoto
 
     days = [dt.date(2026, 10, 20) + dt.timedelta(d) for d in range(5)]
-    bundled = {latephoto.day_background(tmp_path, d) for d in days}
+    bundled = {latephoto.day_background(tmp_path, d, occasions=False) for d in days}
     assert len(bundled) == 5 and all(p.parent == latephoto.BUNDLED for p in bundled)  # five old pictures in turn
     own = tmp_path / latephoto.FOLDER / latephoto.BACKGROUNDS
     own.mkdir(parents=True)
     for name in ("a.jpg", "b.png"):
         cv2.imwrite(str(own / name), np.full((90, 160, 3), 128, np.uint8))
-    assert {latephoto.day_background(tmp_path, d).name for d in days} == {"a.jpg", "b.png"}  # theirs replace them
+    assert {latephoto.day_background(tmp_path, d, occasions=False).name for d in days} == {"a.jpg", "b.png"}  # theirs replace them
     single = latephoto.background_path(tmp_path)
     cv2.imwrite(str(single), np.full((90, 160, 3), 200, np.uint8))
     assert latephoto.day_background(tmp_path, days[0]) == single  # the one uploaded in Settings wins

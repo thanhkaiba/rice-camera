@@ -180,6 +180,8 @@ class LateMessageConfig:
     # burned in). Google Chat shows it only when web.public_url is an https address it can reach;
     # otherwise the message links to it.
     photo: bool = True
+    # Around holidays (Tet, Mid-Autumn, Christmas, Halloween, ...) the picture takes that holiday's background.
+    occasions: bool = True
 
 
 @dataclass
