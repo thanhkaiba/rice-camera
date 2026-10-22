@@ -208,9 +208,11 @@ def test_picture_of_the_late_people(core):
     assert rel == f"late/{DAY}.jpg"
     picture = cv2.imread(str(app.data_dir / rel))
     assert picture.shape == (latephoto.HEIGHT, latephoto.MIN_WIDTH, 3)
-    scene = latephoto.draw_background(latephoto.MIN_WIDTH, latephoto.HEIGHT, seed=DAY.toordinal())
-    sky = lambda p: np.abs(p[0, 1000].astype(int) - scene[0, 1000]).max() <= 6  # noqa: E731  (JPEG is not exact)
-    assert sky(picture)  # the day's drawn scene: no background picture was uploaded
+    behind = latephoto.day_background(app.data_dir, DAY)  # nothing uploaded: the day's bundled old picture
+    assert behind is not None and behind.parent == latephoto.BUNDLED
+    scene = latephoto.load_background(behind, latephoto.MIN_WIDTH, latephoto.HEIGHT)
+    sky = lambda p: np.abs(p[30, 1000].astype(int) - scene[30, 1000]).max() <= 12  # noqa: E731  (JPEG is not exact)
+    assert sky(picture)
     key = (app.data_dir / rel).with_suffix(".key").read_text()
 
     # Unchanged arrivals: the same file. A correction, or a new background: the picture is made again.
@@ -225,7 +227,8 @@ def test_picture_of_the_late_people(core):
     assert app.service.late_photo(DAY) == rel
     assert (app.data_dir / rel).with_suffix(".key").read_text() != key2
     picture = cv2.imread(str(app.data_dir / rel))
-    assert not sky(picture) and np.abs(picture[0, 1000].astype(int) - (10, 20, 30)).max() <= 6
+    uploaded = latephoto.load_background(bg, picture.shape[1], picture.shape[0])  # with the darkened edges
+    assert not sky(picture) and np.abs(picture[30, 1000].astype(int) - uploaded[30, 1000]).max() <= 6
 
     # A plain http address (the office network): Google Chat cannot fetch it, so the message links to it.
     assert app.service.send_late_message(DAY, user="hr")
@@ -402,3 +405,24 @@ def test_messages_tag_people_by_their_chat_id(core):
     app.cfg.google_chat.mention_people = False  # switched off: email names in bold
     text = app.service.summary_text(app.service.report(DAY))
     assert "• *Alice*: 10:15" in text and "<users/" not in text
+
+
+def test_backgrounds_take_turns_by_day_and_the_admins_own_come_first(tmp_path):
+    import datetime as dt
+
+    import cv2
+    import numpy as np
+
+    from attendance.core import latephoto
+
+    days = [dt.date(2026, 10, 20) + dt.timedelta(d) for d in range(5)]
+    bundled = {latephoto.day_background(tmp_path, d) for d in days}
+    assert len(bundled) == 5 and all(p.parent == latephoto.BUNDLED for p in bundled)  # five old pictures in turn
+    own = tmp_path / latephoto.FOLDER / latephoto.BACKGROUNDS
+    own.mkdir(parents=True)
+    for name in ("a.jpg", "b.png"):
+        cv2.imwrite(str(own / name), np.full((90, 160, 3), 128, np.uint8))
+    assert {latephoto.day_background(tmp_path, d).name for d in days} == {"a.jpg", "b.png"}  # theirs replace them
+    single = latephoto.background_path(tmp_path)
+    cv2.imwrite(str(single), np.full((90, 160, 3), 200, np.uint8))
+    assert latephoto.day_background(tmp_path, days[0]) == single  # the one uploaded in Settings wins

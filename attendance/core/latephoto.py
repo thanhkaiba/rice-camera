@@ -26,6 +26,8 @@ log = logging.getLogger(__name__)
 
 FOLDER = "late"  # under the data folder: late/<day>.jpg, late/background.jpg
 BACKGROUND_FILE = "background.jpg"
+BACKGROUNDS = "backgrounds"  # late/backgrounds/*.jpg|png: the admin's own pictures, one a day, in turn
+BUNDLED = Path(__file__).resolve().parents[1] / "web" / "static" / "late"  # old public-domain pictures
 HEIGHT = 720  # the picture is at least this tall, taller when there are several rows
 MIN_WIDTH = 1280
 CARD_W, CARD_H = 170, 340  # a person's photo card (the camera's body photo is about 4:9)
@@ -317,8 +319,29 @@ def draw_extras(canvas: np.ndarray, free: list[tuple[int, int, int, int]], seed:
             draw[str(kind)](canvas, int(rng.integers(x1, x2)), int(rng.integers(y1, y2)), rng)
 
 
+def day_background(data_dir: Path, day: dt.date) -> Path | None:
+    """The picture behind the day's cards: the admin's single background if uploaded, else one of the
+    pictures in late/backgrounds (or the bundled old pictures: roses, cherry blossoms, a crow, a Dong Ho
+    rooster), a different one each day. None: draw a scene."""
+    own = background_path(data_dir)
+    if own.exists():
+        return own
+    def pictures(folder: Path) -> list[Path]:
+        return sorted(p for p in folder.glob("*") if p.suffix.lower() in (".jpg", ".jpeg", ".png")) if folder.is_dir() else []
+    choice = pictures(data_dir / FOLDER / BACKGROUNDS) or pictures(BUNDLED)
+    return choice[day.toordinal() % len(choice)] if choice else None
+
+
+def _vintage(image: np.ndarray) -> np.ndarray:
+    """Darken the edges a little, like an old print, so the cards stand out from a busy picture."""
+    h, w = image.shape[:2]
+    y, x = np.ogrid[:h, :w]
+    d = ((x - w / 2) / (w / 2)) ** 2 + ((y - h / 2) / (h / 2)) ** 2
+    return (image * (1 - 0.28 * np.clip(d - 0.3, 0, 1))[..., None]).astype(np.uint8)
+
+
 def load_background(path: Path | None, width: int, height: int, seed: int = 0) -> np.ndarray:
-    """The admin's picture scaled and cropped to fill the canvas, or the drawn scene."""
+    """A picture scaled and cropped to fill the canvas, its edges darkened a little, or the drawn scene."""
     import cv2
 
     image = cv2.imread(str(path)) if path is not None and path.exists() else None
@@ -328,7 +351,7 @@ def load_background(path: Path | None, width: int, height: int, seed: int = 0) -
     scale = max(width / w, height / h)
     image = cv2.resize(image, (max(width, round(w * scale)), max(height, round(h * scale))), interpolation=cv2.INTER_AREA)
     y, x = (image.shape[0] - height) // 2, (image.shape[1] - width) // 2
-    return np.ascontiguousarray(image[y:y + height, x:x + width])
+    return _vintage(np.ascontiguousarray(image[y:y + height, x:x + width]))
 
 
 def _paste(canvas: np.ndarray, image: np.ndarray, alpha: np.ndarray, x: int, y: int) -> None:
@@ -453,14 +476,15 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
                  f"{person.time}  +{person.minutes} min", slot - 4)
     bottom = top + rows * row_h - ROW_GAP + 8
     banner_right = 24 + _width(_fit(ascii_label(title), width - 160, 0.9, 2), 0.9, 2) + 110
-    draw_extras(canvas, [(banner_right, 0, width, top - 8), (0, 96, width, top - 8), (0, bottom, width, height)], seed)
+    if background is None or not background.exists():  # fairies and balloons belong to the drawn scenes
+        draw_extras(canvas, [(banner_right, 0, width, top - 8), (0, 96, width, top - 8), (0, bottom, width, height)], seed)
     _banner(canvas, title)
     return encode_jpeg(canvas)
 
 
 # files --------------------------------------------------------------------------------------
 
-LOOK = 2  # raise when the drawing changes, so pictures already made are made again
+LOOK = 3  # raise when the drawing changes, so pictures already made are made again
 
 
 def fingerprint(people: list[Person], background: Path | None) -> str:
@@ -479,7 +503,7 @@ def write(data_dir: Path, day: dt.date, people: list[Person], title: str) -> str
     rel = photo_path(day)
     path = data_dir / rel
     key = path.with_suffix(".key")
-    background = background_path(data_dir)
+    background = day_background(data_dir, day)
     fp = fingerprint(people, background)
     if path.exists() and key.exists() and key.read_text() == fp:
         return rel
