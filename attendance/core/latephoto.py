@@ -140,16 +140,90 @@ def grabcut_mask(image: np.ndarray, iterations: int = 5) -> np.ndarray:
     return ((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD)).astype(np.float32)
 
 
-def cutout(image: np.ndarray, model: Path | None) -> tuple[np.ndarray, np.ndarray]:
-    """(image, alpha 0..1): the person with a soft edge, cropped to what remains."""
+def find_face(photo: np.ndarray, face: np.ndarray | None) -> tuple[int, int, int, int] | None:
+    """Where the sighting's face crop sits in its body photo, (x, y, w, h): both were cut from the
+    same camera frame, so the face is found pixel for pixel, also when the body photo was clipped
+    at the frame's edge."""
     import cv2
 
+    if face is None or not face.size or face.shape[0] > photo.shape[0] or face.shape[1] > photo.shape[1]:
+        return None
+    if float(face.std()) < 2:  # a flat (broken) crop matches anywhere: normalising divides by zero
+        return None
+    scores = cv2.matchTemplate(photo, face, cv2.TM_CCOEFF_NORMED)
+    _, best, _, (x, y) = cv2.minMaxLoc(np.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0))
+    return (x, y, face.shape[1], face.shape[0]) if best >= 0.9 else None
+
+
+def _head(image: np.ndarray, face: tuple[int, int, int, int]) -> np.ndarray:
+    """0/1 mask of the head: GrabCut told that the middle of the face crop is the person and an
+    ellipse around it (hair, ears) probably is, so hair is kept without the wall behind it."""
+    import cv2
+
+    x, y, w, h = face
+    shape = image.shape[:2]
+    ellipse = np.zeros(shape, np.uint8)
+    cv2.ellipse(ellipse, (x + w // 2, y + int(h * 0.42)), (int(w * 0.5), int(h * 0.62)), 0, 0, 360, 1, -1)
+    core = np.zeros(shape, np.uint8)  # the face itself, inside the crop's 40% margin
+    cv2.ellipse(core, (x + w // 2, y + h // 2), (int(w * 0.25), int(h * 0.3)), 0, 0, 360, 1, -1)
+    mask = np.where(ellipse == 1, cv2.GC_PR_FGD, cv2.GC_BGD).astype(np.uint8)
+    mask[core == 1] = cv2.GC_FGD
     try:
-        soft = model_mask(image, model) if model is not None and model.exists() else grabcut_mask(image)
-    except Exception as exc:  # a broken model file: fall back rather than lose the picture
-        log.warning("Cutout model failed (%s); using GrabCut", exc)
-        soft = grabcut_mask(image)
-    binary = _largest_blob((soft > 0.5).astype(np.uint8))
+        cv2.grabCut(image, mask, (0, 0, 1, 1), np.zeros((1, 65)), np.zeros((1, 65)), 4, cv2.GC_INIT_WITH_MASK)
+    except cv2.error:
+        return core
+    return (((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD)) | (core == 1)).astype(np.uint8)
+
+
+def _body_fit(mask: np.ndarray, face: tuple[int, int, int, int]) -> float:
+    """How well a 0/1 mask looks like a standing person under `face`: the share of the column below
+    the face it covers, minus the share of the sides it covers."""
+    x, y, w, h = face
+    face_w, cx = w / 1.8, x + w / 2  # the face crop has a 40% margin on each side
+    below = mask[min(mask.shape[0] - 1, y + h):]
+    x1, x2 = int(max(0, cx - 1.6 * face_w)), int(min(mask.shape[1], cx + 1.6 * face_w))
+    if not below.size or x2 <= x1:
+        return 0.0
+    column = below[:, x1:x2].mean()
+    sides = np.concatenate([below[:, :x1].ravel(), below[:, x2:].ravel()])
+    return float(column - (sides.mean() if sides.size else 0.0))
+
+
+def _torso(mask: np.ndarray, face: tuple[int, int, int, int]) -> float:
+    """Share of the chest and belly (2.5 face heights under the face) a 0/1 mask covers."""
+    x, y, w, h = face
+    face_w, face_h, cx = w / 1.8, h / 1.8, x + w / 2
+    y1, y2 = int(y + h), int(min(mask.shape[0], y + h + 2.5 * face_h))
+    x1, x2 = int(max(0, cx - 1.2 * face_w)), int(min(mask.shape[1], cx + 1.2 * face_w))
+    return float(mask[y1:y2, x1:x2].mean()) if y2 > y1 and x2 > x1 else 1.0
+
+
+def cutout(image: np.ndarray, model: Path | None,
+           face: tuple[int, int, int, int] | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """(image, alpha 0..1): the person with a soft edge, cropped to what remains. With `face` (where
+    the face is, see find_face) the head is always kept: dark hair against a dark background, a
+    mask or a cap made both cutters drop it."""
+    import cv2
+
+    candidates = []
+    if model is not None and model.exists():
+        try:
+            candidates.append((model_mask(image, model) > 0.5).astype(np.uint8))
+        except Exception as exc:  # a broken model file: fall back rather than lose the picture
+            log.warning("Cutout model failed (%s); using GrabCut", exc)
+    if face is not None or not candidates:
+        candidates.append((grabcut_mask(image) > 0.5).astype(np.uint8))
+    # Each cutter sometimes keeps only the face (U²-Net) or loses the body (GrabCut): with the face
+    # known, keep the one that fills the body below it and least of the sides.
+    binary = max(candidates, key=lambda m: _body_fit(m, face)) if face is not None else candidates[0]
+    if face is not None and _torso(binary, face) < 0.5:  # a jacket the colour of the wall: the cut
+        return image, np.ones(image.shape[:2], np.float32)  # would be a head over legs; show the photo
+    head = _head(image, face) if face is not None else None
+    if head is not None:
+        binary |= head
+    binary = _largest_blob(binary)
+    if head is not None:
+        binary |= head  # also when the cutter left the head apart from the body
     if binary.sum() < 0.02 * binary.size:  # nothing found: keep the whole photo as a card
         return image, np.ones(image.shape[:2], np.float32)
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
@@ -281,7 +355,9 @@ def _figure(person: Person, model: Path | None, height: int) -> tuple[np.ndarray
     if photo is None or not photo.size:
         image, alpha = _placeholder(height)
     else:
-        image, alpha = cutout(photo, model)
+        face_file = person.photo.with_name(person.photo.name.replace("_body", ""))
+        face = cv2.imread(str(face_file)) if face_file != person.photo and face_file.exists() else None
+        image, alpha = cutout(photo, model, find_face(photo, face))
         if image.shape[0] > image.shape[1] * 1.5:  # a standing person (the body photo is 9:4): full height
             target = height
         else:  # a face or a wide crop: smaller, so it does not look like a giant head

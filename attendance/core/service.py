@@ -267,7 +267,7 @@ class AttendanceService:
             if a.image:  # the whole person when it was kept, else the face
                 photo = next((data_dir / rel for rel in (body_photo(a.image), a.image) if (data_dir / rel).exists()),
                              None)
-            items.append(latephoto.Person(a.name, a.time, minutes_late(a, w), photo))
+            items.append(latephoto.Person(self.chat_name(a.employee_id, a.name), a.time, minutes_late(a, w), photo))
         if not any(p.photo for p in items):  # nobody on camera (all entered by hand): nothing to show
             latephoto.remove(data_dir, day)
             return None

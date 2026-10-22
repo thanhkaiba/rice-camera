@@ -408,3 +408,25 @@ def test_cutout_model_session_loads_through_the_shared_helper(monkeypatch, tmp_p
     latephoto._sessions.clear()
     assert latephoto._session(tmp_path / "cutout.onnx") == ("session", tmp_path / "cutout.onnx", 1)
     latephoto._sessions.clear()
+
+
+def test_cutout_keeps_the_head_found_from_the_face_crop():
+    """Dark hair on a dark wall made the cutters drop the head; the face crop says where it is."""
+    import cv2
+    import numpy as np
+
+    from attendance.core import latephoto
+
+    rng = np.random.default_rng(1)
+    body = np.full((360, 160, 3), 60, np.uint8)  # dark wall
+    cv2.rectangle(body, (40, 110), (120, 340), (200, 120, 60), -1)  # shirt and trousers
+    cv2.circle(body, (80, 70), 28, (40, 40, 40), -1)  # dark hair, like the wall
+    cv2.ellipse(body, (80, 80), (20, 24), 0, 0, 360, (150, 180, 220), -1)  # face
+    body = np.clip(body + rng.normal(0, 3, body.shape), 0, 255).astype(np.uint8)
+    face = body[45:115, 52:108].copy()  # the sighting's face crop, cut from the same frame
+    where = latephoto.find_face(body, face)
+    assert where == (52, 45, 56, 70)
+    image, alpha = latephoto.cutout(body, None, where)
+    assert image.shape[0] >= 300  # cropped to the person, and the head (from y=42) is still there
+    assert alpha[:60].max() > 0.5
+    assert latephoto.find_face(body, np.zeros((10, 10, 3), np.uint8)) is None  # not this photo's face
