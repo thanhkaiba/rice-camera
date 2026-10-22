@@ -227,7 +227,7 @@ def test_picture_of_the_late_people(core):
     assert app.service.late_photo(DAY) == rel
     assert (app.data_dir / rel).with_suffix(".key").read_text() != key2
     picture = cv2.imread(str(app.data_dir / rel))
-    uploaded = latephoto.load_background(bg, picture.shape[1], picture.shape[0])  # with the darkened edges
+    uploaded = latephoto.load_background(bg, picture.shape[1], picture.shape[0])
     assert not sky(picture) and np.abs(picture[30, 1000].astype(int) - uploaded[30, 1000]).max() <= 6
 
     # A plain http address (the office network): Google Chat cannot fetch it, so the message links to it.

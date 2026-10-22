@@ -321,8 +321,8 @@ def draw_extras(canvas: np.ndarray, free: list[tuple[int, int, int, int]], seed:
 
 def day_background(data_dir: Path, day: dt.date) -> Path | None:
     """The picture behind the day's cards: the admin's single background if uploaded, else one of the
-    pictures in late/backgrounds (or the bundled old pictures: roses, cherry blossoms, a crow, a Dong Ho
-    rooster), a different one each day. None: draw a scene."""
+    pictures in late/backgrounds (or the bundled old pictures: the Dong Ho mice's wedding and rooster,
+    roses, cherry blossoms, parrots), a different one each day. None: draw a scene."""
     own = background_path(data_dir)
     if own.exists():
         return own
@@ -332,16 +332,8 @@ def day_background(data_dir: Path, day: dt.date) -> Path | None:
     return choice[day.toordinal() % len(choice)] if choice else None
 
 
-def _vintage(image: np.ndarray) -> np.ndarray:
-    """Darken the edges a little, like an old print, so the cards stand out from a busy picture."""
-    h, w = image.shape[:2]
-    y, x = np.ogrid[:h, :w]
-    d = ((x - w / 2) / (w / 2)) ** 2 + ((y - h / 2) / (h / 2)) ** 2
-    return (image * (1 - 0.28 * np.clip(d - 0.3, 0, 1))[..., None]).astype(np.uint8)
-
-
 def load_background(path: Path | None, width: int, height: int, seed: int = 0) -> np.ndarray:
-    """A picture scaled and cropped to fill the canvas, its edges darkened a little, or the drawn scene."""
+    """A picture scaled and cropped to fill the canvas, or the drawn scene."""
     import cv2
 
     image = cv2.imread(str(path)) if path is not None and path.exists() else None
@@ -351,7 +343,7 @@ def load_background(path: Path | None, width: int, height: int, seed: int = 0) -
     scale = max(width / w, height / h)
     image = cv2.resize(image, (max(width, round(w * scale)), max(height, round(h * scale))), interpolation=cv2.INTER_AREA)
     y, x = (image.shape[0] - height) // 2, (image.shape[1] - width) // 2
-    return _vintage(np.ascontiguousarray(image[y:y + height, x:x + width]))
+    return np.ascontiguousarray(image[y:y + height, x:x + width])
 
 
 def _paste(canvas: np.ndarray, image: np.ndarray, alpha: np.ndarray, x: int, y: int) -> None:
@@ -484,7 +476,7 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
 
 # files --------------------------------------------------------------------------------------
 
-LOOK = 3  # raise when the drawing changes, so pictures already made are made again
+LOOK = 4  # raise when the drawing changes, so pictures already made are made again
 
 
 def fingerprint(people: list[Person], background: Path | None) -> str:
