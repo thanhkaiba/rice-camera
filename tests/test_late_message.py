@@ -397,3 +397,14 @@ def test_messages_tag_people_by_their_chat_id(core):
     app.cfg.google_chat.mention_people = False  # switched off: email names in bold
     text = app.service.summary_text(app.service.report(DAY))
     assert "• *Alice*: 10:15" in text and "<users/" not in text
+
+
+def test_cutout_model_session_loads_through_the_shared_helper(monkeypatch, tmp_path):
+    """The import path was wrong (core.recognizer), so the cutout model never loaded."""
+    from attendance.core import latephoto
+    from attendance.vision import recognizer
+
+    monkeypatch.setattr(recognizer, "onnx_session", lambda model, threads=0: ("session", model, threads))
+    latephoto._sessions.clear()
+    assert latephoto._session(tmp_path / "cutout.onnx") == ("session", tmp_path / "cutout.onnx", 1)
+    latephoto._sessions.clear()

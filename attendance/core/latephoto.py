@@ -93,7 +93,7 @@ _sessions_lock = threading.Lock()
 def _session(model: Path):
     with _sessions_lock:
         if model not in _sessions:
-            from .recognizer import onnx_session
+            from ..vision.recognizer import onnx_session
 
             _sessions[model] = onnx_session(model, threads=1)
         return _sessions[model]
