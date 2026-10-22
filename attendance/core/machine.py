@@ -31,6 +31,14 @@ LOW_BATTERY = 20
 THROTTLED_BELOW = 80  # CPU_Speed_Limit, percent
 THROTTLED_FOR_S = 300
 ALERT_EVERY_S = 6 * 3600  # one alert per problem in this long
+# Critical: the computer will switch off (and stop recording arrivals) unless someone acts. Posted
+# at once every time it happens, not once in ALERT_EVERY_S (a charger pulled out again within
+# hours went unreported until the battery was at 8%), and again every CRITICAL_EVERY_S until fixed.
+CRITICAL = {"battery_power", "not_charging"}
+CRITICAL_EVERY_S = 600
+NOT_CHARGING_BELOW = 50  # on the charger but not charging: macOS holds a full battery at about 80%
+NOT_CHARGING_FOR_S = 300
+POWER_CHECK_S = 20  # how often the power is read: an unplugged charger is reported within this long
 URL_ALERT_KEY = "public_url_alert_day"
 ALERTS_KEY = "machine_alerts"
 
@@ -129,6 +137,7 @@ class Power:
     battery: int | None = None  # percent
     charging: bool | None = None
     adapter_w: int | None = None
+    remaining: str | None = None  # "1:04": battery time left, as macOS estimates it
     speed_limit: int | None = None  # percent of full CPU speed (macOS lowers it when hot or underpowered)
     checked_at: float = 0.0
 
@@ -144,6 +153,9 @@ def parse_batt(text: str) -> dict:
         out["battery"] = int(m.group(1))
         state = m.group(2).strip().lower()
         out["charging"] = state in ("charging", "charged", "finishing charge")
+    m = re.search(r"(\d+:\d\d) remaining", text)
+    if m and m.group(1) != "0:00":
+        out["remaining"] = m.group(1)
     return out
 
 
@@ -167,6 +179,7 @@ def read_power() -> Power | None:
     if not batt:
         return None
     return Power(on_ac=batt.get("on_ac"), battery=batt.get("battery"), charging=batt.get("charging"),
+                 remaining=batt.get("remaining"),
                  adapter_w=parse_adapter(_run(["pmset", "-g", "adapter"])),
                  speed_limit=parse_therm(_run(["pmset", "-g", "therm"])), checked_at=time.time())
 
@@ -175,13 +188,19 @@ def problems(p: Power) -> dict[str, str]:
     """Problem id -> chat text, for the power state `p` (throttling is timed by the watcher)."""
     found = {}
     if p.on_ac is False:
-        found["battery_power"] = (f"🔋 *The attendance computer is running on battery* ({p.battery}%). "
-                                  "Plug its charger in, or it switches off when the battery is empty.")
+        left = f", about {p.remaining} left" if p.remaining else ""
+        found["battery_power"] = (f"🚨 *CRITICAL: the attendance computer is not plugged in* — running on battery "
+                                  f"({p.battery}%{left}). Plug its charger in now, or it switches off and "
+                                  "arrivals are not recorded.")
+    elif p.on_ac and p.charging is False and p.battery is not None and p.battery < NOT_CHARGING_BELOW:
+        found["not_charging"] = (f"🚨 *CRITICAL: the attendance computer is plugged in but not charging* "
+                                 f"(battery {p.battery}%). Check the cable and the socket, or it switches off "
+                                 "when the battery is empty.")
     elif p.adapter_w is not None and p.adapter_w < MIN_ADAPTER_W:
         found["weak_adapter"] = (f"🔌 *The attendance computer's charger gives only {p.adapter_w} W* "
                                  f"(needs at least {MIN_ADAPTER_W} W, ideally the laptop's own 87–96 W charger). "
                                  "The battery drains and the computer slows down under load.")
-    if p.battery is not None and p.battery < LOW_BATTERY and not p.charging:
+    if p.battery is not None and p.battery < LOW_BATTERY and not p.charging and not set(found) & CRITICAL:
         found["low_battery"] = (f"🪫 *The attendance computer's battery is at {p.battery}% and not charging.* "
                                 "It switches off when the battery is empty.")
     if p.speed_limit is not None and p.speed_limit < THROTTLED_BELOW:
@@ -191,6 +210,7 @@ def problems(p: Power) -> dict[str, str]:
 
 
 RECOVERED = {"battery_power": "✅ The attendance computer is on mains power again.",
+             "not_charging": "✅ The attendance computer is charging again.",
              "weak_adapter": "✅ The attendance computer's charger is strong enough again.",
              "low_battery": "✅ The attendance computer's battery is charging again.",
              "throttled": "✅ The attendance computer runs at full CPU speed again."}
@@ -209,7 +229,7 @@ class MachineWatch:
         self._running = False
         self._last_start = 0.0
 
-    def check_soon(self, every_s: float = 60.0) -> None:
+    def check_soon(self, every_s: float = POWER_CHECK_S) -> None:
         """Start a check in the background unless one ran within `every_s` or is running."""
         # Paced by the last start, not by self.power: that stays None where power cannot be read
         # (Windows, Linux, a Mac without a battery), which started a check on every loop pass.
@@ -249,8 +269,13 @@ class MachineWatch:
             for key, text in found.items():
                 if key == "throttled" and t - self._since[key] < THROTTLED_FOR_S:
                     continue
+                if key == "not_charging" and t - self._since[key] < NOT_CHARGING_FOR_S:
+                    continue  # a charger just plugged in takes a moment to start
                 entry = state.get(key) or {}
-                if "sent" in entry and t - entry["sent"] < ALERT_EVERY_S:
+                if key in CRITICAL:
+                    if entry.get("open") and t - entry["sent"] < CRITICAL_EVERY_S:
+                        continue  # repeated until fixed, and at once each time it happens again
+                elif "sent" in entry and t - entry["sent"] < ALERT_EVERY_S:
                     continue  # told a short while ago; a problem that lasts is repeated now and then
                 self.alert(text)
                 state[key] = {"sent": t, "open": True}

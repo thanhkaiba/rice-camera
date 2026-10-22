@@ -94,8 +94,8 @@ def test_public_url_fine_cases():
 
 def test_pmset_parsers():
     assert machine.parse_batt(BATT_AC_5W) == {"on_ac": True, "battery": 6, "charging": False}
-    assert machine.parse_batt(BATT_CHARGING) == {"on_ac": True, "battery": 30, "charging": True}
-    assert machine.parse_batt(BATT_BATTERY) == {"on_ac": False, "battery": 15, "charging": False}
+    assert machine.parse_batt(BATT_CHARGING) == {"on_ac": True, "battery": 30, "charging": True, "remaining": "1:09"}
+    assert machine.parse_batt(BATT_BATTERY) == {"on_ac": False, "battery": 15, "charging": False, "remaining": "0:40"}
     assert machine.parse_therm(THERM) == 24
     assert machine.parse_therm("Note: No thermal warning level has been recorded") is None
     assert machine.parse_adapter(ADAPTER) == 60
@@ -103,9 +103,13 @@ def test_pmset_parsers():
 
 
 def test_problems():
-    weak = Power(on_ac=True, battery=6, charging=False, adapter_w=5, speed_limit=24)
-    assert set(machine.problems(weak)) == {"weak_adapter", "low_battery", "throttled"}
-    assert set(machine.problems(Power(on_ac=False, battery=15, charging=False))) == {"battery_power", "low_battery"}
+    weak = Power(on_ac=True, battery=60, charging=False, adapter_w=5, speed_limit=24)
+    assert set(machine.problems(weak)) == {"weak_adapter", "throttled"}
+    # On the charger but not charging, low: critical (and not also "low battery")
+    assert set(machine.problems(Power(on_ac=True, battery=6, charging=False, adapter_w=5))) == {"not_charging"}
+    assert set(machine.problems(Power(on_ac=True, battery=80, charging=False, adapter_w=96))) == set()  # held at 80%
+    unplugged = machine.problems(Power(on_ac=False, battery=15, charging=False, remaining="0:40"))
+    assert set(unplugged) == {"battery_power"} and "CRITICAL" in unplugged["battery_power"] and "0:40 left" in unplugged["battery_power"]
     assert machine.problems(Power(on_ac=True, battery=30, charging=True, adapter_w=60, speed_limit=100)) == {}
 
 
@@ -219,9 +223,42 @@ def test_summary_gets_placement_hint(core):
 
 
 def test_lasting_problem_repeated_after_six_hours(core):
-    readings = [Power(on_ac=False, battery=50, charging=False)]
+    readings = [Power(on_ac=True, battery=50, charging=True, adapter_w=30)]  # not critical: every six hours
     w, sent = watch(core, readings)
     w.check(t=0)
     w.check(t=3600)
     w.check(t=machine.ALERT_EVERY_S + 1)
-    assert sum("running on battery" in s for s in sent) == 2
+    assert sum("charger gives only 30 W" in s for s in sent) == 2
+
+
+def test_an_unplugged_charger_is_critical_every_time_and_repeated_until_fixed(core):
+    plugged = Power(on_ac=True, battery=90, charging=True, adapter_w=96, speed_limit=100)
+    unplugged = Power(on_ac=False, battery=60, charging=False, speed_limit=100)
+    readings = [unplugged]
+    w, sent = watch(core, readings)
+    critical = lambda: [m for m in sent if "CRITICAL" in m]  # noqa: E731
+    w.check(t=0)
+    assert len(critical()) == 1  # at once
+    w.check(t=machine.POWER_CHECK_S)
+    assert len(critical()) == 1
+    w.check(t=machine.CRITICAL_EVERY_S + 1)
+    assert len(critical()) == 2  # again while it lasts
+    readings[0] = plugged
+    w.check(t=machine.CRITICAL_EVERY_S + 30)
+    assert sent[-1] == "✅ The attendance computer is on mains power again."
+    readings[0] = unplugged  # pulled out again an hour later: not silenced for hours
+    w.check(t=machine.CRITICAL_EVERY_S + 3600)
+    assert len(critical()) == 3
+
+
+def test_plugged_in_but_not_charging_is_critical_after_a_few_minutes(core):
+    readings = [Power(on_ac=True, battery=30, charging=False, adapter_w=96, speed_limit=100)]
+    w, sent = watch(core, readings)
+    w.check(t=0)
+    w.check(t=100)
+    assert not sent  # a charger just plugged in takes a moment
+    w.check(t=machine.NOT_CHARGING_FOR_S + 1)
+    assert len(sent) == 1 and "plugged in but not charging" in sent[0]
+    readings[0] = Power(on_ac=True, battery=31, charging=True, adapter_w=96, speed_limit=100)
+    w.check(t=machine.NOT_CHARGING_FOR_S + 30)
+    assert sent[-1] == "✅ The attendance computer is charging again."
