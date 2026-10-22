@@ -63,7 +63,8 @@
       <strong class="row"><span style="color:var(--brand)">{{ icon('image') }}</span>Collecting reference photos</strong>
       <div class="hint" style="margin-top:4px"><span id="collect-state">{{ 'On now' if collect.running else 'Waiting' }}</span>
         · {{ collect.start }}–{{ collect.end }} outside the camera hours · image score ≥ {{ collect.min_score }}
-        · <span class="tnum" id="collect-kept">{{ collect.kept_today }}</span> kept today</div>
+        · <span class="tnum" id="collect-kept">{{ collect.kept_today }}</span> kept today
+        · <span class="tnum" id="collect-reviewed">{{ collect.reviewed_today }}</span> unrecognised sent to Review</div>
     </div>
     {% endif %}
     <div class="card" id="enrol-card">
@@ -125,6 +126,7 @@
       if (document.getElementById('collect-card')) {
         document.getElementById('collect-state').textContent = co.running ? 'On now' : 'Waiting';
         document.getElementById('collect-kept').textContent = co.kept_today ?? 0;
+        document.getElementById('collect-reviewed').textContent = co.reviewed_today ?? 0;
       }
       const en = s.enrol || {};
       document.getElementById('enrol-form').hidden = !!en.active;

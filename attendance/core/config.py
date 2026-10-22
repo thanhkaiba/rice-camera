@@ -227,6 +227,9 @@ class CollectConfig:
     per_day: int = 3  # photos kept per person per day, so one long chat at the door does not fill the gallery
     enough: int = 20  # a person with this many good photos is left alone
     fps: float = 2.0  # frames analysed per second while collecting: lighter on the computer than camera hours
+    # A clear face the camera does not recognise (often someone with few reference photos) goes to
+    # Review, at most this many a day; naming it there teaches the face, without recording an arrival.
+    review_per_day: int = 10  # 0 = never
 
 
 @dataclass
@@ -305,6 +308,8 @@ class Config:
             raise ValueError("collect.start must be before collect.end")
         if not 1 <= c.min_score <= 100:
             raise ValueError("collect.min_score must be between 1 and 100")
+        if c.review_per_day < 0:
+            raise ValueError("collect.review_per_day must not be negative")
         if c.per_day < 1 or c.enough < 1:
             raise ValueError("collect.per_day and collect.enough must be at least 1")
         if not 0.2 <= c.fps <= 30:

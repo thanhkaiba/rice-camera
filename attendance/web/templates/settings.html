@@ -76,7 +76,6 @@
       {{ check('google_chat', 'mention_people', '@mention people in alerts') }}
       {{ check('google_chat', 'notify_late_arrivals', 'Post each late arrival as it happens') }}
     </div>
-    {{ field('google_chat', 'unknown_batch_minutes', 'Batch "faces to review" notices (min)', type='number') }}
     <div class="form-row">
       <label class="field">Call people in messages by
         <select name="google_chat.names">
@@ -126,7 +125,7 @@
     <div class="stack">{{ check('camera', 'enhance_low_light', 'Brighten dark frames') }}</div>
     <hr>
     <h2 class="row">{{ icon('image') }}Collect reference photos</h2>
-    <p class="hint">Outside the camera hours the camera keeps watching, more slowly, and keeps very clear faces of people it recognises without doubt as their reference photos: one per walk past, a few a day, until they have enough good ones. Arrivals are not recorded then.</p>
+    <p class="hint">Outside the camera hours the camera keeps watching, more slowly, and keeps very clear faces of people it recognises without doubt as their reference photos: one per walk past, a few a day, until they have enough good ones. A clear face it does not recognise goes to Review, where naming it teaches the face. Arrivals are not recorded then.</p>
     <div class="stack">{{ check('collect', 'enabled', 'Collect outside the camera hours', 'On work days, between the times below') }}</div>
     <div class="form-row" style="margin-top:14px">
       {{ field('collect', 'start', 'From', type='time') }}
@@ -137,6 +136,7 @@
       {{ field('collect', 'per_day', 'Photos per person per day', type='number', step='1') }}
       {{ field('collect', 'enough', 'Stop at good photos', 'A person with this many is left alone', type='number', step='1') }}
       {{ field('collect', 'fps', 'Frames / second', 'Lighter than camera hours', type='number', step='0.5') }}
+      {{ field('collect', 'review_per_day', 'Unrecognised faces to Review a day', 'Clear faces nobody matches · no arrival is recorded · 0 = none', type='number', step='1') }}
     </div>
     <hr>
     <h2 class="row">{{ icon('employees') }}Groups of people</h2>

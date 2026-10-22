@@ -58,22 +58,24 @@ def test_notices_are_sent_once_even_after_restart(env, tmp_path):
     assert len([m for m in sent if m.startswith("⏰")]) == 1
 
 
-def test_unknown_faces_are_batched_and_admin_can_resolve(env):
+def test_unknown_faces_wait_on_the_review_page_and_admin_can_resolve(env):
     service, store, clock, sent = env
     run_until(service, clock, at(9, 10))
     carol_turned = person_vector(3) + 0.5 * person_vector(40)  # Carol, but not like her reference photo
     uid = service.on_unknown(at(9, 12), "x.jpg", carol_turned / np.linalg.norm(carol_turned), "C", 0.38)
     service.on_unknown(at(9, 13), "y.jpg", person_vector(20), None, None)
     run_until(service, clock, at(9, 20))
-    unknown_msgs = [m for m in sent if m.startswith("❓")]
-    assert len(unknown_msgs) == 1 and "2 different faces" in unknown_msgs[0] and "/unknowns" in unknown_msgs[0]
+    assert not [m for m in sent if m.startswith("❓")]  # Review is on the page; Chat is not told
+    assert store.pending_group_count(DAY) == 2
 
     run_until(service, clock, at(10, 5))
-    assert "Carol" in [m for m in sent if m.startswith("⏰")][0]
+    deadline = [m for m in sent if m.startswith("⏰")][0]
+    assert "Carol" in deadline and "unidentified" not in deadline and "/unknowns" not in deadline
 
-    # Admin confirms the 9:12 face was C: on time, with a correction in the chat.
+    # Admin confirms the 9:12 face was C: on time, quietly.
+    posted = len(sent)
     service.resolve_unknown(uid, "C")
-    assert sent[-1] == "✅ Update: @Carol arrived at 09:12 (confirmed by admin), not late."
+    assert len(sent) == posted
     rep = service.report(DAY)
     assert "C" in [a.employee_id for a in rep.on_time]
     assert service.gallery.counts()["C"] == 2  # the confirmed face was learned
@@ -145,7 +147,7 @@ def test_late_time_message_still_sent_when_someone_is_missing_or_faces_wait(env)
     service.on_unknown(at(9, 20), "x.jpg", person_vector(20), None, None)  # a visitor, or someone mis-enrolled
     run_until(service, clock, at(10, 5))
     deadline = [m for m in sent if m.startswith("⏰")]
-    assert len(deadline) == 1 and "all 3 people arrived on time" in deadline[0] and "1 unidentified" in deadline[0]
+    assert len(deadline) == 1 and "all 3 people arrived on time" in deadline[0] and "unidentified" not in deadline[0]
 
 
 def test_admin_correction_moves_late_arrival_earlier(env):
@@ -242,19 +244,18 @@ def test_exempt_people_are_recorded_but_never_late_or_missing(env):
     assert "C" not in [p.employee_id for p in service.period_report(DAY, DAY).people]
 
 
-def test_confirming_several_faces_of_a_late_person_posts_once(env):
+def test_confirming_faces_of_a_late_person_posts_nothing(env):
     service, store, clock, sent = env
     run_until(service, clock, at(10, 40))
     first = service.on_unknown(at(10, 30), "b1.jpg", person_vector(21), None, None)  # unlike each other:
     second = service.on_unknown(at(10, 29), "b2.jpg", person_vector(22), None, None)  # two separate groups
     service.resolve_unknown(first, "B")
     service.resolve_unknown(second, "B")  # an earlier visit, still late
-    late_posts = [m for m in sent if m.startswith("🟠")]
-    assert len(late_posts) == 1 and "10:30" in late_posts[0]
     assert store.checkins(DAY)["B"].first_seen == at(10, 29)
     early = service.on_unknown(at(9, 50), "b3.jpg", person_vector(23), None, None)
-    service.resolve_unknown(early, "B")  # turns out B was on time after all: that is worth a post
-    assert [m for m in sent if "Bob" in m][-1] == "✅ Update: @Bob arrived at 09:50 (confirmed by admin), not late."
+    service.resolve_unknown(early, "B")  # turns out B was on time after all
+    assert store.checkins(DAY)["B"].first_seen == at(9, 50)
+    assert not [m for m in sent if "Bob" in m and not m.startswith("⏰")]  # only the late-time list named him
 
 
 def test_unclear_face_also_like_someone_not_in_yet_is_reviewed(env):

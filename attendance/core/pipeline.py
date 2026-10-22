@@ -59,7 +59,7 @@ class App:
         self.recognizer_lock = threading.Lock()
         self._recognizer = None
         self.library = FaceLibrary(cfg, self.store, self.gallery, self.recognizer, self.recognizer_lock,
-                                   alert=self.service.alert, now=self.service.now)
+                                   now=self.service.now)
         self.service.library = self.library
         self.leave_sync = LeaveSync(cfg, self.store, self.service.now, lambda d: self.service.window(d).late_from)
         self.live = LiveStatus()
@@ -68,7 +68,8 @@ class App:
         self.backup = Backup(self.store, cfg, self.service.now, self.service.alert)
         self.service.backup = self.backup
         self.enrolment = DoorEnrolment(self.library, self.store, cfg.recognition, name_of=self.service.chat_name)
-        self.collector = Collector(cfg, self.library, self.store, self.service)
+        self.collector = Collector(cfg, self.library, self.store, self.service,
+                                   report=lambda *face: report_collected(self, *face))
         self.placement = Placement(self.store)
         self.service.placement = self.placement
         self.machine = MachineWatch(cfg, self.store, self.service.alert, self.service.now)
@@ -102,6 +103,19 @@ def save_crop(app: App, decision: Decision, ts: dt.datetime) -> str | None:
         (app.data_dir / scene_photo(rel.as_posix())).write_bytes(
             render_scene(frame, bbox, f"{ts:%Y-%m-%d %H:%M:%S} ({ts:%z})  {label}"))
     return rel.as_posix()
+
+
+def report_collected(app: App, face, frame, ts: dt.datetime, candidates) -> None:
+    """An unrecognised clear face seen outside the camera hours (collect.py) -> a Review card
+    that records no arrival when it is named."""
+    from ..vision.recognizer import crop_body, crop_face
+
+    guess_id, guess_score = candidates[0] if candidates else (None, None)
+    decision = Decision("unknown", ts, None, guess_score, crop_face(frame, face.bbox), face.embedding,
+                        crop_body(frame, face.bbox))
+    image = save_crop(app, decision, ts)
+    app.store.add_unknown(ts.date(), ts, image, app.cfg.recognition.model_id(), face.embedding, guess_id,
+                          guess_score, source="collect")
 
 
 def render_scene(frame, bbox, label: str, max_width: int = 1280) -> bytes:

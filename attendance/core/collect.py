@@ -17,6 +17,11 @@ wrong one:
   and has no photo almost identical to it already.
 One photo is kept per passage at most: the next comes from another time they walk by, in
 another light or pose.
+
+A clear face (same Image score and quality gate) that nobody is recognised as is often someone
+with too few reference photos: it goes to Review, once per passage, confirmed by a second look,
+and not again that day for a face like one already sent, up to collect.review_per_day cards.
+Naming it there teaches the face; no arrival is recorded for it.
 """
 from __future__ import annotations
 
@@ -24,18 +29,23 @@ import datetime as dt
 import logging
 import threading
 import time
+from typing import Callable
 
-from ..vision.tracker import clear_match
+import numpy as np
+
+from ..vision.tracker import clear_match, vote_for
 
 log = logging.getLogger(__name__)
 
 CONFIRM_S = 3.0  # the earlier clear match of the same person must be this recent
 COUNT_EVERY_S = 60.0  # how often the photo counts are read again from the database
+SAME_FACE = 0.5  # an unrecognised face this similar to another is taken to be the same person
 
 
 class Collector:
-    def __init__(self, cfg, library, store, service):
-        self.cfg, self._library, self._store, self._service = cfg, library, store, service
+    def __init__(self, cfg, library, store, service, report: Callable | None = None):
+        """`report(face, frame, ts, candidates)`: sends an unrecognised face to Review."""
+        self.cfg, self._library, self._store, self._service, self._report = cfg, library, store, service, report
         self._lock = threading.Lock()
         self._seen: dict = {}  # followed person id (or employee id) -> (employee id, last clear match, kept one)
         self._day: dt.date | None = None
@@ -44,6 +54,8 @@ class Collector:
         self._active: set[str] = set()
         self._counted = 0.0
         self.kept_today = 0
+        self._strangers: list[list] = []  # unrecognised faces of recent frames: [vector, last seen, sent to Review]
+        self._reviewed: list[np.ndarray] = []  # faces sent to Review today
 
     def running(self, now: dt.datetime, in_window: bool) -> bool:
         """Whether to collect now: switched on, a work day, within the collect hours, outside the camera hours."""
@@ -63,6 +75,8 @@ class Collector:
         self._today, self._good, self._day = today, good, day
         self._active = set(self._store.employees())
         self.kept_today = sum(today.values())
+        self._reviewed = [u.vector for u in self._store.unknowns(day, status=None, source="collect")
+                          if u.vector is not None]
         self._counted = time.monotonic()
 
     def _wanted(self, face, candidates) -> str | None:
@@ -73,6 +87,31 @@ class Collector:
             return None
         return candidates[0][0]
 
+    def _unrecognised(self, face, candidates) -> bool:
+        """A clear face that nobody is recognised as, not even with the usual (lower) bar."""
+        return (face.quality_ok and round(face.quality * 100) >= self.cfg.collect.min_score
+                and vote_for(candidates, True, True, self.cfg.recognition) is None)
+
+    def _stranger(self, face, frame, now: dt.datetime, candidates, at: float) -> bool:
+        """Send an unrecognised face to Review once per passage and once a day; returns whether it was."""
+        v = face.embedding
+        same = next((s for s in self._strangers if float(np.dot(s[0], v)) >= SAME_FACE), None)
+        if same is None:
+            self._strangers.append([v, at, False])  # the first look: only the next one confirms a real face
+            return False
+        same[0], same[1] = v, at
+        if same[2]:
+            return False
+        same[2] = True  # sent now, or not to be sent from this passage
+        if (self._report is None or len(self._reviewed) >= self.cfg.collect.review_per_day
+                or any(float(np.dot(r, v)) >= SAME_FACE for r in self._reviewed)):
+            return False
+        self._report(face, frame, now, candidates)
+        self._reviewed.append(v)
+        log.info("Sent an unrecognised clear face to Review (image score %d, closest %s %.2f)",
+                 round(face.quality * 100), *(candidates[0] if candidates else ("nobody", 0.0)))
+        return True
+
     def observe(self, matched, frame, now: dt.datetime, at: float | None = None) -> int:
         """The faces of one analysed frame, as (DetectedFace, gallery candidates, followed person id).
         Returns how many were kept."""
@@ -82,8 +121,12 @@ class Collector:
             if self._day != now.date() or time.monotonic() - self._counted >= COUNT_EVERY_S:
                 self._count(now.date())
             self._seen = {k: v for k, v in self._seen.items() if at - v[1] <= CONFIRM_S}
+            self._strangers = [s for s in self._strangers if at - s[1] <= CONFIRM_S]
             c = self.cfg.collect
             for face, candidates, pid in matched:
+                if self._unrecognised(face, candidates):
+                    self._stranger(face, frame, now, candidates, at)
+                    continue
                 employee = self._wanted(face, candidates)
                 if employee is None or employee not in self._active:
                     continue
@@ -109,4 +152,5 @@ class Collector:
         now = self._service.now()
         return {"enabled": self.cfg.collect.enabled, "running": self.running(now, self._service.in_window(now)),
                 "kept_today": self.kept_today if self._day == now.date() else 0,
+                "reviewed_today": len(self._reviewed) if self._day == now.date() else 0,
                 "start": self.cfg.collect.start, "end": self.cfg.collect.end, "min_score": self.cfg.collect.min_score}

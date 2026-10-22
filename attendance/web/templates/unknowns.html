@@ -4,7 +4,7 @@
 <div class="page-head">
   <div>
     <h1>Review</h1>
-    <p class="subtitle">Camera faces and seed samples awaiting review. Click one to name it.</p>
+    <p class="subtitle">Camera faces, faces seen outside the camera hours and seed samples awaiting review. Click one to name it.</p>
   </div>
   <div class="actions">
     {% if groups %}<span class="badge bad" title="{{ groups|length }} to review">{{ groups|length }}</span>{% endif %}
@@ -32,7 +32,7 @@
      else 'First ' ~ local(first.ts).strftime('%a %d %b %H:%M') ~ ' · last ' ~ local(last.ts).strftime('%a %d %b %H:%M') %}
   <div class="face-card" style="animation-delay: {{ (loop.index0 % 8) * 40 }}ms"
        data-id="{{ g.id }}" data-count="{{ g.members|length }}" data-when="{{ when }}"
-       data-seed="{{ 1 if g.source == 'seed' else 0 }}"
+       data-seed="{{ 1 if g.source == 'seed' else 0 }}" data-collect="{{ 1 if g.source == 'collect' else 0 }}"
        data-source-id="{{ g.expected_id or '' }}" data-source-name="{{ g.expected_name or '' }}"
        data-guess="{{ g.guess or '' }}" data-guess-name="{{ guess_label }}"
        data-score="{{ '%.2f'|format(g.guess_score) if guess else '' }}"
@@ -51,6 +51,7 @@
     {% if thumbs %}<div class="thumbs">{% for p in thumbs[:4] %}<img src="{{ url_for('media', path=p) }}" alt="" loading="lazy">{% endfor %}</div>{% endif %}
     <div class="body">
       {% if g.source == 'seed' %}<span class="badge info" title="No attendance will be recorded when this sample is labelled">Seed sample</span>{% endif %}
+      {% if g.source == 'collect' %}<span class="badge info" title="A clear face seen outside the camera hours that nobody was recognised as. Naming it teaches the face; no attendance is recorded">Outside camera hours</span>{% endif %}
       <div class="small muted tnum">{{ local(last.ts).strftime('%a %d %b %H:%M') }}</div>
       {% if guess %}<div class="small">Looks like <strong>{{ guess_label }}</strong> <span class="muted" title="Similarity score, not a probability of identity">(similarity {{ '%.2f'|format(g.guess_score) }})</span></div>
       {% elif g.maybe %}<div class="small">Maybe {% for pid, score in g.maybe %}<strong>{{ employee_labels.get(pid, '') }}</strong> <span class="muted tnum" title="Similarity score, not a probability of identity">{{ '%.2f'|format(score) }}</span>{{ ' · ' if not loop.last }}{% endfor %} <span class="muted">· not sure, check the photo</span></div>
@@ -61,7 +62,7 @@
       {% if g.members|length == 1 %}
       <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
         <input type="hidden" name="employee_id" value="{{ g.guess }}">
-        <button class="primary btn-sm btn-block" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ guess_label }}</button>
+        <button class="primary btn-sm btn-block" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Learn the face; no attendance is recorded' if g.source == 'collect' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ guess_label }}</button>
       </form>
       {% else %}
       <button type="button" class="primary btn-sm btn-block" onclick="openReview(this.closest('.face-card'), '{{ g.guess }}')">{{ icon('check') }}Confirm: {{ guess_label }} · select photos</button>
@@ -255,7 +256,8 @@
       return item;
     }));
     document.getElementById('review-when').textContent = d.when + (d.count > 1 ? ' · seen ' + d.count + ' times' : '') +
-      (d.seed === '1' ? ' · Seed sample · No attendance will be recorded' : '');
+      (d.seed === '1' ? ' · Seed sample · No attendance will be recorded' : '') +
+      (d.collect === '1' ? ' · Outside camera hours · No attendance will be recorded' : '');
     const source = document.getElementById('form-source');
     source.hidden = !d.sourceId || d.sourceId === d.guess;
     source.action = url(urls.assign);
@@ -264,7 +266,8 @@
     const pick = document.getElementById('form-pick');
     if (pick) {
       pick.action = url(urls.assign);
-      pick.querySelector('button').title = d.seed === '1' ? 'Label selected samples; no attendance is recorded' : 'Confirm and learn only the selected photos';
+      pick.querySelector('button').title = d.seed === '1' ? 'Label selected samples; no attendance is recorded'
+        : d.collect === '1' ? 'Learn the selected photos; no attendance is recorded' : 'Confirm and learn only the selected photos';
       document.getElementById('pick-label').textContent = d.guess ? 'Someone else?' : 'Which person?';
       pick.reset();
       pickSearch.setCustomValidity('');

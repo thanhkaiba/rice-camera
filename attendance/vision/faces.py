@@ -79,7 +79,7 @@ def decode_image(data: bytes):
 
 class FaceLibrary:
     def __init__(self, cfg: Config, store: Store, gallery: Gallery, recognizer: Callable[[], object],
-                 lock: threading.Lock, alert: Callable[[str], None] = lambda text: None,
+                 lock: threading.Lock,
                  now: Callable[[], dt.datetime] | None = None):
         """`recognizer` returns the FaceRecognizer (loaded lazily); `lock` serialises its use with the camera loop."""
         self.cfg = cfg
@@ -87,7 +87,6 @@ class FaceLibrary:
         self.gallery = gallery
         self._recognizer = recognizer
         self._lock = lock
-        self._alert = alert
         self._now = now or (lambda: dt.datetime.now(cfg.tz))
         self.data_dir = cfg.path(cfg.data_dir)
         self.rate_in_background = False  # set by the running program: check new photos' quality in a thread
@@ -126,9 +125,7 @@ class FaceLibrary:
             other_name = self.store.employees().get(other, other)
             text = (f"This photo of {name} looks like {other_name} ({score:.0%} match), so the camera may "
                     f"confuse them. Check that it really is {name}.")
-            warnings.append(text)
-            self._alert(f"⚠️ Look-alike reference photos: {name} and {other_name} ({score:.0%} match). "
-                        f"Check the photos on the People page.")
+            warnings.append(text)  # shown on the page, and on the People page; not posted to Chat
         return AddResult(True, f"Photo added for {name}.", warnings)
 
     def learn(self, employee_id: str, vector: np.ndarray, snapshot: str | None, model: str) -> bool:

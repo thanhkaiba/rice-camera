@@ -217,8 +217,6 @@ def import_seed(app, seed: Path, review_only: bool = False, progress: Callable[[
     planned = sum(len(paths) for paths in photos.values())
     report = dict(model=app.cfg.recognition.model_id(), employees=len(people), expected_photos=planned,
                   imported=0, failed=[], warnings=[], backup=str(folder))
-    # A bulk import records warnings in the report instead of posting hundreds of Chat alerts.
-    alert, app.library._alert = app.library._alert, lambda message: None
     try:
         app.recognizer()
         app.store.import_employees((seed / "employees.csv").read_text(encoding="utf-8-sig"))
@@ -248,7 +246,6 @@ def import_seed(app, seed: Path, review_only: bool = False, progress: Callable[[
         report["review"] = import_review_samples(app, seed, progress)
         app.store.log(app.service.now(), "seed", "import seed", f'{len(people)} employees, {report["imported"]} photos')
     finally:
-        app.library._alert = alert
         app.library.reload()
         (app.data_dir / f"seed-import-{stamp}.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

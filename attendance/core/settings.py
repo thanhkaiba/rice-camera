@@ -29,7 +29,7 @@ EDITABLE: dict[str, list[str]] = {
     "web": ["public_url", "password", "viewer_username", "viewer_password"],
     "updates": ["enabled"],
     "backup": ["folder", "time", "keep_days", "include_photos"],
-    "collect": ["enabled", "start", "end", "min_score", "per_day", "enough", "fps"],
+    "collect": ["enabled", "start", "end", "min_score", "per_day", "enough", "fps", "review_per_day"],
     "": ["retention_days", "late_evidence_days", "healthcheck_url"],
 }
 

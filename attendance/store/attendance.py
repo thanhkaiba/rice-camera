@@ -162,8 +162,8 @@ class AttendanceStoreMixin:
                     *, source: str = "camera") -> int:
         """Store an unidentified face; without a group it starts a new group of its own.
         `ignored` stores it as already ignored for the day (its group was ignored earlier today)."""
-        if source not in {"camera", "seed"}:
-            raise ValueError("unknown face source must be camera or seed")
+        if source not in {"camera", "seed", "collect"}:
+            raise ValueError("unknown face source must be camera, seed or collect")
         with self._lock, self._db:
             cur = self._db.execute(
                 "INSERT INTO unknowns (day, ts, image, model, vector, guess_id, guess_score, group_id, status, "

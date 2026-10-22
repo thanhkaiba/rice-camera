@@ -217,6 +217,9 @@ def register(app: Flask, core: "App") -> None:
         if face and face.source == "seed":
             return done("Sample labelled. No attendance recorded; usable faces are learned after confirmation.", "unknowns")
         person = store.employee(request.form.get("employee_id", ""))
+        if face and face.source == "collect":
+            label = _review_name(person.name, person.email) if person else "employee"
+            return done(f"Face learned for {label}. Seen outside the camera hours, so no attendance recorded.", "unknowns")
         label = _review_name(person.name, person.email) if person else "employee"
         return done(f"Confirmed as {label}; face learned.", "unknowns")
 

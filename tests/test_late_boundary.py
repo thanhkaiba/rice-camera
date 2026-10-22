@@ -24,10 +24,11 @@ def test_entire_configured_minute_is_on_time(core, seconds, is_late, source):
     assert [a.employee_id for a in report.late] == (["A"] if is_late else [])
     assert [a.employee_id for a in report.on_time] == ([] if is_late else ["A"])
     assert bool(app.service.late_text(DAY)) == is_late
-    assert bool([m for m in sent if m.startswith("🟠")]) == is_late
+    # Only the camera's arrivals are posted as they happen; one the admin enters is not.
+    assert bool([m for m in sent if m.startswith("🟠")]) == (is_late and source == "camera")
     if is_late:
         assert minutes_late(report.late[0], report.window) == 1
-        assert "1 min late" in sent[-1]
+        assert source == "manual" or "1 min late" in sent[-1]
     [person] = app.service.period_report(DAY, DAY).people
     assert (person.on_time, person.late, person.late_minutes) == ((0, 1, 1) if is_late else (1, 0, 0))
 
@@ -48,14 +49,15 @@ def test_deadline_notice_and_period_totals_wait_until_next_minute(core):
     assert app.service.period_report(DAY, DAY).days
 
 
-def test_correction_to_configured_minute_announces_on_time(core):
+def test_correction_to_configured_minute_counts_as_on_time(core):
     app, clock, sent = core
     app.cfg.schedule.late_after = "09:00"
     clock.t = at(9, 30)
     app.service.tick()
     app.service.on_identified("A", at(9, 1), .8, None)
     app.service.set_arrival(DAY, "A", dt.time(9, 0, 59))
-    assert sent[-1].startswith("✅ Update:") and "not late" in sent[-1]
+    assert [a.employee_id for a in app.service.report(DAY).on_time] == ["A"]
+    assert not sent[-1].startswith("✅ Update:")  # admin changes are not posted to Chat
 
 
 @pytest.mark.parametrize("minute,second,status,minutes", [(0, 59, "On time", None), (1, 0, "Late", 1)])

@@ -151,7 +151,6 @@ class AttendanceService:
         saved = store.get("last_alive")
         self._last_alive = dt.datetime.fromisoformat(saved) if saved else None
         self._last_alive_saved = self._last_alive
-        self._last_unknown_notice: dt.datetime | None = None
         self._last_flush: dt.datetime | None = None
         self._camera_seen_day: dt.date | None = None
         self._bad_since: dt.datetime | None = None  # when the camera stopped working, in this run
@@ -341,7 +340,7 @@ class AttendanceService:
                                            self.model_id if vector is not None else None, vector, sha256)
         log.info("Identified %s at %s (score %.2f): %s", employee_id, ts.strftime("%H:%M:%S"), score, result)
         if result == "new":
-            self._announce(employee_id, ts, suffix="")
+            self._announce(employee_id, ts)
 
     def on_unknown(self, ts: dt.datetime, image: str | None, vector: np.ndarray | None,
                    guess_id: str | None, guess_score: float | None, sha256: str | None = None) -> int | None:
@@ -481,18 +480,13 @@ class AttendanceService:
         step = max(1, len(with_vector) // per_group)
         for u in with_vector[::step][:per_group]:
             self._learn(employee_id, u.vector, u.image, u.model)
-        today = self.now().date()
-        before = self.store.checkins(today).get(employee_id)
         for u in members:
-            if u.source == "seed":
+            if u.source in ("seed", "collect"):  # a sample, or a face seen outside the camera hours: no arrival
                 continue
             ts = self._local(u.ts)
+            # Not posted to Chat: Chat is for late arrivals the camera sees and for problems, and the
+            # late message and the summary list everyone late, confirmed by the admin or not.
             self.store.record_checkin(ts.date(), employee_id, ts, "admin", u.guess_score, u.image, sha256=u.sha256)
-        # Earlier days are corrected quietly. Today's arrival is posted once, and again only if the
-        # person turns out to be on time after all: confirming several faces of someone who came in
-        # late (one group after another, or a group with several visits) must not repeat the post.
-        self._announce_change(employee_id, before, self.store.checkins(today).get(employee_id),
-                              suffix=" (confirmed by admin)")
         when = ", ".join(sorted({f"{self._local(u.ts):%Y-%m-%d %H:%M}" for u in members})[:5])
         more = f" (+{len(members) - 5} more)" if len(members) > 5 else ""
         self.store.log(self.now(), user, "confirm face", f"{self._name(employee_id)}: {when}{more}")
@@ -556,7 +550,6 @@ class AttendanceService:
         self.store.set_checkin(day, employee_id, ts, "manual", None, old.image if old else None)
         before = f" (was {self._local(old.first_seen):%H:%M})" if old else ""
         self.store.log(self.now(), user, "set arrival", f"{day} {self._name(employee_id)} {time:%H:%M}{before}")
-        self._announce(employee_id, ts, suffix=" (entered by admin)")
 
     def reassign_arrival(self, day: dt.date, from_id: str, to_id: str, user: str = "admin") -> bool:
         """The camera recorded the wrong person: move the sighting the arrival came from (time and
@@ -605,28 +598,12 @@ class AttendanceService:
         self._correct(s, self._name(s.employee_id), "restore sighting", user, status="ok")
 
     def _correct(self, s, what: str, action: str, user: str, **change) -> None:
-        people = list(dict.fromkeys([s.employee_id, change.get("employee_id") or s.employee_id]))
-        before = {e: self.store.checkins(s.day).get(e) for e in people}
+        """Corrections are not posted to Chat; the late message and the summary show the result."""
         self.store.update_sighting(s.id, **change)
         self.store.log(self.now(), user, action, f"{s.day} {self._local(s.ts):%H:%M} {what}")
-        after = self.store.checkins(s.day)
-        for e in people:
-            self._announce_change(e, before[e], after.get(e))
 
-    def _announce_change(self, employee_id: str, before, after, suffix: str = " (corrected by admin)") -> None:
-        """After a correction, post only what changes someone's status: they turn out to be late
-        (or on time after being listed as not seen)."""
-        if after is None or (before is not None and after.first_seen == before.first_seen):
-            return
-        ts = self._local(after.first_seen)
-        if ts.date() != self.now().date():
-            return  # earlier days are corrected quietly
-        late = ts >= self.window(ts.date()).late_from
-        was_late = before is not None and self._local(before.first_seen) >= self.window(ts.date()).late_from
-        if late != was_late or before is None:
-            self._announce(employee_id, ts, suffix=suffix)
-
-    def _announce(self, employee_id: str, ts: dt.datetime, suffix: str) -> None:
+    def _announce(self, employee_id: str, ts: dt.datetime) -> None:
+        """A camera arrival after the late time, or after the "not seen" list (admin changes are not posted)."""
         day = ts.date()
         if (not self.is_workday(day) or employee_id in self.store.leaves_on(day)
                 or employee_id in self.store.exempt_ids()):
@@ -636,10 +613,10 @@ class AttendanceService:
         if ts >= w.late_from:
             if self.cfg.google_chat.notify_late_arrivals:
                 late = int((ts - w.late_after).total_seconds() // 60)
-                self._send(f"🟠 {self.who(employee_id)} arrived at {when}, {late} min late{suffix}.", day)
+                self._send(f"🟠 {self.who(employee_id)} arrived at {when}, {late} min late.", day)
         elif self.store.notice_sent(day, "deadline"):
             # They were on the "not seen" list, but turned out to have arrived on time.
-            self._send(f"✅ Update: {self.who(employee_id)} arrived at {when}{suffix}, not late.", day)
+            self._send(f"✅ Update: {self.who(employee_id)} arrived at {when}, not late.", day)
 
     # reports -------------------------------------------------------------------
 
@@ -708,9 +685,6 @@ class AttendanceService:
         else:
             lines = [f"⏰ *{w.late_from:%H:%M}: {len(rep.not_seen)}/{rep.total} people not seen yet* (counted as late):"]
             lines += [f"• {self.who(emp_id, name)}" for emp_id, name in rep.not_seen]
-        if rep.pending_unknowns:
-            lines.append(f"❓ {rep.pending_unknowns} unidentified faces, possibly people on this list · "
-                         f"{self._link('/unknowns?review=first', 'Review')}")
         lines += self._extra_lines(rep)
         lines.append(f"Details: {self._link('/')}")
         return "\n".join(lines)
@@ -720,7 +694,7 @@ class AttendanceService:
         lines = [
             f"📋 *Attendance summary {rep.day:%Y-%m-%d}*",
             f"On time: {len(rep.on_time)} · Late: {len(rep.late)} · Not seen: {len(rep.not_seen)}"
-            f" · On leave: {len(rep.on_leave)} · Unidentified faces: {rep.pending_unknowns}",
+            f" · On leave: {len(rep.on_leave)}",
         ]
         if rep.all_in and rep.last_arrival is not None:
             lines.append(f"✅ Everyone was in by {rep.last_arrival.time} 🎉")
@@ -731,9 +705,6 @@ class AttendanceService:
         if rep.not_seen:
             lines.append(f"*Not seen on camera between {w.start:%H:%M} and {w.end:%H:%M}:*")
             lines += [f"• {self.who(emp_id, name)}" for emp_id, name in rep.not_seen]
-        if rep.pending_unknowns:
-            lines.append(f"❓ {rep.pending_unknowns} unidentified faces to review · "
-                         f"{self._link('/unknowns?review=first', 'Review')}")
         lines += self._extra_lines(rep)
         if self.placement is not None:
             lines += self.placement.hints(rep.day, self.cfg.recognition.min_face_px)
@@ -773,15 +744,6 @@ class AttendanceService:
         ranked = sorted(people.values(), key=lambda p: (-(p.late + p.not_seen), -p.late_minutes, p.name))
         return PeriodReport(start, end, days, ranked)
 
-    def unknown_text(self, unknowns) -> str:
-        people = len({u.group_id for u in unknowns})
-        times = ", ".join(self._local(u.ts).strftime("%H:%M") for u in unknowns[:10])
-        who = "1 face" if people == 1 else f"{people} different faces"
-        return (f"❓ {who} to review, seen at {times}{'…' if len(unknowns) > 10 else ''} · "
-                f"{self._link('/unknowns?review=first', 'Say who it is')}")
-
-    # scheduler -----------------------------------------------------------------
-
     def tick(self, camera_ok: bool = True, camera_state: str = "") -> None:
         """Call about once a second from the main loop. `camera_state` says what is wrong when the
         camera is not ok, for the alert."""
@@ -803,14 +765,6 @@ class AttendanceService:
                         self._send(self.deadline_text(rep), day)
                     self.store.mark_notice(day, "deadline", now)
 
-            batch = dt.timedelta(minutes=self.cfg.google_chat.unknown_batch_minutes)
-            if now < w.end and (self._last_unknown_notice is None or now - self._last_unknown_notice >= batch):
-                pending = self.store.unnotified_unknowns(day)
-                if pending:
-                    self._send(self.unknown_text(pending), day)
-                    self.store.mark_unknowns_notified([u.id for u in pending])
-                    self._last_unknown_notice = now
-
             lm = self.cfg.late_message
             send_at = dt.datetime.combine(day, parse_clock(lm.send_at), tzinfo=self.tz) if lm.send_at else w.end
             if (lm.enabled and lm.auto_send and now >= send_at
@@ -819,7 +773,6 @@ class AttendanceService:
                 self.send_late_message(day, auto=True)
 
             if now >= w.end and not self.store.notice_sent(day, "summary"):
-                self.store.mark_unknowns_notified([u.id for u in self.store.unnotified_unknowns(day)])
                 self._send(self.summary_text(self.report(day)), day)
                 self.store.mark_notice(day, "summary", now)
 

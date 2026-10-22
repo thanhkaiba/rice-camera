@@ -48,10 +48,10 @@ def test_admin_can_add_move_and_delete_arrivals_with_audit_trail(env):
     service.on_identified("A", at(9, 10), 0.8, "crops/x.jpg")
 
     # The camera thought it was Alice, but it was Carol.
+    posted = len(sent)
     service.reassign_arrival(DAY, "A", "C", user="hr")
     assert set(store.checkins(DAY)) == {"C"}
     assert store.checkins(DAY)["C"].image == "crops/x.jpg"
-    assert sent[-1] == "✅ Update: @Carol arrived at 09:10 (corrected by admin), not late."
 
     # Bob forgot to look at the camera; HR enters his arrival.
     service.set_arrival(DAY, "B", dt.time(9, 45), user="hr")
@@ -61,6 +61,7 @@ def test_admin_can_add_move_and_delete_arrivals_with_audit_trail(env):
 
     service.delete_arrival(DAY, "C", user="hr")
     assert "C" not in store.checkins(DAY)
+    assert len(sent) == posted  # what the admin changes is not posted to Chat
     actions = [a for _, who, a, _ in store.audit() if who == "hr"]
     assert actions == ["delete arrival", "set arrival", "set arrival", "reassign arrival"]
     with pytest.raises(ValueError):
@@ -71,8 +72,8 @@ def test_messages_about_past_days_carry_the_date(env):
     service, store, clock, sent = env
     run_until(service, clock, at(10, 1))
     clock.t = at(9, 0, day=DAY + dt.timedelta(days=1))
-    service.set_arrival(DAY, "B", dt.time(9, 30))
-    assert sent[-1] == "✅ Update: @Bob arrived at 09:30 on 2026-10-14 (entered by admin), not late."
+    service.on_identified("B", at(9, 30), 0.8, None)  # a camera arrival from yesterday, recorded late
+    assert sent[-1] == "✅ Update: @Bob arrived at 09:30 on 2026-10-14, not late."
 
 
 def test_unclear_face_of_someone_already_checked_in_is_not_reported(env):
@@ -142,7 +143,7 @@ def test_upload_learn_delete_and_look_alike_alert(core):
     # Bob's folder accidentally holds a photo of Alice.
     result = lib.add_photo("B", face_image(4))
     assert result.ok and "looks like Alice" in result.warnings[0]
-    assert sent[-1].startswith("⚠️ Look-alike reference photos: Bob and Alice")
+    assert not any("Look-alike" in m for m in sent)  # shown on the page and the People page, not in Chat
     assert [(p.a, p.b) for p in lib.look_alikes()] == [("A", "B")]
 
     wrong = app.store.references(lib.model_id, "B")[-1].image
@@ -245,12 +246,12 @@ def test_correcting_a_wrong_sighting_brings_back_the_real_later_arrival(env):
     assert store.checkins(DAY)["B"].first_seen == at(9, 20)
     assert len(store.sightings(DAY, "B")) == 2
 
+    posted = len(sent)
     service.reassign_arrival(DAY, "B", "A", user="hr")
     arrivals = store.checkins(DAY)
     assert arrivals["A"].first_seen == at(9, 20) and arrivals["A"].source == "corrected"
     assert arrivals["B"].first_seen == at(10, 15) and arrivals["B"].image == "crops/bob.jpg"
-    assert sent[-2:] == ["🟠 @Bob arrived at 10:15, 15 min late (corrected by admin).",
-                         "✅ Update: @Alice arrived at 09:20 (corrected by admin), not late."]
+    assert len(sent) == posted  # corrections are not posted; the late message lists Bob
     assert [d.employee_id for d in service.report(DAY).late] == ["B"]
 
 

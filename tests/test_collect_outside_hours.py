@@ -114,3 +114,58 @@ def test_settings_and_camera_page(collect):
     with pytest.raises(ValueError):
         app.cfg.collect.start, app.cfg.collect.end = "20:00", "07:00"
         app.cfg.validate()
+
+
+def stranger(person: int, i: int = 0) -> np.ndarray:
+    """Someone the gallery does not know (or barely), in another pose."""
+    return unit(person_vector(person), 0.3 * person_vector(900 + 10 * person + i))
+
+
+def test_a_clear_face_nobody_is_recognised_as_goes_to_review_once(collect):
+    app, clock, c = collect
+    assert seen(app, c, stranger(40, 0), 0.0) == 0
+    assert app.store.unknowns(source="collect") == []  # one look could be anything
+    seen(app, c, stranger(40, 1), 0.5)
+    seen(app, c, stranger(40, 2), 1.0)  # the same walk past
+    cards = app.store.unknowns(source="collect")
+    assert len(cards) == 1 and (app.data_dir / cards[0].image).exists()
+    seen(app, c, stranger(40, 3), 30.0)
+    seen(app, c, stranger(40, 4), 30.5)  # again later today: already in Review
+    seen(app, c, stranger(41, 0), 60.0, quality=0.5)
+    seen(app, c, stranger(41, 1), 60.5, quality=0.5)  # not clear enough
+    assert len(app.store.unknowns(source="collect")) == 1
+    seen(app, c, stranger(42, 0), 90.0)
+    seen(app, c, stranger(42, 1), 90.5)
+    assert len(app.store.unknowns(source="collect")) == 2 and c.status()["reviewed_today"] == 2
+    assert app.store.pending_group_count(DAY) == 0  # not part of the morning's report
+    assert app.store.unnotified_unknowns(DAY) == []  # nor posted to Chat
+
+
+def test_review_cards_a_day_are_limited(collect):
+    app, clock, c = collect
+    app.cfg.collect.review_per_day = 1
+    for n, person in enumerate((40, 42)):
+        seen(app, c, stranger(person, 0), n * 10.0)
+        seen(app, c, stranger(person, 1), n * 10.0 + 0.5)
+    assert len(app.store.unknowns(source="collect")) == 1
+    app.cfg.collect.review_per_day = 0
+    c._counted = -1e9
+    seen(app, c, stranger(44, 0), 50.0)
+    seen(app, c, stranger(44, 1), 50.5)
+    assert len(app.store.unknowns(source="collect")) == 1
+
+
+def test_naming_it_teaches_the_face_but_records_no_arrival(collect):
+    from attendance.web import create_app
+
+    app, clock, c = collect
+    seen(app, c, stranger(40, 0), 0.0)
+    seen(app, c, stranger(40, 1), 0.5)
+    card = app.store.unknowns(source="collect")[0]
+    client = create_app(app).test_client()
+    page = client.get("/unknowns").get_data(as_text=True)
+    assert "Outside camera hours" in page
+    reply = client.post(f"/unknowns/{card.id}/assign", data={"employee_id": "C"}, follow_redirects=True)
+    assert "no attendance recorded" in reply.get_data(as_text=True)
+    assert app.gallery.counts()["C"] == 2
+    assert "C" not in app.store.checkins(DAY)
