@@ -83,7 +83,7 @@
           <option value="name" {{ 'selected' if s.google_chat.names == 'name' }}>Their name (People page)</option>
           <option value="email" {{ 'selected' if s.google_chat.names == 'email' }}>Their email name (ruby@… → Ruby)</option>
         </select>
-        <span class="hint">Used when there is no Chat ID to @mention them</span>{{ src('google_chat.names') }}</label>
+        <span class="hint">Used when there is no Chat ID to @mention them, and on the People and Camera pages</span>{{ src('google_chat.names') }}</label>
     </div>
 
     <hr>

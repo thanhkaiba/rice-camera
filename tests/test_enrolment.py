@@ -5,7 +5,7 @@ import datetime as dt
 import numpy as np
 import pytest
 
-from attendance.core.enrolment import DISTINCT, MAX_FACES, STEPS, DoorEnrolment, looks_masked
+from attendance.core.enrolment import DISTINCT, MAX_FACES, PER_STEP, DoorEnrolment
 from attendance.vision.recognizer import DetectedFace
 from attendance.web import create_app
 from conftest import DAY, at, face_image, person_vector
@@ -55,7 +55,7 @@ def test_walk_past_the_camera_keeps_different_views_only(enrol):
     v1 = person_vector(50)  # Carol with a mask: nothing like her ID photo
     assert e.observe([(face(v1), app.gallery.match(v1))], frame) is True
     assert e.observe([(face(v1), app.gallery.match(v1))], frame) is False  # the next frame, same view
-    assert "1/8 kept. Closer still." == e.status()["note"]  # nothing new, told what to do next
+    assert f"1/{MAX_FACES} kept. Hold it…" == e.status()["note"]  # nothing new; the step is not ticked by one frame
     v2 = unit(v1, 0.6 * person_vector(51))  # turned a little
     assert float(v1 @ v2) < DISTINCT
     assert e.observe([(face(v2), app.gallery.match(v2))], frame) is True
@@ -93,10 +93,12 @@ def test_enrolment_ends_after_its_time_or_enough_faces_and_can_be_stopped(enrol)
     assert e.observe([(face(person_vector(70)), [])], frame) is False  # too late
 
     e.start("A")
-    for i in range(MAX_FACES + 2):
+    for i in range(6):  # many faces at once, all in the first step's pose
         e.observe([(face(person_vector(100 + i)), [])], frame)
-    assert not e.active and e.status()["kept"] == MAX_FACES
-    assert f"{MAX_FACES} face(s) of Alice" in e.status()["note"]
+    assert e.active and e.status()["kept"] == PER_STEP
+    e.stop()
+    assert f"{PER_STEP} face(s) of Alice" in e.status()["note"] and "not yet: look at the camera" in e.status()["note"]
+    assert e.status()["can_continue"]
 
     e.start("B")
     e.observe([(face(person_vector(200)), [])], frame)
@@ -104,6 +106,83 @@ def test_enrolment_ends_after_its_time_or_enough_faces_and_can_be_stopped(enrol)
     assert not e.active and "1 face(s) of Bob" in e.status()["note"]
     with pytest.raises(ValueError):
         e.start("nobody")
+
+
+def test_steps_come_one_at_a_time_and_tick_only_once_held(enrol):
+    """Someone who just stands there, close to the camera, ticks nothing at once: each step must be
+    shown long enough to be read, and its pose held; a turn of the head for one frame is not a turn."""
+    app, e, ticker = enrol
+    frame = face_image(1, 300)
+    big = 2 * app.cfg.recognition.min_face_px + 10
+    faces = iter(range(300, 400))
+
+    def frames(seconds, **kw):
+        for _ in range(round(seconds / 0.2)):
+            ticker.t += 0.2
+            e.observe([(face(person_vector(next(faces)), **kw), [])], frame)
+
+    def done():
+        return [st["key"] for st in e.status()["steps"] if st["done"]]
+
+    e.start("A")
+    frames(0.2, size=big)  # looking at the camera, close: one frame ticks nothing
+    assert done() == []
+    frames(2.0, size=big)  # held long enough, but the step was only just shown
+    assert done() == []
+    frames(0.4, size=big)
+    assert done() == ["straight"]  # and not "close" with it, although the face is close
+    frames(2.0, size=big)
+    assert done() == ["straight"]
+    frames(0.6, size=big)
+    assert done() == ["straight", "close"]
+
+    frames(0.2, yaw=30.0)  # a glance aside
+    frames(3.0)
+    assert done() == ["straight", "close"] and "Turn your head further" in e.status()["note"]
+    frames(3.0, yaw=30.0)  # either way first
+    assert done()[-1] == "side"
+    frames(3.0, yaw=30.0)  # the same way again is not the other side
+    assert done()[-1] == "side" and "the other way" in e.status()["note"]
+    frames(3.0, yaw=-30.0)
+    assert done()[-1] == "other"
+
+    e.observe([(face(person_vector(1)), [])], frame)  # a moment without a mask
+    assert "No mask seen yet" in e.status()["note"]
+    e.skip()  # no mask at hand
+    st = e.status()
+    assert not st["active"] and st["complete"] and "every view covered" in st["note"]
+    assert st["kept"] == 4 * PER_STEP  # two faces in each pose done, none from the wrong poses
+
+
+def test_a_held_pose_survives_a_missed_frame_but_not_a_pause(enrol):
+    app, e, ticker = enrol
+    frame = face_image(1, 300)
+    e.start("A")
+    for i in range(30):  # 3 s looking at the camera, but with a 1 s break in the middle
+        ticker.t += 0.1
+        if not 10 <= i < 20:
+            e.observe([(face(person_vector(500 + i)), [])], frame)
+    assert not e.status()["steps"][0]["done"]
+    for i in range(10):  # every third frame missed: still held
+        ticker.t += 0.1
+        if i % 3:
+            e.observe([(face(person_vector(600 + i)), [])], frame)
+    assert e.status()["steps"][0]["done"] == "seen"
+
+
+def test_people_and_enrolment_use_the_email_name(core):
+    app, clock, _ = core
+    app.store.update_employee("C", "Carol Smith", True, email="tan.nguyen@example.com")
+    app.cfg.camera.url = "rtsp://cam/stream"
+    c = create_app(app).test_client()
+    assert app.cfg.google_chat.names == "email"
+    assert '<option value="C">Tan Nguyen</option>' in c.get("/live").get_data(as_text=True)
+    people = c.get("/employees").get_data(as_text=True)
+    assert "Tan Nguyen" in people and "Carol Smith" in people  # the full name still shown, smaller
+    assert "<h1>Tan Nguyen</h1>" in c.get("/employees/C").get_data(as_text=True)
+    assert app.enrolment.start("C") == "Tan Nguyen"
+    app.cfg.google_chat.names = "name"
+    assert '<option value="C">Carol Smith</option>' in c.get("/live").get_data(as_text=True)
 
 
 def test_camera_page_starts_and_stops_enrolment(core):

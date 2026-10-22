@@ -66,7 +66,7 @@ class App:
         self.pose = PoseCalibration(self.store, lambda: cfg.recognition.auto_pose)
         self.backup = Backup(self.store, cfg, self.service.now, self.service.alert)
         self.service.backup = self.backup
-        self.enrolment = DoorEnrolment(self.library, self.store, cfg.recognition)
+        self.enrolment = DoorEnrolment(self.library, self.store, cfg.recognition, name_of=self.service.chat_name)
         self.placement = Placement(self.store)
         self.service.placement = self.placement
         self.machine = MachineWatch(cfg, self.store, self.service.alert, self.service.now)

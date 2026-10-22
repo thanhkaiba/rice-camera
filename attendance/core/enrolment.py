@@ -7,10 +7,13 @@ through five short steps, in big letters over the live picture (and read aloud i
 
     look at the camera · come close · turn to one side · the other side · mask on
 
-Each step is ticked by what the camera sees (head pose, face size, a covered lower face), so
-the person is told exactly what is still missing and when there is enough. Meanwhile every clear
-face that adds a new view is kept as a reference, up to a handful. A step the person cannot do
-(no mask at hand) can be skipped by the admin; when the time runs out the admin can continue.
+The steps come one at a time. Each is ticked by what the camera sees (head pose, face size, a
+covered lower face), but only once the person has held it for a moment and had time to read it:
+a single frame with a noisy head-pose estimate, or someone who happens to stand close already,
+must not tick the step before they did anything. While a step's pose is held, a couple of clear
+faces in that pose are kept as references, so each view ends up in the gallery. A step the
+person cannot do (no mask at hand) can be skipped by the admin; when the time runs out the
+admin can continue.
 
 Safety: nothing is kept while more than one face is in view (so a colleague walking along is
 never learned as this person), nor a face that clearly matches another employee. Arrivals are
@@ -29,7 +32,10 @@ from ..vision.tracker import clear_match
 
 DURATION_S = 90.0
 EXTRA_S = 60.0  # 'Continue' after the time ran out
-MAX_FACES = 8
+PER_STEP = 2  # faces kept in each step's pose
+HOLD_S = 1.0  # a step is done once its pose is held this long,
+STEP_MIN_S = 2.5  # and no sooner than this after it was shown, so the person can read (or hear) it
+GAP_S = 0.4  # a missed frame or two this short does not break a held pose
 DISTINCT = 0.9  # a face this similar to one kept in this session is the same view again
 TURN = 15.0  # degrees of yaw that count as "turned to one side"
 TURN_MAX = 20.0  # degrees beyond max_yaw: turned so far the face is no longer a useful reference
@@ -45,6 +51,7 @@ STEPS = (
     ("other", "Now turn to the other side"),
     ("mask", "Put a mask on and look at the camera"),
 )
+MAX_FACES = PER_STEP * len(STEPS)
 STEP_HINTS = {
     "straight": "Stand still a moment, face towards the lens.",
     "close": "Two or three steps closer, until your face fills more of the picture.",
@@ -84,9 +91,12 @@ def looks_masked(frame: np.ndarray, landmarks: np.ndarray | None) -> bool:
 
 
 class DoorEnrolment:
-    def __init__(self, library, store, recognition, now: Callable[[], float] = time.time):
-        """`library`: FaceLibrary (keeps the faces); `recognition`: the RecognitionConfig (quality limits)."""
+    def __init__(self, library, store, recognition, now: Callable[[], float] = time.time,
+                 name_of: Callable[[str], str] | None = None):
+        """`library`: FaceLibrary (keeps the faces); `recognition`: the RecognitionConfig (quality limits);
+        `name_of`: how to name an employee by id (the email name, if Settings say so)."""
         self._library, self._store, self._cfg, self._now = library, store, recognition, now
+        self._name_of = name_of or (lambda employee_id: self._store.employees().get(employee_id, employee_id))
         self._lock = threading.Lock()
         self._employee: str | None = None
         self._last: str | None = None  # the employee of the session that just ended (for Continue)
@@ -97,17 +107,23 @@ class DoorEnrolment:
         self._done: dict[str, str] = {}  # step -> "seen" | "skipped"
         self._note = ""
         self._instruction = ""
+        self._step_since = 0.0  # when the current step was shown
+        self._holding: float | None = None  # since when its pose is held
+        self._last_met = 0.0  # the last frame that showed it
+        self._step_kept = 0
+        self._side = 0.0  # the way the head turned for "side": "other" is the opposite way
 
     def start(self, employee_id: str) -> str:
         """Begin enrolling `employee_id`; returns their name. Raises ValueError for an unknown id."""
-        name = self._store.employees().get(employee_id)
-        if name is None:
+        if employee_id not in self._store.employees():
             raise ValueError(f"unknown employee {employee_id}")
+        name = self._name_of(employee_id)
         with self._lock:
             self._employee, self._last, self._name, self._kept, self._done = employee_id, employee_id, name, [], {}
             self._until = self._now() + DURATION_S
             self._note = "Only one person in the picture, please."
-            self._instruction = self._next_instruction()
+            self._side = 0.0
+            self._new_step()
         return name
 
     def resume(self) -> bool:
@@ -119,7 +135,7 @@ class DoorEnrolment:
             self._employee = self._last
             self._until = self._now() + EXTRA_S
             self._note = ""
-            self._instruction = self._next_instruction()
+            self._new_step()
             return True
 
     def skip(self) -> str | None:
@@ -150,9 +166,14 @@ class DoorEnrolment:
     def _missing(self) -> list[str]:
         return [label for key, label in STEPS if key not in self._done]
 
+    def _new_step(self) -> None:
+        """Call with the lock held: the current step is shown from now on."""
+        self._instruction = self._next_instruction()
+        self._step_since, self._holding, self._step_kept = self._now(), None, 0
+
     def _after_step(self) -> None:
         """Call with the lock held, after a step was ticked or skipped."""
-        self._instruction = self._next_instruction()
+        self._new_step()
         if self._current() is None and self._kept:
             self._finish()
 
@@ -221,50 +242,70 @@ class DoorEnrolment:
                 self._note = "The face is blurred; stand still a moment."
                 return False
             if candidates and candidates[0][0] != employee and clear_match(candidates, self._cfg):
-                other = self._store.employees().get(candidates[0][0], candidates[0][0])
+                other = self._name_of(candidates[0][0])
                 self._note = f"This face clearly matches {other}, not {self._name}; nothing kept."
                 return False
 
-            kept = self._keep(employee, face, frame)
-            ticked = self._tick(face, frame)
-            if self._employee is None:  # finished on this frame: the last step, or enough faces
+            step = self._current()
+            met = step is not None and self._meets(step, face, frame)
+            kept = met and self._step_kept < PER_STEP and self._keep(employee, face, frame)
+            self._step_kept += kept
+            ticked = self._hold(step, met, face.yaw)
+            if self._employee is None:  # finished on this frame: the last step
                 return kept
             progress = f"{len(self._kept)}/{MAX_FACES} kept."
-            current = self._current()
             if ticked:
                 guidance = f"{dict(STEPS)[ticked]}: done."
+            elif met:
+                guidance = "Hold it…"
             elif abs(face.yaw) > self._cfg.max_yaw + TURN_MAX:
                 guidance = "Turned too far; a little less."
-            elif current in ("side", "other") and abs(face.yaw) < TURN:
+            elif step in ("side", "other") and abs(face.yaw) < TURN:
                 guidance = "Turn your head further, slowly."
-            elif current == "close":
+            elif step == "other":
+                guidance = "Now the other way."
+            elif step == "close":
                 guidance = "Closer still."
-            elif not kept:
-                guidance = "Same view as before; follow the step shown."
+            elif step == "straight":
+                guidance = "Look straight at the camera."
+            elif step == "mask":
+                guidance = "No mask seen yet: cover your nose and mouth."
             else:
                 guidance = ""
             self._note = f"{progress} {guidance}".strip()
             return kept
 
-    def _tick(self, face, frame) -> str | None:
-        """Mark every step this face satisfies; returns the first newly ticked step."""
-        seen = []
-        if abs(face.yaw) <= STRAIGHT and abs(face.pitch) <= STRAIGHT + 3:
-            seen.append("straight")
-        if face.size >= CLOSE * self._cfg.min_face_px:
-            seen.append("close")
-        if TURN <= -face.yaw <= self._cfg.max_yaw + TURN_MAX:
-            seen.append("side")
-        if TURN <= face.yaw <= self._cfg.max_yaw + TURN_MAX:
-            seen.append("other")
-        if looks_masked(frame, face.landmarks):
-            seen.append("mask")
-        new = [s for s in seen if s not in self._done]
-        for s in new:
-            self._done[s] = "seen"
-        if new:
-            self._after_step()
-        return new[0] if new else None
+    def _meets(self, step: str, face, frame) -> bool:
+        """Whether this face shows what `step` asks for."""
+        if step == "straight":
+            return abs(face.yaw) <= STRAIGHT and abs(face.pitch) <= STRAIGHT + 3
+        if step == "close":
+            return face.size >= CLOSE * self._cfg.min_face_px
+        if step in ("side", "other"):
+            turned = TURN <= abs(face.yaw) <= self._cfg.max_yaw + TURN_MAX
+            # either way for the first turn, then the opposite way
+            return turned and (step == "side" or self._side == 0.0 or face.yaw * self._side < 0)
+        if step == "mask":
+            return looks_masked(frame, face.landmarks)
+        return False
+
+    def _hold(self, step: str | None, met: bool, yaw: float) -> str | None:
+        """Tick `step` once its pose was held for HOLD_S and it was shown for STEP_MIN_S; returns it then."""
+        now = self._now()
+        if not met:
+            if self._holding is not None and now - self._last_met > GAP_S:
+                self._holding = None
+            return None
+        if self._holding is None or now - self._last_met > GAP_S:
+            self._holding = now
+        self._last_met = now
+        if step is None or now - self._holding < HOLD_S or now - self._step_since < STEP_MIN_S:
+            return None
+        if step == "side":
+            self._side = yaw
+        self._done[step] = "seen"
+        self._after_step()
+        return step
 
     def _keep(self, employee: str, face, frame) -> bool:
         if any(float(np.dot(face.embedding, kept)) >= DISTINCT for kept in self._kept):
@@ -272,7 +313,4 @@ class DoorEnrolment:
         if not self._library.keep_face(employee, face.embedding, crop_face(frame, face.bbox)):
             return False
         self._kept.append(face.embedding)
-        if len(self._kept) >= MAX_FACES and self._employee is not None:
-            self._done.update({k: self._done.get(k, "seen") for k, _ in STEPS})  # enough views either way
-            self._finish()
         return True

@@ -60,7 +60,7 @@
     </div>
     <div class="card" id="enrol-card">
       <strong class="row"><span style="color:var(--brand)">{{ icon('user-plus') }}</span>Enrol at the door</strong>
-      <div class="hint" style="margin:4px 0 10px">The camera's own pictures are the best reference photos. Pick a person and turn the screen towards them: the picture shows them what to do, step by step, and says when there is enough (90 s, up to 8 faces). One person in view; their arrival is not recorded meanwhile.</div>
+      <div class="hint" style="margin:4px 0 10px">The camera's own pictures are the best reference photos. Pick a person and turn the screen towards them: the picture shows them what to do, step by step, one step at a time; a step is ticked once they have held it for a moment, and two faces are kept in each pose (90 s). One person in view; their arrival is not recorded meanwhile.</div>
       <form method="post" action="{{ url_for('enrol_start') }}" class="row" id="enrol-form" {% if enrol.active %}hidden{% endif %}>
         <select name="employee_id" required style="flex:1 1 160px">
           <option value="">Choose a person…</option>

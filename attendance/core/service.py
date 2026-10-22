@@ -26,7 +26,7 @@ from .config import Config, parse_clock
 from ..vision.gallery import Gallery
 from ..vision.tracker import vote_for
 from ..integrations.notifier import GoogleChat
-from ..store import LEAVE_KINDS, Store, body_photo, scene_photo
+from ..store import LEAVE_KINDS, Employee, Store, body_photo, scene_photo
 
 if TYPE_CHECKING:
     from ..vision.faces import FaceLibrary
@@ -212,6 +212,15 @@ class AttendanceService:
             if e and e.email:
                 return email_name(e.email)
         return name or self._name(employee_id)
+
+    def shown_name(self, e: Employee) -> str:
+        """chat_name for an employee already at hand: how the admin pages name people too."""
+        return email_name(e.email) if self.cfg.google_chat.names == "email" and e.email else e.name
+
+    def shown_names(self, active_only: bool = True) -> dict[str, str]:
+        """id -> shown_name, in alphabetical order of that name (pickers, look-alike warnings)."""
+        people = [e for e in self.store.all_employees() if e.active or not active_only]
+        return dict(sorted(((e.id, self.shown_name(e)) for e in people), key=lambda kv: kv[1].lower()))
 
     def mention(self, employee_id: str) -> str:
         """A Google Chat @mention when the employee's Chat user ID is known, else "@Name" as plain text."""

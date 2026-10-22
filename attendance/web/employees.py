@@ -39,8 +39,9 @@ def register(app: Flask, core: "App") -> None:
                 summary = recognition.setdefault(r.employee_id, {"useful": 0, "review": 0, "unverified": 0, "duplicates": 0})
                 summary[check.status] += 1
                 summary["duplicates"] += check.duplicate_of is not None
-        names = {e.id: e.name for e in store.all_employees()}
-        return render_template("employees.html", people=store.all_employees(), counts=counts, thumbs=thumbs,
+        names = service.shown_names(active_only=False)
+        people = sorted(store.all_employees(), key=lambda e: (not e.active, names[e.id].lower()))
+        return render_template("employees.html", people=people, counts=counts, thumbs=thumbs,
                                look_alikes=quality_report["look_alikes"], names=names, quality=library.quality(),
                                good_photos=GOOD_PHOTOS, photo_scores=scores, recognition=recognition,
                                quality_report=quality_report,
@@ -138,7 +139,7 @@ def register(app: Flask, core: "App") -> None:
                                recognition_params=cfg.recognition,
                                look_alikes=[(p.b if p.a == employee_id else p.a, p.score)
                                             for p in quality_report["look_alikes"] if employee_id in (p.a, p.b)],
-                               names=store.employees(),
+                               names=service.shown_names(active_only=False),
                                leaves=store.leaves(employee_id=employee_id, ending_after=service.now().date()))
 
     @app.post("/employees/<employee_id>")

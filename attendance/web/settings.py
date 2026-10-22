@@ -31,7 +31,7 @@ def register(app: Flask, core: "App") -> None:
     @app.get("/live")
     def live_page():
         return render_template("live.html", cfg=cfg, in_window=service.in_window(service.now()),
-                               employees=store.employees(), enrol=core.enrolment.status())
+                               employees=service.shown_names(), enrol=core.enrolment.status())
 
     @app.post("/live/enrol")
     def enrol_start():

@@ -46,9 +46,10 @@
     {% for p in people %}
       {% set n = counts.get(p.id, 0) %}
       {% set q = quality.get(p.id, (0, 0, 0)) %}
-      <tr class="link" data-name="{{ p.name|lower }} {{ p.email|lower }}" data-needs="{{ 1 if p.active and (n == 0 or (q[2] < n and q[1] < good_photos)) else 0 }}" onclick="location.href='{{ url_for('employee', employee_id=p.id) }}'">
-        <td>{% if thumbs.get(p.id) %}<img class="avatar" src="{{ url_for('media', path=thumbs[p.id]) }}" alt="" loading="lazy">{% else %}<span class="avatar empty">{{ p.name[:1] }}</span>{% endif %}</td>
-        <td><div class="cell-main">{{ p.name }}</div><div class="cell-sub">{{ p.email or "Add email" }}</div></td>
+      {% set shown = names[p.id] %}
+      <tr class="link" data-name="{{ shown|lower }}{% if shown != p.name %} {{ p.name|lower }}{% endif %} {{ p.email|lower }}" data-needs="{{ 1 if p.active and (n == 0 or (q[2] < n and q[1] < good_photos)) else 0 }}" onclick="location.href='{{ url_for('employee', employee_id=p.id) }}'">
+        <td>{% if thumbs.get(p.id) %}<img class="avatar" src="{{ url_for('media', path=thumbs[p.id]) }}" alt="" loading="lazy">{% else %}<span class="avatar empty">{{ shown[:1] }}</span>{% endif %}</td>
+        <td><div class="cell-main">{{ shown }}</div><div class="cell-sub">{{ p.email or "Add email" }}{% if shown != p.name %} · {{ p.name }}{% endif %}</div></td>
         <td>{% if n == 0 %}<span class="badge bad plain">{{ icon('image') }}No photos</span>
             {% elif q[2] == n %}<span class="badge info plain" title="{{ n }} photos · quality not checked yet">{{ icon('image') }}{{ n }}</span>
             {% elif q[1] < good_photos %}<span class="badge late plain" title="{{ q[1] }} of {{ n }} photos are sharp and frontal · add {{ good_photos - q[1] }} more good ones">{{ icon('image') }}{{ q[1] }}/{{ n }} good</span>
@@ -66,7 +67,7 @@
             {% elif on_leave.get(p.id) %}<span class="badge info">{{ leave_label(on_leave[p.id]) }} today</span>
             {% elif p.exempt %}<span class="badge info plain" title="Never counted as late or absent">{{ icon('crown') }}Not counted</span>
             {% else %}<span class="badge ok">Active</span>{% endif %}</td>
-        <td class="num"><a class="btn btn-sm ghost icon" href="{{ url_for('employee', employee_id=p.id) }}" title="Open" aria-label="Open {{ p.name }}">{{ icon('chevron-right') }}</a></td>
+        <td class="num"><a class="btn btn-sm ghost icon" href="{{ url_for('employee', employee_id=p.id) }}" title="Open" aria-label="Open {{ shown }}">{{ icon('chevron-right') }}</a></td>
       </tr>
     {% endfor %}
     </tbody>

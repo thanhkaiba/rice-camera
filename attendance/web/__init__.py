@@ -164,6 +164,7 @@ def create_app(core: "App") -> "Flask":
         store.put("web_secret", secret)
     app.secret_key = secret
     app.jinja_env.globals["icon"] = icon
+    app.jinja_env.globals["person_name"] = core.service.shown_name  # the email name, if Settings say so
     # Browsers keep the stylesheet and script until they change.
     static_dir = Path(app.static_folder or "")
     app.jinja_env.globals["asset_version"] = str(int(max((f.stat().st_mtime for f in static_dir.glob("*")), default=0)))
