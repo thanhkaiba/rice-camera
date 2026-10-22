@@ -157,7 +157,11 @@ class TrackingConfig:
 class GoogleChatConfig:
     webhook_url: str = ""
     mention_people: bool = True  # @mention late and missing people (needs their Google Chat user ID)
-    notify_late_arrivals: bool = True
+    # Off by default, the space only gets the late message (late_message) and the problems: each of
+    # these adds a message a day, or one per late person.
+    notify_late_arrivals: bool = False  # each late arrival the camera sees, as it happens
+    late_time_list: bool = False  # at the late time, who is not seen yet
+    daily_summary: bool = False  # when the camera stops, the day's totals (on time, late, not seen, on leave)
     unknown_batch_minutes: int = 5
     # How people are called in messages: "name" (as on the People page) or "email" (the part
     # before @, e.g. ruby@… → Ruby), for teams that know each other by their email names.

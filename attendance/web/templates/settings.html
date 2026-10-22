@@ -75,6 +75,8 @@
     <div class="stack">
       {{ check('google_chat', 'mention_people', '@mention people in alerts') }}
       {{ check('google_chat', 'notify_late_arrivals', 'Post each late arrival as it happens') }}
+      {{ check('google_chat', 'late_time_list', 'Post who is not seen yet at the late time') }}
+      {{ check('google_chat', 'daily_summary', 'Post the day\'s totals when the camera stops', 'On time, late, not seen, on leave') }}
     </div>
     <div class="form-row">
       <label class="field">Call people in messages by

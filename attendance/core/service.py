@@ -610,10 +610,11 @@ class AttendanceService:
             return
         w = self.window(day)
         when = f"{ts:%H:%M}" if day == self.now().date() else f"{ts:%H:%M} on {day:%Y-%m-%d}"
+        if not self.cfg.google_chat.notify_late_arrivals:
+            return  # the late message lists them all once
         if ts >= w.late_from:
-            if self.cfg.google_chat.notify_late_arrivals:
-                late = int((ts - w.late_after).total_seconds() // 60)
-                self._send(f"🟠 {self.who(employee_id)} arrived at {when}, {late} min late.", day)
+            late = int((ts - w.late_after).total_seconds() // 60)
+            self._send(f"🟠 {self.who(employee_id)} arrived at {when}, {late} min late.", day)
         elif self.store.notice_sent(day, "deadline"):
             # They were on the "not seen" list, but turned out to have arrived on time.
             self._send(f"✅ Update: {self.who(employee_id)} arrived at {when}, not late.", day)
@@ -677,6 +678,22 @@ class AttendanceService:
             spans = ", ".join(f"{a:%H:%M}–{b:%H:%M}" for a, b in rep.outages)
             lines.append(f"⚠️ Camera/system was down: {spans}. Arrivals during this time may be missing.")
         return lines
+
+    def problems_text(self, rep: DayReport) -> str | None:
+        """What went wrong during the camera hours, for when the summary is not posted; None if nothing."""
+        lines = []
+        stale = leave_api.warning(self.cfg, self.store, self.now())
+        if stale:
+            lines.append(stale)
+        if rep.no_camera_data:
+            lines.append(f"⚠️ No camera data at all between {rep.window.start:%H:%M} and {rep.window.end:%H:%M}: "
+                         "nobody's arrival was recorded.")
+        elif rep.outages:
+            spans = ", ".join(f"{a:%H:%M}–{b:%H:%M}" for a, b in rep.outages)
+            lines.append(f"⚠️ Camera/system was down: {spans}. Arrivals during this time may be missing.")
+        if not lines:
+            return None
+        return "\n".join([f"🛠 *Camera hours {rep.day:%Y-%m-%d}*", *lines, f"Details: {self._link('/')}"])
 
     def deadline_text(self, rep: DayReport) -> str:
         w = rep.window
@@ -753,7 +770,8 @@ class AttendanceService:
             w = self.window(day)
             self._track_health(now, w, camera_ok, camera_state)
 
-            if (now >= w.late_from and not self.store.notice_sent(day, "deadline")
+            if (self.cfg.google_chat.late_time_list and now >= w.late_from
+                    and not self.store.notice_sent(day, "deadline")
                     and not self.store.notice_sent(day, "deadline_skipped")):
                 rep = self.report(day)
                 if rep.all_in:
@@ -773,7 +791,12 @@ class AttendanceService:
                 self.send_late_message(day, auto=True)
 
             if now >= w.end and not self.store.notice_sent(day, "summary"):
-                self._send(self.summary_text(self.report(day)), day)
+                rep = self.report(day)
+                # Without the summary, its warnings (the camera or computer was down, leave data
+                # is stale) still go out: they are problems to fix, not attendance news.
+                text = self.summary_text(rep) if self.cfg.google_chat.daily_summary else self.problems_text(rep)
+                if text:
+                    self._send(text, day)
                 self.store.mark_notice(day, "summary", now)
 
         if self.store.get("cleanup_day") != day.isoformat():

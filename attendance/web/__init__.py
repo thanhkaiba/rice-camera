@@ -108,7 +108,8 @@ def deadline_status(core: "App", day: dt.date) -> dict:
     store, service = core.store, core.service
     sent, skipped = store.notice_time(day, "deadline"), store.notice_time(day, "deadline_skipped")
     return {"sent": sent.astimezone(service.tz) if sent else None,
-            "skipped": skipped.astimezone(service.tz) if skipped else None}
+            "skipped": skipped.astimezone(service.tz) if skipped else None,
+            "posting": core.cfg.google_chat.late_time_list}
 
 
 def _back(endpoint: str, **kwargs):
