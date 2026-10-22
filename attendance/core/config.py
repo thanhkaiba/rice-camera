@@ -217,6 +217,19 @@ class BackupConfig:
 
 
 @dataclass
+class CollectConfig:
+    """Outside the camera hours, keep very clear faces of clearly recognised people as reference
+    photos (see collect.py), so everyone's photos keep improving without anyone being asked."""
+    enabled: bool = False
+    start: str = "07:00"  # on work days, between these times, whenever the camera hours are not on
+    end: str = "20:00"
+    min_score: int = 65  # Image score (out of 100, as on the person page) a face needs
+    per_day: int = 3  # photos kept per person per day, so one long chat at the door does not fill the gallery
+    enough: int = 20  # a person with this many good photos is left alone
+    fps: float = 2.0  # frames analysed per second while collecting: lighter on the computer than camera hours
+
+
+@dataclass
 class Config:
     timezone: str = "Asia/Ho_Chi_Minh"
     data_dir: str = "data"
@@ -236,6 +249,7 @@ class Config:
     web: WebConfig = field(default_factory=WebConfig)
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
+    collect: CollectConfig = field(default_factory=CollectConfig)
     base_dir: Path = field(default=Path("."), repr=False)
 
     @property
@@ -285,6 +299,16 @@ class Config:
         self.backup.time = parse_clock(self.backup.time).strftime("%H:%M")
         if self.backup.keep_days < 1:
             raise ValueError("backup.keep_days must be at least 1")
+        c = self.collect
+        c.start, c.end = (parse_clock(t).strftime("%H:%M") for t in (c.start, c.end))
+        if c.start >= c.end:
+            raise ValueError("collect.start must be before collect.end")
+        if not 1 <= c.min_score <= 100:
+            raise ValueError("collect.min_score must be between 1 and 100")
+        if c.per_day < 1 or c.enough < 1:
+            raise ValueError("collect.per_day and collect.enough must be at least 1")
+        if not 0.2 <= c.fps <= 30:
+            raise ValueError("collect.fps must be between 0.2 and 30")
         lm = self.late_message
         if str(lm.send_at).strip():
             lm.send_at = parse_clock(lm.send_at).strftime("%H:%M")

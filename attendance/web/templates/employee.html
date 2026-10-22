@@ -83,7 +83,7 @@
         {% if r.image %}<img src="{{ url_for('media', path=r.image) }}" alt="" loading="lazy">
         {% else %}<div class="empty-state" style="height:100%">No image</div>{% endif %}
         <div class="meta">
-          <span>{{ {'upload': 'Uploaded', 'enroll': 'From folder', 'admin': 'Confirmed', 'capture': 'From camera'}.get(r.source.split(':')[0], r.source) }}{% if r.quality_ok is false %} · <span title="Blurred or turned away: a weaker reference">blurred</span>{% endif %}
+          <span>{{ {'upload': 'Uploaded', 'enroll': 'From folder', 'admin': 'Confirmed', 'capture': 'From camera', 'enrol': 'Enrolled at the door', 'collect': 'Collected'}.get(r.source.split(':')[0], r.source) }}{% if r.quality_ok is false %} · <span title="Blurred or turned away: a weaker reference">blurred</span>{% endif %}
             <br><span title="Image clarity: face size, detection, sharpness and pose. Not recognition confidence.">{% if r.image_score is not none %}Image {{ r.image_score }}/100{% elif r.image %}Image not scored yet{% else %}Image score unavailable{% endif %}</span></span>
           <form method="post" action="{{ url_for('delete_photo', employee_id=person.id) }}" data-confirm="Delete this photo?">
             <input type="hidden" name="{{ 'image' if r.image else 'ref_id' }}" value="{{ r.image or r.id }}">

@@ -12,6 +12,7 @@ from pathlib import Path
 from . import settings
 from .backup import Backup
 from .config import Config
+from .collect import Collector
 from .enrolment import DoorEnrolment
 from .evidence import evidence_digest
 from .machine import MachineWatch
@@ -67,6 +68,7 @@ class App:
         self.backup = Backup(self.store, cfg, self.service.now, self.service.alert)
         self.service.backup = self.backup
         self.enrolment = DoorEnrolment(self.library, self.store, cfg.recognition, name_of=self.service.chat_name)
+        self.collector = Collector(cfg, self.library, self.store, self.service)
         self.placement = Placement(self.store)
         self.service.placement = self.placement
         self.machine = MachineWatch(cfg, self.store, self.service.alert, self.service.now)
@@ -293,7 +295,11 @@ def run(cfg: Config) -> None:
         camera_ok = True
 
         enrolling = app.enrolment.active
-        if (in_window or live.previewing or enrolling) and recognizer is not None and cfg.camera.url and not app.maintenance:
+        # Outside the camera hours the camera may still collect reference photos, at a lower rate.
+        collecting = not enrolling and recognizer is not None and app.collector.running(now, in_window)
+        watching = in_window or live.previewing or enrolling
+        fps = cfg.camera.process_fps if watching else min(cfg.camera.process_fps, cfg.collect.fps)
+        if (watching or collecting) and recognizer is not None and cfg.camera.url and not app.maintenance:
             if (camera is None or camera.source != cfg.camera.url or camera.silent_for() > CAMERA_RESTART_S
                     or camera.decode_threads != cfg.camera.decode_threads):
                 if camera is not None:
@@ -307,7 +313,7 @@ def run(cfg: Config) -> None:
             if frame is None:
                 live.camera_state = "no picture (reconnecting)" if camera.started_for() > 10 else "connecting"
                 time.sleep(0.05)
-            elif frame_time - last_processed >= 1.0 / cfg.camera.process_fps:
+            elif frame_time - last_processed >= 1.0 / fps:
                 last_processed = frame_time  # paces the analysis on the newest frame
                 frame, frame_time = camera.sharpest(last_chosen, face_regions)
                 last_chosen = frame_time
@@ -324,6 +330,8 @@ def run(cfg: Config) -> None:
                                                                    raw=raw if raw is not frame else None)
                     if enrolling:
                         app.enrolment.observe([(f, c) for f, c, _ in matched], frame)
+                    elif collecting:
+                        app.collector.observe(matched, frame, ts)
                     handle(decisions)
                     if in_window and not enrolling:
                         app.placement.add_frame(ts.date(), [f for f, _, _ in matched], cfg.recognition,

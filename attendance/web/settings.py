@@ -31,7 +31,8 @@ def register(app: Flask, core: "App") -> None:
     @app.get("/live")
     def live_page():
         return render_template("live.html", cfg=cfg, in_window=service.in_window(service.now()),
-                               employees=service.shown_names(), enrol=core.enrolment.status())
+                               employees=service.shown_names(), enrol=core.enrolment.status(),
+                               collect=core.collector.status())
 
     @app.post("/live/enrol")
     def enrol_start():
@@ -83,6 +84,7 @@ def register(app: Flask, core: "App") -> None:
                        people=live.people if cfg.tracking.mode == "person" else None, pose=core.pose.describe(),
                        last_identified=live.last_identified, previewing=live.previewing,
                        in_window=service.in_window(service.now()), enrol=core.enrolment.status(),
+                       collect=core.collector.status(),
                        frame_age=round(time.time() - frame_time, 1) if frame_time else None)
 
     @app.get("/models.json")

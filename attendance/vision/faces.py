@@ -149,6 +149,17 @@ class FaceLibrary:
         self._keep(employee_id, vector, encode_jpeg(image), source, self.model_id)
         return True
 
+    def collect(self, employee_id: str, face, frame) -> bool:
+        """Keep a clear face the camera saw outside its hours (collect.py), with the quality it was
+        judged by there, unless an almost identical one is already kept. Returns whether it was kept."""
+        from .recognizer import crop_face
+
+        if self.near_duplicate(employee_id, face.embedding, self.model_id):
+            return False
+        self._keep(employee_id, face.embedding, encode_jpeg(crop_face(frame, face.bbox)), "collect", self.model_id,
+                   face.quality_ok, face.quality)
+        return True
+
     def near_duplicate(self, employee_id: str, vector: np.ndarray, model: str) -> bool:
         """Whether this person already has a reference almost identical to `vector` (same photo,
         or the same frame twice): it would add nothing but weight to that one view."""

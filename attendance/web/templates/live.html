@@ -58,6 +58,14 @@
       <div><span class="k">Last recognised</span><span class="v" id="last" style="font-weight:500">–</span></div>
       <div><span class="k" title="Learned from how this camera sees faces">Camera angle</span><span class="v small" id="pose" style="font-weight:500">–</span></div>
     </div>
+    {% if collect.enabled %}
+    <div class="card small" id="collect-card">
+      <strong class="row"><span style="color:var(--brand)">{{ icon('image') }}</span>Collecting reference photos</strong>
+      <div class="hint" style="margin-top:4px"><span id="collect-state">{{ 'On now' if collect.running else 'Waiting' }}</span>
+        · {{ collect.start }}–{{ collect.end }} outside the camera hours · image score ≥ {{ collect.min_score }}
+        · <span class="tnum" id="collect-kept">{{ collect.kept_today }}</span> kept today</div>
+    </div>
+    {% endif %}
     <div class="card" id="enrol-card">
       <strong class="row"><span style="color:var(--brand)">{{ icon('user-plus') }}</span>Enrol at the door</strong>
       <div class="hint" style="margin:4px 0 10px">The camera's own pictures are the best reference photos. Pick a person and turn the screen towards them: the picture shows them what to do, step by step, one step at a time; a step is ticked once they have held it for a moment, and two faces are kept in each pose (90 s). One person in view; their arrival is not recorded meanwhile.</div>
@@ -113,6 +121,11 @@
       const p = document.getElementById('problem'); p.hidden = !s.problem; p.textContent = s.problem || '';
       document.getElementById('start').hidden = s.in_window || s.previewing;
       document.getElementById('stop').hidden = !s.previewing;
+      const co = s.collect || {};
+      if (document.getElementById('collect-card')) {
+        document.getElementById('collect-state').textContent = co.running ? 'On now' : 'Waiting';
+        document.getElementById('collect-kept').textContent = co.kept_today ?? 0;
+      }
       const en = s.enrol || {};
       document.getElementById('enrol-form').hidden = !!en.active;
       document.getElementById('enrol-live').hidden = !en.active;

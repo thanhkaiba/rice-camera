@@ -125,6 +125,20 @@
     </div>
     <div class="stack">{{ check('camera', 'enhance_low_light', 'Brighten dark frames') }}</div>
     <hr>
+    <h2 class="row">{{ icon('image') }}Collect reference photos</h2>
+    <p class="hint">Outside the camera hours the camera keeps watching, more slowly, and keeps very clear faces of people it recognises without doubt as their reference photos: one per walk past, a few a day, until they have enough good ones. Arrivals are not recorded then.</p>
+    <div class="stack">{{ check('collect', 'enabled', 'Collect outside the camera hours', 'On work days, between the times below') }}</div>
+    <div class="form-row" style="margin-top:14px">
+      {{ field('collect', 'start', 'From', type='time') }}
+      {{ field('collect', 'end', 'Until', type='time') }}
+      {{ field('collect', 'min_score', 'Image score at least', 'Out of 100, as on the person page', type='number', step='1') }}
+    </div>
+    <div class="form-row" style="margin-top:14px">
+      {{ field('collect', 'per_day', 'Photos per person per day', type='number', step='1') }}
+      {{ field('collect', 'enough', 'Stop at good photos', 'A person with this many is left alone', type='number', step='1') }}
+      {{ field('collect', 'fps', 'Frames / second', 'Lighter than camera hours', type='number', step='0.5') }}
+    </div>
+    <hr>
     <h2 class="row">{{ icon('employees') }}Groups of people</h2>
     <div class="form-row">
       <label class="field">Follow

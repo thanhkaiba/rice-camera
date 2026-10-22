@@ -119,7 +119,7 @@ def register(app: Flask, core: "App") -> None:
         weeks = {}
         other_photos = []
         for ref in refs:
-            if ref.source.split(':')[0] not in {'admin', 'capture'}:
+            if ref.source.split(':')[0] not in {'admin', 'capture', 'collect'}:
                 other_photos.append(ref)
                 continue
             if ref.created_at.tzinfo is None:
