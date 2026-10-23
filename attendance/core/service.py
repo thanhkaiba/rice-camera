@@ -318,6 +318,8 @@ class AttendanceService:
         if not self.store.mark_notice(day, "late_message", self.now()) and auto:
             return False
         cards = None
+        # Signed in to the Chat API: posted as the admin, the picture attached (shown in any case).
+        api = {"text": text, "image": self.late_photo(day)} if self.chat.api_ready else None
         url = self.late_photo_url(day)
         if url and url.startswith("https://"):
             cards = [{"cardId": f"late-photo-{day.isoformat()}", "card": {"sections": [{"widgets": [
@@ -325,7 +327,7 @@ class AttendanceService:
             ]}]}}]
         elif url:
             text += f"\n📷 <{url}|Picture of the late people>"
-        self.chat.send(text, None, self.now(), cards)
+        self.chat.send(text, None, self.now(), cards, api=api)
         self.store.log(self.now(), user, "send late message", ", ".join(a.name for a in self.late_people(day)))
         return True
 

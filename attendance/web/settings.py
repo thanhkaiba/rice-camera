@@ -11,6 +11,7 @@ from flask import Flask, Response, abort, jsonify, redirect, render_template, re
 from .. import __version__
 from ..cli import updater
 from ..core import latephoto, occasions, settings, transfer
+from ..integrations import chat_api
 from ..vision.faces import decode_image, encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
 
@@ -123,6 +124,7 @@ def register(app: Flask, core: "App") -> None:
         return render_template("settings.html", s=settings.current(cfg), cfg=cfg, leave=leave_status(core),
                                overrides=settings.overrides(cfg, store),
                                late_background=latephoto.background_path(core.data_dir).exists(),
+                               google=core.chat.api.status(),
                                occasion=occasions.occasion_on(service.now().date()),
                                upcoming=occasions.upcoming(service.now().date()),
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
@@ -294,6 +296,69 @@ def register(app: Flask, core: "App") -> None:
         except Exception as exc:
             return failed(f"Sending failed: {exc}", "settings_page")
         return done("Test message sent; check Google Chat.", "settings_page")
+
+    # Google Chat API (the late message with its picture) -----------------------------------
+
+    def google_redirect() -> str:
+        # Desktop-app OAuth clients may only come back to this computer's loopback address.
+        return f"http://127.0.0.1:{cfg.web.port}{chat_api.CALLBACK}"
+
+    @app.post("/settings/google/client")
+    def google_client():
+        upload = request.files.get("client")
+        if not upload or not upload.filename:
+            return failed("Choose the JSON file first.", "settings_page")
+        try:
+            client = core.chat.api.set_client(upload.read(64 * 1024).decode("utf-8", "replace"))
+        except ValueError as exc:
+            return failed(f"Not loaded: {exc}.", "settings_page")
+        store.log(service.now(), current_user(cfg), "google oauth client", client["project_id"] or client["client_id"][:12])
+        return done("OAuth client loaded. Now press Connect and sign in.", "settings_page")
+
+    @app.post("/settings/google/connect")
+    def google_connect():
+        try:
+            return redirect(core.chat.api.start(google_redirect()))
+        except ValueError as exc:
+            return failed(f"Cannot connect: {exc}.", "settings_page")
+
+    def google_finished(finish) -> Response:
+        try:
+            finish()
+        except (ValueError, chat_api.ChatApiError) as exc:
+            return failed(f"Sign-in not finished: {exc}.", "settings_page")
+        store.log(service.now(), current_user(cfg), "google sign-in", core.chat.api.status()["space"] or "")
+        return done("Signed in: the late message will be posted with its picture. Try Test.", "settings_page")
+
+    @app.get(chat_api.CALLBACK)
+    def google_callback():
+        if request.args.get("error"):
+            return failed(f"Google says: {request.args['error']}.", "settings_page")
+        return google_finished(lambda: core.chat.api.finish(request.args.get("code", ""), request.args.get("state", "")))
+
+    @app.post("/settings/google/paste")
+    def google_paste():
+        return google_finished(lambda: core.chat.api.finish_from_address(request.form.get("address", "")))
+
+    @app.post("/settings/google/test")
+    def google_test():
+        import cv2
+        import numpy as np
+
+        picture = np.full((180, 320, 3), (60, 170, 240), np.uint8)
+        cv2.putText(picture, "Test", (100, 110), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (255, 255, 255), 3, cv2.LINE_AA)
+        try:
+            core.chat.api.send("✅ The attendance system can post the late message here, with its picture attached.",
+                               encode_jpeg(picture), "test.jpg")
+        except chat_api.ChatApiError as exc:
+            return failed(f"Sending failed: {exc}.", "settings_page")
+        return done("Test message with a picture sent; check Google Chat.", "settings_page")
+
+    @app.post("/settings/google/disconnect")
+    def google_disconnect():
+        core.chat.api.disconnect()
+        store.log(service.now(), current_user(cfg), "google sign-out", "")
+        return done("Signed out: the late message is posted with the webhook again.", "settings_page")
 
     # first-run setup ------------------------------------------------------------------
 

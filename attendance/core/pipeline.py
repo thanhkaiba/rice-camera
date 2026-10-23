@@ -22,6 +22,7 @@ from ..vision.gallery import Gallery
 from ..integrations.leave_api import LeaveSync
 from ..vision.live import FrameHealth, LiveStatus
 from ..vision.posecal import PoseCalibration
+from ..integrations.chat_api import ChatApi, space_of
 from ..integrations.notifier import GoogleChat
 from .service import AttendanceService
 from ..store import Store, body_photo, scene_photo
@@ -55,6 +56,8 @@ class App:
                 log.info("Imported %d employees from %s", n, employees_file)
         self.gallery = Gallery(self.store.embeddings(cfg.recognition.model_id()), cfg.recognition.center_embeddings)
         self.chat = GoogleChat(lambda: cfg.google_chat.webhook_url, self.store)
+        self.chat.api = ChatApi(self.store, lambda: space_of(cfg.google_chat.webhook_url))
+        self.chat.data_dir = cfg.path(cfg.data_dir)
         self.service = AttendanceService(cfg, self.store, self.chat, self.gallery, now=now)
         self.recognizer_lock = threading.Lock()
         self._recognizer = None
