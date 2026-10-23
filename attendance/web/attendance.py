@@ -143,9 +143,21 @@ def register(app: Flask, core: "App") -> None:
     @app.get("/unknowns")
     def unknowns():
         labels = _review_labels(store.all_employees())
+        blurry_below = cfg.recognition.blurry_score / 100
+        arrivals: dict = {}  # day -> employee id -> arrival time, for "in at 08:52" next to a suggestion
+
+        def arrived(day):
+            if day not in arrivals:
+                arrivals[day] = {e: f"{c.first_seen.astimezone(service.tz):%H:%M}" for e, c in store.checkins(day).items()}
+            return arrivals[day]
+
         groups = []
         for members in store.pending_groups():
             best, maybe = service.review_suggestions(members)
+            scores = [u.quality for u in members if u.quality is not None]
+            # Every photo on the card is poor (photos from before the score was kept never count as poor).
+            blurry = members[-1].source == "camera" and len(scores) == len(members) and max(scores) < blurry_below
+            camera_day = members[-1].ts.astimezone(service.tz).date() if members[-1].source == "camera" else None
             email = store.get(f"seed_review_email:{members[-1].id}") if members[-1].source == "seed" else None
             person = store.employee_by_email(email) if email else None
             photos = [u.image for u in reversed(members) if u.image]
@@ -159,10 +171,11 @@ def register(app: Flask, core: "App") -> None:
                            "body": next((body_photo(u.image) for u in reversed(members) if u.image
                                          and (core.data_dir / body_photo(u.image)).exists()), None),
                            "guess": best[0] if best else None, "guess_score": best[1] if best else None,
-                           "maybe": maybe})
+                           "maybe": maybe, "blurry": blurry, "in_at": arrived(camera_day) if camera_day else {}})
         # Cards that only need "Confirm" first, then those with likely people, then the rest; the
-        # most similar first within each, newest first among equals. Camera faces before seed samples.
-        groups.sort(key=lambda g: (g["source"] != "camera", 0 if g["guess"] else 1 if g["maybe"] else 2,
+        # most similar first within each, newest first among equals. Camera faces before seed samples;
+        # blurry camera faces after everything else, in a section of their own.
+        groups.sort(key=lambda g: (g["blurry"], g["source"] != "camera", 0 if g["guess"] else 1 if g["maybe"] else 2,
                                    -(g["guess_score"] or (g["maybe"][0][1] if g["maybe"] else 0.0)),
                                    -g["latest"].ts.timestamp()))
         auto_labelled = []
@@ -185,7 +198,8 @@ def register(app: Flask, core: "App") -> None:
         return render_template("unknowns.html", groups=groups, ignored=ignored, employees=store.employees(),
                                auto_labelled=auto_labelled, employee_labels=labels,
                                local=lambda ts: ts.astimezone(service.tz),
-                               no_photos=not core.gallery.counts(), open_id=open_id)
+                               no_photos=not core.gallery.counts(), open_id=open_id,
+                               blurry_score=cfg.recognition.blurry_score)
 
     @app.post("/unknowns/<int:unknown_id>/reopen-seed")
     def reopen_seed(unknown_id: int):

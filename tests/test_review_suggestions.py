@@ -138,3 +138,55 @@ def test_review_picker_labels_stay_unique_when_email_names_repeat():
                              P(id="2", name="An Nguyen", email="an@partner.com"),
                              P(id="3", name="Ruby Doan", email="ruby@company.com")])
     assert labels == {"1": "An Nguyen (an@company.com)", "2": "An Nguyen (an@partner.com)", "3": "Ruby Doan (ruby)"}
+
+
+def test_a_clear_suggestion_also_offers_the_next_most_similar_people(core):
+    app, _, _ = core
+    a, b = person_vector(1), person_vector(2)
+    face = (a + 0.75 * b) / np.linalg.norm(a + 0.75 * b)  # Alice 0.8, Bob 0.6
+    add_face(app, face)
+    page = client(app).get('/unknowns').get_data(as_text=True)
+    assert 'data-guess="A"' in page and "Confirm: Alice (alice)" in page
+    assert "It's Bob (bob)" in page and "It's Carol" not in page  # Carol is like nobody here
+
+
+def test_suggestions_say_who_is_already_in_today(core):
+    app, clock, _ = core
+    app.service.on_identified("A", at(8, 52), 0.8, None)
+    clock.t = at(9, 30)
+    add_face(app, person_vector(1), minute=20)
+    page = client(app).get('/unknowns').get_data(as_text=True)
+    assert "Looks like <strong>Alice (alice)</strong>" in page and ">in 08:52</span>" in page
+
+
+def test_blurry_camera_faces_are_listed_last_apart_and_never_dropped(core):
+    app, _, _ = core
+    blurry = app.service.on_unknown(at(9, 5), None, person_vector(1), "A", 0.5, quality=0.04)
+    clear = app.service.on_unknown(at(9, 6), None, person_vector(31), None, None, quality=0.4)
+    old = app.service.on_unknown(at(9, 7), None, person_vector(32), None, None)  # stored before the score was kept
+    assert app.store.unknown(blurry).quality == 0.04 and app.store.unknown(old).quality is None
+    page = client(app).get('/unknowns').get_data(as_text=True)
+    assert "Blurry or too small (1)" in page and 'id="select-blurry"' in page
+    # The clear ones first, even the one with no suggestion, then the section, then the blurry one.
+    order = [page.index(f'data-id="{clear}"'), page.index(f'data-id="{old}"'), page.index('id="blurry"'),
+             page.index(f'data-id="{blurry}"')]
+    assert sorted(order[:2]) + order[2:] == sorted(order)
+    assert 'class="face-card blurry"' in page and "Confirm: Alice" in page  # still one click to confirm
+    app.cfg.recognition.blurry_score = 0
+    page = client(app).get('/unknowns').get_data(as_text=True)
+    assert "Blurry or too small" not in page and "face-card blurry" not in page
+
+
+def test_the_tracker_keeps_the_quality_of_the_face_it_reports():
+    import datetime as dt
+
+    from attendance.config import RecognitionConfig
+    from attendance.tracker import FaceTracker, Observation
+
+    tracker = FaceTracker(RecognitionConfig(unknown_min_frames=2))
+    t0 = dt.datetime(2026, 10, 23, 9, 0, tzinfo=dt.timezone.utc)
+    face = person_vector(40)
+    for i, q in enumerate((0.03, 0.07, 0.05)):
+        tracker.update([Observation((100, 100, 160, 160), face, [("A", 0.2)], False, q)], t0 + dt.timedelta(seconds=i / 5))
+    out = tracker.update([], t0 + dt.timedelta(seconds=30))
+    assert [(d.kind, d.quality) for d in out] == [("unknown", 0.07)]

@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS unknowns (
     group_id INTEGER,  -- unknown faces that look like the same person share a group
     ignored_day TEXT,  -- set when the admin ignored the face; ignoring only lasts that day
     sha256 TEXT,
-    source TEXT NOT NULL DEFAULT 'camera'
+    source TEXT NOT NULL DEFAULT 'camera',
+    quality REAL  -- Image score / 100 of the face shown; Review lists the blurry ones apart
 );
 CREATE TABLE IF NOT EXISTS calendar (
     day TEXT PRIMARY KEY,
@@ -179,6 +180,7 @@ class Unknown:
     group_id: int = 0
     sha256: str | None = None
     source: str = "camera"
+    quality: float | None = None  # Image score / 100; None for faces stored before it was kept
 
 
 @dataclass
@@ -254,7 +256,7 @@ def _blob(vector) -> bytes | None:
 
 def migrate(db: sqlite3.Connection) -> None:
     """Add columns introduced after a database was created."""
-    added = {"embeddings": [("image", "TEXT"), ("quality_ok", "INTEGER"), ("quality_score", "REAL")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'")],
+    added = {"embeddings": [("image", "TEXT"), ("quality_ok", "INTEGER"), ("quality_score", "REAL")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'"), ("quality", "REAL")],
              "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT")],
              "sightings": [("camera_id", "TEXT"), ("model", "TEXT"), ("vector", "BLOB"), ("sha256", "TEXT")],
              "calendar": [("source", "TEXT NOT NULL DEFAULT 'hr'")], "leaves": [("source", "TEXT NOT NULL DEFAULT 'hr'")]}

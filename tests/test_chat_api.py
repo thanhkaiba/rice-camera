@@ -175,3 +175,23 @@ def test_settings_page_upload_connect_and_paste(core):
     assert "s3cret" not in c.get("/settings").get_data(as_text=True) and "rt1" not in c.get("/settings").get_data(as_text=True)
     c.post("/settings/google/disconnect")
     assert not app.chat.api.ready
+
+
+def test_the_alert_says_what_to_fix(core):
+    app, clock, sent = core
+    google = Google()
+    app.chat.api = signed_in(app.store, google)
+    google.chat_status = 404  # e.g. "Google Chat app not found": the Cloud project, not the sign-in
+    late_day(app, clock)
+    app.service.send_late_message(DAY)
+    app.chat.flush(clock.t)
+    alert = next(m for m in sent if "could not be posted with its picture" in m)
+    assert "Chat app in Google Cloud" in alert and "Sign in again" not in alert
+    sent.clear()
+    google.chat_status, google.refresh_ok = 200, False
+    token = json.loads(app.store.get(chat_api.TOKEN_KEY))
+    token["expires_at"] = 0
+    app.store.put(chat_api.TOKEN_KEY, json.dumps(token))
+    app.service.send_late_message(DAY)
+    app.chat.flush(clock.t)
+    assert any("Sign in again" in m for m in sent)

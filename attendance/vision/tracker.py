@@ -78,6 +78,7 @@ class Decision:
     embedding: np.ndarray
     body: Any = None
     scene: Any = None
+    quality: float | None = None  # of the face in `crop` (the track's best), as the Image score / 100
 
 
 @dataclass
@@ -184,7 +185,7 @@ class FaceTracker:
         t.decided = person
         self._recent[person] = ts
         return Decision("identified", t.first_ts, person, t.best_score[person], t.best.crop, t.best.embedding,
-                        t.best.body, t.best.scene)
+                        t.best.body, t.best.scene, t.best.quality)
 
     def _strong_exit(self, t: _Track) -> str | None:
         if len(t.votes) != 1:
@@ -215,7 +216,7 @@ class FaceTracker:
             elif not self._is_split(t):
                 person, score = self._guess(t)
                 decisions.append(Decision("unknown", t.first_ts, person, score, t.best.crop, t.best.embedding,
-                                          t.best.body, t.best.scene))
+                                          t.best.body, t.best.scene, t.best.quality))
         self._ended = waiting
         return decisions
 

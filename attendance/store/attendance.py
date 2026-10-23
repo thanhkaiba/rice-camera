@@ -159,7 +159,7 @@ class AttendanceStoreMixin:
     def add_unknown(self, day: dt.date, ts: dt.datetime, image: str | None, model: str | None,
                     vector: np.ndarray | None, guess_id: str | None, guess_score: float | None,
                     group_id: int | None = None, ignored: bool = False, sha256: str | None = None,
-                    *, source: str = "camera") -> int:
+                    *, source: str = "camera", quality: float | None = None) -> int:
         """Store an unidentified face; without a group it starts a new group of its own.
         `ignored` stores it as already ignored for the day (its group was ignored earlier today)."""
         if source not in {"camera", "seed", "collect"}:
@@ -167,9 +167,9 @@ class AttendanceStoreMixin:
         with self._lock, self._db:
             cur = self._db.execute(
                 "INSERT INTO unknowns (day, ts, image, model, vector, guess_id, guess_score, group_id, status, "
-                "ignored_day, sha256, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "ignored_day, sha256, source, quality) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (day.isoformat(), ts.isoformat(), image, model, _blob(vector), guess_id, guess_score, group_id,
-                 "ignored" if ignored else "pending", day.isoformat() if ignored else None, sha256, source),
+                 "ignored" if ignored else "pending", day.isoformat() if ignored else None, sha256, source, quality),
             )
             if group_id is None:
                 self._db.execute("UPDATE unknowns SET group_id = id WHERE id = ?", (cur.lastrowid,))
@@ -178,7 +178,7 @@ class AttendanceStoreMixin:
     def _unknown(self, r) -> Unknown:
         return Unknown(r["id"], dt.datetime.fromisoformat(r["ts"]), r["image"], r["model"], _vec(r["vector"]),
                        r["guess_id"], r["guess_score"], r["status"], r["employee_id"], r["group_id"] or r["id"],
-                       r["sha256"], r["source"])
+                       r["sha256"], r["source"], r["quality"])
 
     def pending_groups(self) -> list[list[Unknown]]:
         """Pending unknown faces grouped by person, most recently seen group first."""

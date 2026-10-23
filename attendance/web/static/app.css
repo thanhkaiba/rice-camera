@@ -512,6 +512,10 @@ button.link { background: none; border: 0; padding: 0; box-shadow: none; color: 
 .face-grid.focus { grid-template-columns: minmax(0, 520px); justify-content: center; }
 .face-grid.focus .face-card { display: none; cursor: default; animation: none; }
 .face-grid.focus .face-card.current { display: flex; }
+.face-grid.focus .grid-divider { display: none; }
+.grid-divider { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; border-top: 1px solid var(--line-strong); padding-top: 16px; margin-top: 8px; }
+.grid-divider .hint { margin: 2px 0 0; }
+.face-card.blurry .pic img { opacity: .8; }
 .face-grid.focus .face-card:hover { transform: none; }
 .face-grid.focus .face-card .focus-only { display: block; }
 .face-grid.focus .face-select { display: none; }

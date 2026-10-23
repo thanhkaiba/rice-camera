@@ -345,7 +345,8 @@ class AttendanceService:
             self._announce(employee_id, ts)
 
     def on_unknown(self, ts: dt.datetime, image: str | None, vector: np.ndarray | None,
-                   guess_id: str | None, guess_score: float | None, sha256: str | None = None) -> int | None:
+                   guess_id: str | None, guess_score: float | None, sha256: str | None = None,
+                   quality: float | None = None) -> int | None:
         ts = self._local(ts)
         again = self._seen_again(vector, guess_id, guess_score, ts.date())
         if again:
@@ -360,7 +361,7 @@ class AttendanceService:
             log.info("Unknown face at %s (closest %s %.2f, group %s)", ts.strftime("%H:%M:%S"), guess_id,
                      guess_score or 0, group_id or "new")
         return self.store.add_unknown(ts.date(), ts, image, self.model_id, vector, guess_id, guess_score,
-                                      group_id, ignored=ignored, sha256=sha256)
+                                      group_id, ignored=ignored, sha256=sha256, quality=quality)
 
     def _seen_again(self, vector, guess_id: str | None, guess_score: float | None, day: dt.date) -> str | None:
         """Whether an unclear face is someone already checked in today passing again (not worth a
@@ -404,10 +405,14 @@ class AttendanceService:
     # admin actions -------------------------------------------------------------
 
     def review_suggestions(self, members) -> tuple[tuple[str, float] | None, list[tuple[str, float]]]:
-        """(review_guess, review_candidates when there is no guess) from one pass over the gallery."""
+        """(review_guess, other people it may be) from one pass over the gallery. With a guess, the
+        next two are offered too: on small or blurred camera faces the most similar person was the
+        right one about 63% of the time, and one of the three most similar 77% (October 2026)."""
         ranked, matches = self._review_ranking(members)
         guess = self._clear_guess(ranked, matches)
-        return guess, [] if guess else self._candidates(ranked)
+        if guess:
+            return guess, [c for c in self._candidates(ranked) if c[0] != guess[0]][:2]
+        return None, self._candidates(ranked)
 
     def review_guess(self, members) -> tuple[str, float] | None:
         """A current, unambiguous suggestion supported by most usable faces in the group."""

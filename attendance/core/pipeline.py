@@ -118,7 +118,7 @@ def report_collected(app: App, face, frame, ts: dt.datetime, candidates) -> None
                         crop_body(frame, face.bbox))
     image = save_crop(app, decision, ts)
     app.store.add_unknown(ts.date(), ts, image, app.cfg.recognition.model_id(), face.embedding, guess_id,
-                          guess_score, source="collect")
+                          guess_score, source="collect", quality=face.quality)
 
 
 def render_scene(frame, bbox, label: str, max_width: int = 1280) -> bytes:
@@ -299,7 +299,7 @@ def run(cfg: Config) -> None:
                 service.on_identified(d.employee_id, ts, d.score, image, d.embedding, digest)
                 live.last_identified = f"{app.service.chat_name(d.employee_id)} at {ts:%H:%M:%S}"
             else:
-                service.on_unknown(ts, image, d.embedding, d.employee_id, d.score, digest)
+                service.on_unknown(ts, image, d.embedding, d.employee_id, d.score, digest, d.quality)
 
     log.info("Running; processing window %s-%s", cfg.schedule.window_start, cfg.schedule.window_end)
     while True:

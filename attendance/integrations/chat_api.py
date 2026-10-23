@@ -45,11 +45,12 @@ CALLBACK = "/settings/google/callback"
 
 
 class ChatApiError(Exception):
-    """`permanent`: retrying will not help (signed out, no access to the space, bad request)."""
+    """`permanent`: retrying will not help (signed out, no access to the space, bad request).
+    `sign_in`: the sign-in itself failed, so signing in again is what helps."""
 
-    def __init__(self, message: str, permanent: bool):
+    def __init__(self, message: str, permanent: bool, sign_in: bool = False):
         super().__init__(message)
-        self.permanent = permanent
+        self.permanent, self.sign_in = permanent, sign_in
 
 
 def space_of(webhook_url: str) -> str | None:
@@ -186,14 +187,14 @@ class ChatApi:
             raise ChatApiError(f"Google sign-in server error {status}", permanent=False)
         if status != 200:
             reason = data.get("error_description") or data.get("error") or f"HTTP {status}"
-            raise ChatApiError(f"Google sign-in refused: {reason}", permanent=True)
+            raise ChatApiError(f"Google sign-in refused: {reason}", permanent=True, sign_in=True)
         return data
 
     def _access_token(self, force: bool = False) -> str:
         with self._lock:
             token, client = self._get(TOKEN_KEY), self._get(CLIENT_KEY)
             if not token.get("refresh_token") or not client.get("client_id"):
-                raise ChatApiError("not signed in to Google", permanent=True)
+                raise ChatApiError("not signed in to Google", permanent=True, sign_in=True)
             if not force and token.get("access_token") and self._clock() < token.get("expires_at", 0):
                 return token["access_token"]
             try:
@@ -225,7 +226,7 @@ class ChatApi:
                 return result
             message = (result.get("error") or {}).get("message") or f"HTTP {status}"
             raise ChatApiError(f"Google Chat: {message}", permanent=status < 500 and status != 429)
-        raise ChatApiError("Google Chat refused the sign-in", permanent=True)
+        raise ChatApiError("Google Chat refused the sign-in", permanent=True, sign_in=True)
 
     def upload(self, space: str, data: bytes, filename: str, mime: str = "image/jpeg") -> dict:
         """Upload a file to the space; returns the attachmentDataRef to attach to a message."""
