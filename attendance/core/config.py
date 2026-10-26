@@ -125,9 +125,14 @@ class RecognitionConfig:
     learn_per_group: int = 5  # reference photos taken from one confirmed group of unknown faces
     group_days: int = 14  # how far back to compare photos of faces ignored today
     # An unclear face at least this similar to someone already checked in today is taken to be that
-    # person passing again at a bad angle, and is not sent for review.
-    seen_again_score: float = 0.3
+    # person passing again at a bad angle, and is not sent for review. Never applied below
+    # accept_score: a weaker resemblance is not them (0 = always review).
+    seen_again_score: float = 0.45
     suggest_score: float = 0.35  # Review lists people from this similarity up as "Maybe" choices
+    # After a face is confirmed on Review, other pending cards from the same day whose faces are at
+    # least this similar to it are offered as the same person ("3 more cards look like X"), so one
+    # person seen many times is named once. Compared face to face, not against the gallery. 0 = off.
+    same_face_score: float = 0.55
     # Review lists camera faces below this Image score (0-100) apart, after the others, as blurry or
     # too small: most are unusable, but some are still someone arriving, so they are never dropped.
     blurry_score: int = 10
@@ -294,6 +299,8 @@ class Config:
             raise ValueError("seen_again_score must be between 0 and 1")
         if not 0 < r.suggest_score < 1:
             raise ValueError("suggest_score must be between 0 and 1")
+        if not 0 <= r.same_face_score < 1:
+            raise ValueError("same_face_score must be between 0 and 1")
         if not 0 <= r.blurry_score <= 100:
             raise ValueError("blurry_score must be between 0 and 100")
         if not 0 < self.camera.process_fps <= 30:

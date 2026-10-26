@@ -78,10 +78,10 @@ def test_messages_about_past_days_carry_the_date(env):
 
 def test_unclear_face_of_someone_already_checked_in_is_not_reported(env):
     service, store, clock, _ = env
-    service.cfg.recognition.seen_again_score = 0.3  # off by default (masks); see test_service
+    service.cfg.recognition.seen_again_score = 0.45  # see test_service
     service.on_identified("A", at(9, 5), 0.8, None)
-    assert service.on_unknown(at(9, 30), None, None, "A", 0.35) is None
-    assert service.on_unknown(at(9, 31), None, None, "B", 0.35) is not None
+    assert service.on_unknown(at(9, 30), None, None, "A", 0.5) is None
+    assert service.on_unknown(at(9, 31), None, None, "B", 0.5) is not None
 
 
 # retention ----------------------------------------------------------------------

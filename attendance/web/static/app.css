@@ -518,6 +518,13 @@ button.link { background: none; border: 0; padding: 0; box-shadow: none; color: 
 .face-card.blurry .pic img { opacity: .8; }
 .face-grid.focus .face-card:hover { transform: none; }
 .face-grid.focus .face-card .focus-only { display: block; }
+/* review: keys, the current card, "N more cards look like X" ------------------------------------ */
+.keys { margin: -8px 0 14px; } .keys kbd { font: inherit; font-size: .85em; padding: 0 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--soft); }
+.face-grid:not(.focus) .face-card.current { border-color: var(--brand); box-shadow: 0 0 0 3px var(--ring), var(--shadow); }
+.face-card.related { border-color: var(--brand); background: var(--brand-soft); }
+.related-bar { position: sticky; top: 64px; z-index: 5; align-items: center; gap: 10px 14px; margin-bottom: 14px; box-shadow: var(--shadow-md); }
+.related-bar .msg { flex: 1 1 240px; }
+@media (max-width: 760px) { .keys { display: none; } }
 .face-grid.focus .face-select { display: none; }
 .face-grid.focus .face-card .pic img.body { height: min(52vh, 440px); }
 .face-grid.focus .face-card .body button { min-height: 48px; font-size: 1rem; }

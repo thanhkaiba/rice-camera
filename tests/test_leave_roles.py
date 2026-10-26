@@ -185,7 +185,7 @@ def test_review_page_has_one_at_a_time_mode(core):
     uid = app.service.on_unknown(at(9, 20), "crops/u.jpg", None, "B", 0.4)
     page = client(app).get("/unknowns").get_data(as_text=True)
     assert 'id="focus-toggle"' in page and 'id="focus-bar"' in page
-    assert f'action="/unknowns/{uid}/ignore" class="focus-only"' in page
+    assert f'action="/unknowns/{uid}/ignore" class="focus-only skip-form"' in page
 
 
 def test_old_databases_get_the_source_columns(tmp_path):

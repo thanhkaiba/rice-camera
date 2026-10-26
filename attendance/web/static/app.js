@@ -19,6 +19,24 @@
     if (t.dataset.flash === 'ok') setTimeout(() => dismiss(t), 6000);
   });
 
+  // A toast made by a page's own script (the Review page answers in place, without a reload).
+  const toastIcons = {
+    ok: '<path d="m5 12 5 5L20 7"/>',
+    error: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+  };
+  const svg = paths => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
+  window.toast = (kind, message) => {
+    const t = document.createElement('div');
+    t.className = 'toast ' + kind; t.dataset.flash = kind; t.setAttribute('role', 'status');
+    t.innerHTML = '<span class="ico">' + svg(toastIcons[kind] || toastIcons.ok) + '</span><span class="msg"></span>' +
+      '<button class="close" type="button" aria-label="Close">' + svg('<path d="M6 6l12 12M18 6 6 18"/>') + '</button>' +
+      (kind === 'ok' ? '<span class="bar"></span>' : '');
+    $('.msg', t).textContent = message;
+    $('.close', t).addEventListener('click', () => dismiss(t));
+    $('#toasts')?.append(t);
+    if (kind === 'ok') setTimeout(() => dismiss(t), 6000);
+  };
+
   // Dialogs: click outside closes; [data-close] closes the nearest dialog.
   $$('dialog').forEach(d => {
     d.addEventListener('click', e => { if (e.target === d) d.close(); });

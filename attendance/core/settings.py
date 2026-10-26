@@ -23,7 +23,7 @@ EDITABLE: dict[str, list[str]] = {
     "recognition": ["accept_score", "min_margin", "votes_required", "min_face_px", "min_det_score",
                     "min_sharpness", "max_yaw", "max_pitch", "auto_pose", "unknown_min_frames",
                     "learn_corrections", "learn_per_group", "group_days", "seen_again_score", "suggest_score",
-                    "blurry_score"],
+                    "same_face_score", "blurry_score"],
     "google_chat": ["webhook_url", "mention_people", "notify_late_arrivals", "late_time_list", "daily_summary",
                     "unknown_batch_minutes", "names"],
     "leave_api": ["url", "token", "refresh_minutes"],

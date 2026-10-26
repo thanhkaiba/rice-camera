@@ -54,7 +54,7 @@ recognition:
   learn_corrections: true # a face moved to the right person on the Today page is learned as a reference photo
   learn_per_group: 5      # reference photos taken from one confirmed group of faces on the review page
   group_days: 14          # how far back to compare photos of faces ignored today; pending tracks stay separate
-  seen_again_score: 0.3   # an unclear face this similar to someone already checked in today is not sent for review
+  seen_again_score: 0.45  # an unclear face this similar to someone already checked in today is not sent for review (never below accept_score; 0 = always review)
   suggest_score: 0.35     # Review offers people from this similarity up as "Maybe" choices (never recorded by itself)
 
 tracking:

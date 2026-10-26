@@ -365,12 +365,15 @@ class AttendanceService:
 
     def _seen_again(self, vector, guess_id: str | None, guess_score: float | None, day: dt.date) -> str | None:
         """Whether an unclear face is someone already checked in today passing again (not worth a
-        review): it resembles them from seen_again_score up, and clearly more than anyone who is not in
-        yet. Without the second condition a face only somewhat like an early arrival (a mask, a side
-        view, a newcomer) was dropped once most people were in, and its arrival with it.
+        review): it resembles them from seen_again_score up, never below accept_score, and clearly
+        more than anyone who is not in yet. Without the second condition a face only somewhat like an
+        early arrival (a mask, a side view, a newcomer) was dropped once most people were in, and its
+        arrival with it; below accept_score the resemblance is too weak to say it is them at all (a
+        0.37 match to an early arrival turned out to be a different person walking in).
         Returns a note for the log ("none" or the closest person not in and their score), else None."""
         r = self.cfg.recognition
-        if not (r.seen_again_score and guess_id and guess_score is not None and guess_score >= r.seen_again_score):
+        floor = max(r.seen_again_score, r.accept_score)
+        if not (r.seen_again_score and guess_id and guess_score is not None and guess_score >= floor):
             return None
         checked = self.store.checkins(day)
         if guess_id not in checked:
@@ -445,8 +448,7 @@ class AttendanceService:
         active = self.store.employees()
         matches = []
         for u in members:
-            if (u.model != self.model_id or u.vector is None
-                    or not np.all(np.isfinite(u.vector)) or np.linalg.norm(u.vector) < 1e-12):
+            if not self._usable(u):
                 continue
             candidates = [(person, score) for person, score in self.gallery.match(u.vector, k=count)
                           if person in active]
@@ -462,6 +464,34 @@ class AttendanceService:
                         key=lambda item: item[1], reverse=True)
         return ranked, matches
 
+    def _usable(self, u) -> bool:
+        """A review face with an embedding from the current model that can be compared."""
+        return (u.model == self.model_id and u.vector is not None
+                and bool(np.all(np.isfinite(u.vector))) and np.linalg.norm(u.vector) >= 1e-12)
+
+    def similar_pending(self, confirmed: list) -> list[tuple[list, float]]:
+        """Pending camera cards from the same days whose faces look like the photos just confirmed,
+        most similar first. Review offers them as "N more cards look like X" after a confirmation:
+        a person seen many times (a doorway camera at a distance breaks one visit into several
+        tracks) is then named once, not once per card. Faces are compared with the confirmed faces
+        directly, not with the gallery, so a poor reference set does not pull strangers in."""
+        threshold = self.cfg.recognition.same_face_score
+        known = [self.gallery.prepare(u.vector) for u in confirmed if self._usable(u)]
+        if not threshold or not known:
+            return []
+        days = {self._local(u.ts).date() for u in confirmed}
+        done = {u.id for u in confirmed}
+        found = []
+        for group in self.store.pending_groups():
+            if group[-1].source == "seed" or any(u.id in done for u in group):
+                continue
+            if self._local(group[-1].ts).date() not in days:
+                continue
+            sims = [max(float(v @ self.gallery.prepare(u.vector)) for v in known) for u in group if self._usable(u)]
+            if sims and (score := sum(sims) / len(sims)) >= threshold:
+                found.append((group, score))
+        return sorted(found, key=lambda item: item[1], reverse=True)
+
     def _pending_group(self, unknown_id: int, photo_ids: list[int] | None = None) -> list:
         u = self.store.unknown(unknown_id)
         members = self.store.group(u.group_id) if u is not None and u.status == "pending" else []
@@ -474,9 +504,26 @@ class AttendanceService:
             members = [u for u in members if u.id in selected]
         return members
 
+    def resolve_unknowns(self, unknown_ids: list[int], employee_id: str, user: str = "admin") -> list:
+        """Confirm several whole cards as one person at once (the cards selected on Review, or the
+        cards offered as the same person after a confirmation); returns the faces confirmed."""
+        if not unknown_ids:
+            raise ValueError("Choose at least one review card to confirm")
+        if employee_id not in self.store.employees():
+            raise ValueError(f"unknown employee {employee_id}")
+        groups = {}
+        for unknown_id in unknown_ids:  # all checked before any is confirmed
+            members = self._pending_group(unknown_id)
+            groups[members[0].group_id] = members
+        confirmed = []
+        for members in groups.values():
+            confirmed += self.resolve_unknown(members[0].id, employee_id, user)
+        return confirmed
+
     def resolve_unknown(self, unknown_id: int, employee_id: str, user: str = "admin", *,
-                        photo_ids: list[int] | None = None) -> None:
-        """Confirm selected photos (or the whole group when omitted), learn them and record arrivals."""
+                        photo_ids: list[int] | None = None) -> list:
+        """Confirm selected photos (or the whole group when omitted), learn them and record arrivals.
+        Returns the faces confirmed."""
         if employee_id not in self.store.employees():
             raise ValueError(f"unknown employee {employee_id}")
         members = self._pending_group(unknown_id, photo_ids)
@@ -497,6 +544,7 @@ class AttendanceService:
         when = ", ".join(sorted({f"{self._local(u.ts):%Y-%m-%d %H:%M}" for u in members})[:5])
         more = f" (+{len(members) - 5} more)" if len(members) > 5 else ""
         self.store.log(self.now(), user, "confirm face", f"{self._name(employee_id)}: {when}{more}")
+        return members
 
     def _learn(self, employee_id: str, vector: np.ndarray, image: str | None, model: str) -> bool:
         """Keep a face the admin confirmed as a reference photo of `employee_id`."""
@@ -508,14 +556,15 @@ class AttendanceService:
         return True
 
     def add_employee_from_unknown(self, unknown_id: int, email: str, name: str, user: str = "admin", *,
-                                  photo_ids: list[int] | None = None) -> None:
-        """Create a new employee from a face the camera collected, and confirm it as them."""
+                                  photo_ids: list[int] | None = None) -> tuple[str, list]:
+        """Create a new employee from a face the camera collected, and confirm it as them.
+        Returns (employee id, the faces confirmed)."""
         # Keep another request from handling these photos between validation and employee creation.
         with self.store._lock:
             self._pending_group(unknown_id, photo_ids)
             employee_id = self.store.add_employee(email, name)
             self.store.log(self.now(), user, "add employee", f"{email.strip()} {name.strip()} (from camera)")
-            self.resolve_unknown(unknown_id, employee_id, user, photo_ids=photo_ids)
+            return employee_id, self.resolve_unknown(unknown_id, employee_id, user, photo_ids=photo_ids)
 
     def ignore_unknown(self, unknown_id: int, user: str = "admin") -> None:
         """Hide this face for today only: later sightings today are ignored too, but if the person

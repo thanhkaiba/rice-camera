@@ -5,7 +5,7 @@ import datetime as dt
 import json
 from typing import TYPE_CHECKING
 
-from flask import Flask, Response, abort, flash, redirect, render_template, request, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, url_for
 
 from ..core.service import SOURCES, minutes_late
 from ..core import evidence as evidence_module
@@ -39,8 +39,30 @@ def _review_labels(people) -> dict[str, str]:
     return {p.id: _review_name(p.name, p.email, full=locals_.count(local) > 1) for p, local in zip(people, locals_)}
 
 
+def wants_json() -> bool:
+    """The Review page sends its forms in the background and shows the answer in place."""
+    return request.headers.get("X-Requested-With") == "fetch"
+
+
 def register(app: Flask, core: "App") -> None:
     cfg, store, service = core.cfg, core.store, core.service
+
+    def reply(ok: bool, message: str, **data):
+        """The outcome of a Review action: JSON for the page's background requests (with what else
+        it should show, e.g. the cards that look like the person just confirmed), else a flash and
+        a redirect back to Review."""
+        if wants_json():
+            return jsonify({"ok": ok, "message": message, **data}), (200 if ok else 400)
+        return (done if ok else failed)(message, "unknowns")
+
+    def related(members, employee_id: str) -> dict:
+        """Pending cards that look like the faces just confirmed as `employee_id`, for the page to
+        offer "N more cards look like X · Confirm all"."""
+        person = store.employee(employee_id)
+        cards = [{"id": g[-1].id, "count": len(g), "score": round(score, 2)}
+                 for g, score in service.similar_pending(members)]
+        return {"employee_id": employee_id,
+                "label": _review_name(person.name, person.email) if person else "", "cards": cards}
 
     @app.get("/")
     def index():
@@ -223,56 +245,73 @@ def register(app: Flask, core: "App") -> None:
     @app.post("/unknowns/<int:unknown_id>/assign")
     def assign(unknown_id: int):
         face = store.unknown(unknown_id)
+        employee_id = request.form.get("employee_id", "")
         try:
-            service.resolve_unknown(unknown_id, request.form.get("employee_id", ""), current_user(cfg),
-                                    photo_ids=selected_photos(unknown_id))
+            members = service.resolve_unknown(unknown_id, employee_id, current_user(cfg),
+                                              photo_ids=selected_photos(unknown_id))
         except ValueError as exc:
-            return failed(str(exc), "unknowns")
+            return reply(False, str(exc))
         if face and face.source == "seed":
-            return done("Sample labelled. No attendance recorded; usable faces are learned after confirmation.", "unknowns")
-        person = store.employee(request.form.get("employee_id", ""))
-        if face and face.source == "collect":
-            label = _review_name(person.name, person.email) if person else "employee"
-            return done(f"Face learned for {label}. Seen outside the camera hours, so no attendance recorded.", "unknowns")
+            return reply(True, "Sample labelled. No attendance recorded; usable faces are learned after confirmation.")
+        person = store.employee(employee_id)
         label = _review_name(person.name, person.email) if person else "employee"
-        return done(f"Confirmed as {label}; face learned.", "unknowns")
+        if face and face.source == "collect":
+            return reply(True, f"Face learned for {label}. Seen outside the camera hours, so no attendance recorded.",
+                         related=related(members, employee_id))
+        return reply(True, f"Confirmed as {label}; face learned.", related=related(members, employee_id))
+
+    @app.post("/unknowns/assign-many")
+    def assign_many():
+        """The cards selected on Review, or those offered as the same person, confirmed at once."""
+        try:
+            ids = [int(value) for value in request.form.getlist("unknown_id")]
+        except ValueError:
+            return reply(False, "Invalid review selection.")
+        employee_id = request.form.get("employee_id", "")
+        try:
+            members = service.resolve_unknowns(ids, employee_id, current_user(cfg))
+        except ValueError as exc:
+            return reply(False, str(exc))
+        person = store.employee(employee_id)
+        label = _review_name(person.name, person.email) if person else "employee"
+        cards = len({u.group_id for u in members})
+        return reply(True, f"{cards} card{'s' if cards != 1 else ''} confirmed as {label}; faces learned.",
+                     related=related(members, employee_id))
 
     @app.post("/unknowns/<int:unknown_id>/new-employee")
     def new_employee_from_face(unknown_id: int):
         face = store.unknown(unknown_id)
         email, name = request.form.get("email", ""), request.form.get("name", "").strip()
         try:
-            service.add_employee_from_unknown(unknown_id, email, name, current_user(cfg),
-                                              photo_ids=selected_photos(unknown_id))
+            employee_id, members = service.add_employee_from_unknown(unknown_id, email, name, current_user(cfg),
+                                                                     photo_ids=selected_photos(unknown_id))
         except ValueError as exc:
-            return failed(str(exc), "unknowns")
+            return reply(False, str(exc))
         label = _review_name(name, email.strip().lower())
         if face and face.source == "seed":
-            flash(f"{label} added and sample labelled. No attendance recorded; add reference photos if needed.", "ok")
-        else:
-            flash(f"{label} added as a new employee and their face learned.", "ok")
-        return redirect(url_for("unknowns"))
+            return reply(True, f"{label} added and sample labelled. No attendance recorded; add reference photos if needed.")
+        return reply(True, f"{label} added as a new employee and their face learned.",
+                     related=related(members, employee_id))
 
     @app.post("/unknowns/<int:unknown_id>/ignore")
     def ignore(unknown_id: int):
         try:
             service.ignore_unknown(unknown_id, current_user(cfg))
         except ValueError as exc:
-            return failed(str(exc), "unknowns")
-        return done("Ignored for today. If this person comes back on another day, they will be shown again.",
-                    "unknowns")
+            return reply(False, str(exc))
+        return reply(True, "Ignored for today. If this person comes back on another day, they will be shown again.")
 
     @app.post("/unknowns/delete")
     def delete_unknowns():
         try:
             ids = [int(value) for value in request.form.getlist("unknown_id")]
         except ValueError:
-            return failed("Invalid review selection.", "unknowns")
+            return reply(False, "Invalid review selection.")
         try:
             service.delete_unknowns(ids, current_user(cfg))
         except ValueError as exc:
-            return failed(str(exc), "unknowns")
-        return done("Selected cards removed from review. No attendance recorded or faces learned.", "unknowns")
+            return reply(False, str(exc))
+        return reply(True, "Selected cards removed from review. No attendance recorded or faces learned.")
 
     @app.post("/unknowns/<int:unknown_id>/delete")
     def delete_unknown(unknown_id: int):
@@ -280,8 +319,8 @@ def register(app: Flask, core: "App") -> None:
             photo_ids = selected_photos(unknown_id) if "photo_selection" in request.form or "photo_id" in request.form else None
             service.delete_unknown(unknown_id, current_user(cfg), photo_ids=photo_ids)
         except ValueError as exc:
-            return failed(str(exc), "unknowns")
-        return done("Removed from review. No attendance recorded or faces learned.", "unknowns")
+            return reply(False, str(exc))
+        return reply(True, "Removed from review. No attendance recorded or faces learned.")
 
     @app.post("/unknowns/<int:unknown_id>/restore")
     def restore(unknown_id: int):

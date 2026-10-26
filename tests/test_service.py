@@ -114,9 +114,21 @@ def test_unclear_face_like_someone_checked_in_is_reviewed_unless_setting_is_on(e
     service.on_identified("B", at(9, 0), 0.7, None)
     like_bob = person_vector(2) + 0.6 * person_vector(20)  # Bob, unclear
     like_bob /= np.linalg.norm(like_bob)
-    assert service.on_unknown(at(9, 5), "a.jpg", like_bob, "B", 0.35) is None  # taken to be Bob again
+    assert service.on_unknown(at(9, 5), "a.jpg", like_bob, "B", 0.5) is None  # taken to be Bob again
     service.cfg.recognition.seen_again_score = 0
-    assert service.on_unknown(at(9, 6), "b.jpg", like_bob, "B", 0.35) is not None
+    assert service.on_unknown(at(9, 6), "b.jpg", like_bob, "B", 0.5) is not None
+
+
+def test_unclear_face_below_the_accept_score_is_reviewed_whatever_the_setting(env):
+    """A 0.37 match to someone already in was a different person walking in: below accept_score the
+    resemblance says nothing, so the already-seen score never drops such a face, however low it is set."""
+    service, store, clock, sent = env
+    service.on_identified("B", at(9, 0), 0.7, None)
+    like_bob = person_vector(2) + 0.6 * person_vector(20)
+    like_bob /= np.linalg.norm(like_bob)
+    service.cfg.recognition.seen_again_score = 0.3
+    assert service.on_unknown(at(9, 5), "a.jpg", like_bob, "B", 0.37) is not None
+    assert service.on_unknown(at(9, 6), "b.jpg", like_bob, "B", service.cfg.recognition.accept_score) is None
 
 
 def test_no_late_time_message_when_everyone_is_in(env):

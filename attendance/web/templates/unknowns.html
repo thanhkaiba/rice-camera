@@ -7,18 +7,31 @@
     <p class="subtitle">Camera faces, faces seen outside the camera hours and seed samples awaiting review. Click one to name it.</p>
   </div>
   <div class="actions">
-    {% if groups %}<span class="badge bad" title="{{ groups|length }} to review">{{ groups|length }}</span>{% endif %}
+    {% if groups %}<span class="badge bad" id="count-total" title="{{ groups|length }} to review">{{ groups|length }}</span>{% endif %}
     {% set ready = groups|selectattr('guess')|list|length %}
-    {% if ready %}<span class="badge ok" title="Shown first: these only need Confirm">{{ ready }} ready to confirm</span>{% endif %}
+    {% if ready %}<span class="badge ok" id="count-ready" title="Shown first: these only need Confirm">{{ ready }} ready to confirm</span>{% endif %}
     {% if groups %}
     <button type="button" id="focus-toggle" title="Show one face at a time, with large buttons (handy on a phone)">{{ icon('eye') }}<span>One at a time</span></button>
+    <button type="button" id="name-selected" disabled title="Confirm every selected card as one person">{{ icon('check') }}Name selected (<span id="selected-count" aria-live="polite">0</span>)</button>
     <form method="post" id="bulk-delete" action="{{ url_for('delete_unknowns') }}" data-confirm="Remove the selected cards from review?">
-      <button class="danger" id="delete-selected" disabled>{{ icon('trash') }}Delete selected (<span id="selected-count" aria-live="polite">0</span>)</button>
+      <button class="danger" id="delete-selected" disabled>{{ icon('trash') }}Delete selected</button>
     </form>
     {% endif %}
     <a class="btn" href="{{ url_for('unknowns') }}">{{ icon('refresh') }}Reload</a>
   </div>
 </div>
+{% if groups %}
+<p class="hint keys" id="keys">Keys: <kbd>←</kbd> <kbd>→</kbd> move · <kbd>Enter</kbd> confirm the suggestion · <kbd>1</kbd>–<kbd>3</kbd> pick a name · <kbd>O</kbd> open · <kbd>S</kbd> skip · <kbd>D</kbd> delete · <kbd>X</kbd> select</p>
+<div class="alert info related-bar" id="related" hidden>
+  <span class="ico">{{ icon('sparkles') }}</span>
+  <span class="msg"><strong id="related-count"></strong> more card(s) from that day look like <strong id="related-name"></strong>. Check them before confirming: the arrival time of each card is recorded for this person.</span>
+  <span class="row" style="gap:6px; flex-wrap:wrap">
+    <button type="button" class="primary btn-sm" id="related-confirm">{{ icon('check') }}Confirm all</button>
+    <button type="button" class="btn-sm" id="related-show">{{ icon('eye') }}Show them</button>
+    <button type="button" class="ghost btn-sm" id="related-dismiss" aria-label="Dismiss">{{ icon('close') }}</button>
+  </span>
+</div>
+{% endif %}
 {% if no_photos %}
   <div class="alert info"><span class="ico">{{ icon('sparkles') }}</span><span><strong>No photos yet?</strong> Let the camera run; name each person here once and it recognises them from then on.</span></div>
 {% endif %}
@@ -74,27 +87,27 @@
       {% if g.members|length == 1 %}
       <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
         <input type="hidden" name="employee_id" value="{{ g.guess }}">
-        <button class="primary btn-sm btn-block" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Learn the face; no attendance is recorded' if g.source == 'collect' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ guess_label }}</button>
+        <button class="primary btn-sm btn-block name-btn" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Learn the face; no attendance is recorded' if g.source == 'collect' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ guess_label }}</button>
       </form>
       {% else %}
-      <button type="button" class="primary btn-sm btn-block" onclick="openReview(this.closest('.face-card'), '{{ g.guess }}')">{{ icon('check') }}Confirm: {{ guess_label }} · select photos</button>
+      <button type="button" class="primary btn-sm btn-block name-btn" onclick="openReview(this.closest('.face-card'), '{{ g.guess }}')">{{ icon('check') }}Confirm: {{ guess_label }} · select photos</button>
       {% endif %}
       {% endif %}
       {% for pid, score in g.maybe %}
       {% if g.members|length == 1 %}
       <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
         <input type="hidden" name="employee_id" value="{{ pid }}">
-        <button class="btn-sm btn-block" title="Name this person and learn the face">{{ icon('check') }}It's {{ employee_labels.get(pid, '') }}</button>
+        <button class="btn-sm btn-block name-btn" title="Name this person and learn the face">{{ icon('check') }}It's {{ employee_labels.get(pid, '') }}</button>
       </form>
       {% else %}
-      <button type="button" class="btn-sm btn-block" onclick="openReview(this.closest('.face-card'), '{{ pid }}')">{{ icon('check') }}It's {{ employee_labels.get(pid, '') }} · select photos</button>
+      <button type="button" class="btn-sm btn-block name-btn" onclick="openReview(this.closest('.face-card'), '{{ pid }}')">{{ icon('check') }}It's {{ employee_labels.get(pid, '') }} · select photos</button>
       {% endif %}
       {% endfor %}
-      <button type="button" class="{{ 'primary' if not guess and not g.maybe }} btn-sm btn-block" onclick="openReview(this.closest('.face-card'))">{{ icon('help') }}{{ 'Someone else?' if guess else 'Who is this?' }}</button>
-      <form method="post" action="{{ url_for('ignore', unknown_id=g.id) }}" class="focus-only">
+      <button type="button" class="{{ 'primary' if not guess and not g.maybe }} btn-sm btn-block open-btn" onclick="openReview(this.closest('.face-card'))">{{ icon('help') }}{{ 'Someone else?' if guess else 'Who is this?' }}</button>
+      <form method="post" action="{{ url_for('ignore', unknown_id=g.id) }}" class="focus-only skip-form">
         <button class="btn-sm btn-block" title="Hidden for the rest of today; shown again if seen another day">{{ icon('user-x') }}Skip · not an employee</button>
       </form>
-      <form method="post" action="{{ url_for('delete_unknown', unknown_id=g.id) }}" data-confirm="Remove all {{ g.members|length }} photo(s) on this card from review?">
+      <form method="post" action="{{ url_for('delete_unknown', unknown_id=g.id) }}" class="delete-form" data-confirm="Remove all {{ g.members|length }} photo(s) on this card from review?">
         <button class="danger btn-sm btn-block" title="Remove blurry or unusable photos from review">{{ icon('trash') }}Delete from review</button>
       </form>
     </div>
@@ -150,6 +163,19 @@
 </details>
 {% endif %}
 
+<dialog id="bulk-name-dialog">
+  <div class="dialog-head"><strong>Name the selected cards</strong><button type="button" class="close" data-close aria-label="Close">{{ icon('close') }}</button></div>
+  <div class="dialog-body">
+    <p class="hint" style="margin-top:0">Every selected card is confirmed as this person: their arrival is recorded from the earliest card and the faces are learned. Only do this when all the selected cards show the same person.</p>
+    <form method="post" id="bulk-name" action="{{ url_for('assign_many') }}">
+      <div class="form-row" style="flex-wrap:nowrap">
+        <input id="bulk-search" list="employee-options" required autocomplete="off" placeholder="Search by name or email…" aria-label="Choose an employee by name or email" style="flex:1; min-width:0">
+        <input type="hidden" name="employee_id" id="bulk-id">
+        <button class="primary">{{ icon('check') }}Confirm <span id="bulk-count">0</span> card(s)</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 <dialog id="review">
   <div class="dialog-head"><strong>Who is this?</strong><button type="button" class="close" data-close aria-label="Close">{{ icon('close') }}</button></div>
   <div class="dialog-body">
@@ -206,30 +232,53 @@
 {% block scripts %}
 <script>
   const review = document.getElementById('review');
-  const selections = [...document.querySelectorAll('.review-select')];
-  document.getElementById('select-blurry')?.addEventListener('click', () => {
-    document.querySelectorAll('.face-card.blurry .review-select').forEach(box => { box.checked = true; });
-    selections[0].dispatchEvent(new Event('change'));
-  });
-  selections.forEach(box => box.addEventListener('change', () => {
-    const selected = selections.filter(input => input.checked);
-    document.getElementById('delete-selected').disabled = !selected.length;
-    document.getElementById('selected-count').textContent = selected.length;
-    const photos = selected.reduce((total, input) => total + Number(input.closest('.face-card').dataset.count), 0);
-    document.getElementById('bulk-delete').dataset.confirm = 'Remove all ' + photos + ' photo(s) on ' + selected.length + ' selected card(s) from review?';
-  }));
-  const pickSearch = document.getElementById('pick-search');
-  pickSearch?.addEventListener('input', () => {
-    const selected = [...document.getElementById('employee-options').options].find(o => o.value === pickSearch.value);
-    document.getElementById('pick-id').value = selected ? selected.dataset.id : '';
-    pickSearch.setCustomValidity(selected ? '' : 'Choose an employee from the suggestions.');
-  });
+  const bulkDialog = document.getElementById('bulk-name-dialog');
+  const grid = document.getElementById('review-grid');
+  let cards = grid ? [...grid.querySelectorAll('.face-card')] : [];
+  let selections = [...document.querySelectorAll('.review-select')];
+  let openCard = null;  // the card the "Who is this?" window is about
+  const selectedCards = () => selections.filter(box => box.checked).map(box => box.closest('.face-card'));
   const urls = {
     assign: "{{ url_for('assign', unknown_id=0) }}",
+    assignMany: "{{ url_for('assign_many') }}",
     add: "{{ url_for('new_employee_from_face', unknown_id=0) }}",
     skip: "{{ url_for('ignore', unknown_id=0) }}",
     delete: "{{ url_for('delete_unknown', unknown_id=0) }}",
   };
+
+  // Selection: the same cards can be deleted or named as one person.
+  function updateSelection() {
+    const selected = selectedCards();
+    for (const id of ['delete-selected', 'name-selected']) { const b = document.getElementById(id); if (b) b.disabled = !selected.length; }
+    for (const id of ['selected-count', 'bulk-count']) { const n = document.getElementById(id); if (n) n.textContent = selected.length; }
+    const photos = selected.reduce((total, card) => total + Number(card.dataset.count), 0);
+    const bulk = document.getElementById('bulk-delete');
+    if (bulk) bulk.dataset.confirm = 'Remove all ' + photos + ' photo(s) on ' + selected.length + ' selected card(s) from review?';
+  }
+  document.getElementById('select-blurry')?.addEventListener('click', () => {
+    document.querySelectorAll('.face-card.blurry .review-select').forEach(box => { box.checked = true; });
+    updateSelection();
+  });
+  selections.forEach(box => box.addEventListener('change', updateSelection));
+  document.getElementById('name-selected')?.addEventListener('click', () => {
+    document.getElementById('bulk-name').reset();
+    document.getElementById('bulk-id').value = '';
+    bulkDialog.showModal();
+    document.getElementById('bulk-search').focus();
+  });
+
+  // Employee search boxes: the typed label becomes the person's id.
+  function bindSearch(input, hiddenId) {
+    input?.addEventListener('input', () => {
+      const option = [...document.getElementById('employee-options').options].find(o => o.value === input.value);
+      document.getElementById(hiddenId).value = option ? option.dataset.id : '';
+      input.setCustomValidity(option ? '' : 'Choose an employee from the suggestions.');
+    });
+  }
+  const pickSearch = document.getElementById('pick-search');
+  bindSearch(pickSearch, 'pick-id');
+  bindSearch(document.getElementById('bulk-search'), 'bulk-id');
+
   const photoForms = [...review.querySelectorAll('.photo-selection-form')];
   function updatePhotoSelection() {
     const selected = [...review.querySelectorAll('.review-photo-select:checked')];
@@ -247,6 +296,7 @@
   }
   document.getElementById('review-photos').addEventListener('change', updatePhotoSelection);
   function openReview(card, person = '') {
+    openCard = card;
     const d = card.dataset, url = u => u.replace('/0/', '/' + d.id + '/');
     const bodyLink = document.getElementById('review-body-link');
     bodyLink.hidden = !d.body;
@@ -297,16 +347,117 @@
     updatePhotoSelection();
     review.showModal();
   }
+
+  // Actions are sent in the background: the card goes, the next one is shown, nothing reloads.
+  const HEADERS = { 'Accept': 'application/json', 'X-Requested-With': 'fetch' };
+  async function post(action, body) {
+    let r;
+    try { r = await fetch(action, { method: 'POST', body, headers: HEADERS }); }
+    catch (e) { return { ok: false, message: 'No answer from the program. Is it running? Reload the page.' }; }
+    if (r.status === 401 || r.status === 403) { location.reload(); return null; }
+    try { return await r.json(); } catch (e) { return { ok: false, message: 'Unexpected answer (' + r.status + '). Reload the page.' }; }
+  }
+  function handled(data, affected, partial = false) {
+    if (!data) return;
+    if (!data.ok) { toast('error', data.message); return; }
+    if (review.open) review.close();
+    if (bulkDialog.open) bulkDialog.close();
+    if (partial) { location.reload(); return; }  // some photos stay on the card: let the page redraw it
+    removeCards(affected);
+    toast('ok', data.message);
+    if (data.related && data.related.cards.length) showRelated(data.related); else hideRelated();
+  }
+  document.addEventListener('submit', async e => {
+    const form = e.target;
+    const ours = form.closest('#review-grid, #review, #bulk-name-dialog') || form.id === 'bulk-delete';
+    if (!ours || e.defaultPrevented) return;  // a cancelled confirmation stays cancelled
+    e.preventDefault();
+    const body = new FormData(form);
+    let affected, partial = false;
+    if (form.closest('.face-card')) affected = [form.closest('.face-card')];
+    else if (form.closest('#review')) {
+      affected = [openCard];
+      partial = form.classList.contains('photo-selection-form') && body.getAll('photo_id').length < Number(openCard.dataset.count);
+    } else {
+      affected = selectedCards();
+      if (form.id === 'bulk-name') affected.forEach(card => body.append('unknown_id', card.dataset.id));
+    }
+    const btn = e.submitter || form.querySelector('button:not([type="button"])');
+    const data = await post(form.action, body);
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+    handled(data, affected, partial);
+  });
+
+  // "N more cards look like X": offered after a confirmation, confirmed in one go or looked at first.
+  const relatedBar = document.getElementById('related');
+  let related = null;
+  function relatedCards() { return related ? cards.filter(c => related.ids.has(c.dataset.id)) : []; }
+  function showRelated(rel) {
+    related = { ...rel, ids: new Set(rel.cards.map(c => String(c.id))) };
+    cards.forEach(c => c.classList.toggle('related', related.ids.has(c.dataset.id)));
+    document.getElementById('related-count').textContent = relatedCards().length;
+    document.getElementById('related-name').textContent = rel.label;
+    relatedBar.hidden = !relatedCards().length;
+  }
+  function hideRelated() { related = null; if (relatedBar) relatedBar.hidden = true; cards.forEach(c => c.classList.remove('related')); }
+  document.getElementById('related-dismiss')?.addEventListener('click', hideRelated);
+  document.getElementById('related-show')?.addEventListener('click', () => {
+    const them = relatedCards();
+    if (!them.length) return;
+    if (focus) { focus = false; show(); }
+    selections.forEach(box => { box.checked = them.includes(box.closest('.face-card')); });
+    updateSelection();
+    pos = cards.indexOf(them[0]); show();
+    them[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  });
+  document.getElementById('related-confirm')?.addEventListener('click', async e => {
+    const them = relatedCards();
+    if (!them.length) return hideRelated();
+    const body = new URLSearchParams();
+    them.forEach(c => body.append('unknown_id', c.dataset.id));
+    body.append('employee_id', related.employee_id);
+    e.target.disabled = true;
+    const data = await post(urls.assignMany, body);
+    e.target.disabled = false;
+    handled(data, them);
+  });
+
+  // Counters in the page head.
+  function updateCounts() {
+    const total = document.getElementById('count-total');
+    if (total) { total.textContent = cards.length; total.title = cards.length + ' to review'; total.hidden = !cards.length; }
+    const ready = document.getElementById('count-ready'), n = cards.filter(c => c.dataset.guess).length;
+    if (ready) { ready.textContent = n + ' ready to confirm'; ready.hidden = !n; }
+  }
+  function removeCards(list) {
+    list.forEach(card => card && card.remove());
+    cards = cards.filter(c => c.isConnected);
+    selections = selections.filter(box => box.isConnected);
+    updateSelection(); updateCounts();
+    if (related) showRelated(related);
+    if (!cards.length) {
+      const empty = document.createElement('div'); empty.className = 'card empty-state';
+      empty.innerHTML = '<span class="ico">{{ icon('smile') }}</span><strong>Nothing to review.</strong>';
+      grid.replaceWith(empty);
+      for (const id of ['focus-bar', 'focus-toggle', 'name-selected', 'bulk-delete', 'keys', 'related']) { const el = document.getElementById(id); if (el) el.hidden = true; }
+      return;
+    }
+    show();
+  }
+
   // One at a time: a single large card with Back / Next. On by default on phones; the choice and the
-  // position are kept in this browser, so after naming a face the next one is shown.
-  const grid = document.getElementById('review-grid');
+  // position are kept in this browser, so after naming a face the next one is shown. The current card
+  // is also what the keys act on when all cards are shown.
+  let focus = false, pos = 0;
+  function show() {}
+  function go(by) { pos += by; show(); if (cards[pos]) cards[pos].scrollIntoView({ block: 'nearest' }); }
   if (grid) {
-    const cards = [...grid.querySelectorAll('.face-card')], bar = document.getElementById('focus-bar');
-    const toggle = document.getElementById('focus-toggle');
+    const bar = document.getElementById('focus-bar'), toggle = document.getElementById('focus-toggle');
     const stored = (k, v) => { try { if (v === undefined) return sessionStorage.getItem(k); sessionStorage.setItem(k, v); } catch (e) {} };
-    let focus = stored('review-focus') ? stored('review-focus') === '1' : matchMedia('(max-width: 640px)').matches;
-    let pos = Number(stored('review-pos')) || 0;
-    function show() {
+    focus = stored('review-focus') ? stored('review-focus') === '1' : matchMedia('(max-width: 640px)').matches;
+    pos = Number(stored('review-pos')) || 0;
+    show = function () {
+      if (!cards.length) return;
       pos = Math.max(0, Math.min(pos, cards.length - 1));
       grid.classList.toggle('focus', focus);
       bar.hidden = !focus;
@@ -317,21 +468,31 @@
       toggle.querySelector('span').textContent = focus ? 'Show all' : 'One at a time';
       stored('review-focus', focus ? '1' : '0');
       stored('review-pos', pos);
-    }
-    const go = by => { pos += by; show(); if (focus) cards[pos].scrollIntoView({ block: 'nearest' }); };
+    };
     document.getElementById('focus-prev').addEventListener('click', () => go(-1));
     document.getElementById('focus-next').addEventListener('click', () => go(1));
     toggle.addEventListener('click', () => { focus = !focus; show(); });
-    document.addEventListener('keydown', e => {
-      if (!focus || review.open || e.target.closest('input, textarea, select')) return;
-      if (e.key === 'ArrowLeft') go(-1);
-      if (e.key === 'ArrowRight') go(1);
-    });
     // Opening a card (also from the chat link) makes it the current one.
     const open = openReview;
     openReview = (card, person) => { pos = cards.indexOf(card); show(); open(card, person); };
     show();
   }
+  // Keys act on the current card: arrows move, Enter confirms the suggestion, 1-3 pick a name,
+  // O opens, S skips, D deletes, X selects.
+  document.addEventListener('keydown', e => {
+    if (review.open || bulkDialog.open || e.metaKey || e.ctrlKey || e.altKey || e.target.closest('input, textarea, select')) return;
+    const card = cards[pos];
+    if (!card) return;
+    const key = e.key.toLowerCase();
+    if (key === 'arrowleft') { go(-1); e.preventDefault(); }
+    else if (key === 'arrowright') { go(1); e.preventDefault(); }
+    else if (key === 'enter') { (card.querySelector('.name-btn') || card.querySelector('.open-btn')).click(); e.preventDefault(); }
+    else if ('123'.includes(key) && key) { card.querySelectorAll('.name-btn')[Number(key) - 1]?.click(); }
+    else if (key === 'o' || key === ' ') { openReview(card); e.preventDefault(); }
+    else if (key === 's') card.querySelector('.skip-form')?.requestSubmit();
+    else if (key === 'd') card.querySelector('.delete-form')?.requestSubmit();
+    else if (key === 'x') { const box = card.querySelector('.review-select'); box.checked = !box.checked; updateSelection(); }
+  });
   {% if open_id %}
   const first = document.querySelector('.face-card[data-id="{{ open_id }}"]');
   if (first) openReview(first);
