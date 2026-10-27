@@ -85,3 +85,13 @@ def test_review_actions_answer_json_in_the_background(core):
     # A plain form post (no script) is still answered with a redirect back to Review.
     r = web.post("/unknowns/assign-many", data={"employee_id": "B"})
     assert r.status_code == 302
+
+
+def test_review_page_draws_its_own_employee_suggestions(core):
+    """The name boxes no longer rely on the browser's datalist picker, which phones hide or skip."""
+    app, clock, sent = core
+    _four_cards(app.service)
+    html = client(app).get("/unknowns").data.decode()
+    assert 'list="employee-options"' not in html
+    assert 'id="pick-suggest"' in html and 'id="bulk-suggest"' in html
+    assert 'id="employee-options"' in html  # still the list of people the script reads

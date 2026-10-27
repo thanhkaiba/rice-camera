@@ -22,6 +22,11 @@ LINK_IOU = 0.2  # same position as the previous frame
 LINK_SIM = 0.5  # or clearly the same face
 LINK_MIN_SIM = 0.3  # never link faces that look like different people, even at the same position
 SPLIT_WINDOW = dt.timedelta(seconds=5)
+# An unknown track that starts this soon after an unknown track ended, and looks like it, continues
+# that track's Review card instead of opening a new one: a few frames a second and a face that
+# turns or is masked break one walk to the door into several tracks (see Decision.follows).
+CONTINUE_WINDOW = SPLIT_WINDOW
+REPORTED_KEPT = 10  # recently reported unknown tracks remembered for that
 # A track that ends one vote short is still accepted when its votes are unanimous and this much
 # above accept_score: someone walking fast past a slow PC may only give two good frames.
 STRONG_BONUS = 0.1
@@ -79,6 +84,8 @@ class Decision:
     body: Any = None
     scene: Any = None
     quality: float | None = None  # of the face in `crop` (the track's best), as the Image score / 100
+    track: int | None = None  # the face track this decision ends
+    follows: int | None = None  # for an unknown: the track of the unknown decision it continues, if any
 
 
 @dataclass
@@ -87,7 +94,8 @@ class _Track:
     first_ts: dt.datetime
     last_ts: dt.datetime
     bbox: tuple[float, float, float, float]
-    embedding: np.ndarray
+    embedding: np.ndarray  # of the latest face
+    first_embedding: np.ndarray | None = None
     frames: int = 0
     votes: Counter = field(default_factory=Counter)
     best_score: dict[str, float] = field(default_factory=dict)
@@ -114,6 +122,7 @@ class FaceTracker:
         self._ids = itertools.count(1)
         self._recent: dict[str, dt.datetime] = {}  # employee -> last time a track identified them
         self._people: dict[int, dt.datetime] = {}  # person tracks currently followed
+        self._reported: list[_Track] = []  # the last unknown tracks reported, newest last (see _continues)
 
     def update(self, observations: list[Observation], ts: dt.datetime,
                people: dict[int, dt.datetime] | None = None, *, frame_interval_s: float = 0.0) -> list[Decision]:
@@ -128,7 +137,8 @@ class FaceTracker:
             track = self._link(obs, free)
             if track is None:
                 first = min(ts, self._people.get(obs.person_id, ts))  # arrival = when the person appeared
-                track = _Track(next(self._ids), first, ts, obs.bbox, obs.embedding, person_id=obs.person_id)
+                track = _Track(next(self._ids), first, ts, obs.bbox, obs.embedding, first_embedding=obs.embedding,
+                               person_id=obs.person_id)
                 self._tracks.append(track)
             else:
                 free.remove(track)
@@ -216,9 +226,29 @@ class FaceTracker:
             elif not self._is_split(t):
                 person, score = self._guess(t)
                 decisions.append(Decision("unknown", t.first_ts, person, score, t.best.crop, t.best.embedding,
-                                          t.best.body, t.best.scene, t.best.quality))
+                                          t.best.body, t.best.scene, t.best.quality, track=t.id,
+                                          follows=self._continues(t)))
+                self._reported = (self._reported + [t])[-REPORTED_KEPT:]
         self._ended = waiting
         return decisions
+
+    def _continues(self, t: _Track) -> int | None:
+        """The reported unknown track that `t` carries on, if any: it ended at most CONTINUE_WINDOW
+        before `t` began (two faces in the picture at once, or in one frame, are two people, whatever
+        the likeness), of a face that resembles this one, and not of another followed person. The most
+        similar wins."""
+        best, best_sim = None, LINK_MIN_SIM
+        for p in reversed(self._reported):
+            gap = t.first_ts - p.last_ts
+            if gap <= dt.timedelta(0) or gap > CONTINUE_WINDOW:
+                continue
+            if t.person_id is not None and p.person_id is not None and t.person_id != p.person_id:
+                continue
+            sim = max(float(np.dot(t.best.embedding, p.best.embedding)),
+                      float(np.dot(t.first_embedding, p.embedding)))  # where one track stopped and the next began
+            if sim >= best_sim:
+                best, best_sim = p.id, sim
+        return best
 
     @staticmethod
     def _guess(t: _Track) -> tuple[str | None, float | None]:

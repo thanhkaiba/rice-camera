@@ -292,3 +292,19 @@ def test_seen_again_margin_uses_scores_from_the_same_picture(env):
     both /= np.linalg.norm(both)
     # Another frame of the track matched Bob at 0.95: still not "Bob again", as this picture shows.
     assert service.on_unknown(at(9, 5), "m.jpg", both, "B", 0.95) is not None
+
+
+def test_a_track_that_continues_an_unknown_track_joins_its_review_card(env):
+    service, store, clock, sent = env
+    v = person_vector(30)
+    a = service.on_unknown(at(8, 30), "a.jpg", v, None, None, track=1)
+    b = service.on_unknown(at(8, 30, 4), "b.jpg", v, None, None, track=2, follows=1)
+    assert store.unknown(b).group_id == store.unknown(a).group_id
+    c = service.on_unknown(at(8, 30, 8), "c.jpg", v, None, None, track=3, follows=2)  # a chain
+    assert store.unknown(c).group_id == store.unknown(a).group_id
+    assert [u.id for u in store.group(store.unknown(a).group_id)] == [a, b, c]
+    # Once the card is handled, a later continuation is a new card, and an unknown track starts one too.
+    service.resolve_unknown(a, "B")
+    d = service.on_unknown(at(8, 31), "d.jpg", v, None, None, track=4, follows=3)
+    e = service.on_unknown(at(8, 32), "e.jpg", v, None, None, track=5, follows=99)
+    assert store.unknown(d).group_id == d and store.unknown(e).group_id == e

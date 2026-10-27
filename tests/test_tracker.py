@@ -182,3 +182,49 @@ def test_strong_matches_outweigh_the_pose_check_but_not_a_tiny_face():
     tiny = lambda i: [Observation((100, 100, 130, 130), noisy(A, 0.6), GALLERY.match(noisy(A, 0.6)), False, 0.1,
                                   size_ok=False)]
     assert [d.kind for d in frames(tr, tiny, 6) + tr.flush()] == ["unknown"]
+
+
+C, D = unit(rng.normal(size=512)), unit(rng.normal(size=512))  # strangers
+
+
+def test_a_walk_broken_into_two_tracks_continues_the_first_card():
+    tr = tracker()
+    out = frames(tr, lambda i: [obs(noisy(C))], 4)
+    # Lost for 3 s (longer than the timeout), then seen again further along, so a new track.
+    out += frames(tr, lambda i: [obs(noisy(C), x=500)], 4, start=T0 + dt.timedelta(seconds=3))
+    out += tr.flush()
+    assert [d.kind for d in out] == ["unknown", "unknown"]
+    assert out[0].follows is None
+    assert out[1].follows == out[0].track
+
+
+def test_a_stranger_after_another_stranger_gets_a_card_of_their_own():
+    tr = tracker()
+    out = frames(tr, lambda i: [obs(noisy(C))], 4)
+    out += frames(tr, lambda i: [obs(noisy(D))], 4, start=T0 + dt.timedelta(seconds=3))
+    out += tr.flush()
+    assert [d.follows for d in out] == [None, None]
+
+
+def test_look_alikes_in_the_picture_at_the_same_time_are_two_cards():
+    tr = tracker()
+    frames(tr, lambda i: [obs(noisy(C)), obs(noisy(C), x=600)], 4)
+    out = tr.flush()
+    assert len(out) == 2 and [d.follows for d in out] == [None, None]
+
+
+def test_the_same_face_much_later_is_a_new_card():
+    tr = tracker()
+    out = frames(tr, lambda i: [obs(noisy(C))], 4)
+    out += frames(tr, lambda i: [obs(noisy(C))], 4, start=T0 + dt.timedelta(seconds=12))
+    out += tr.flush()
+    assert [d.follows for d in out] == [None, None]
+
+
+def test_a_continued_track_still_knows_which_it_continues_after_three_segments():
+    tr = tracker()
+    out = frames(tr, lambda i: [obs(noisy(C))], 4)
+    out += frames(tr, lambda i: [obs(noisy(C), x=400)], 4, start=T0 + dt.timedelta(seconds=3))
+    out += frames(tr, lambda i: [obs(noisy(C), x=800)], 4, start=T0 + dt.timedelta(seconds=6))
+    out += tr.flush()
+    assert [d.follows for d in out] == [None, out[0].track, out[1].track]

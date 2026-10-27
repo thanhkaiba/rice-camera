@@ -299,7 +299,8 @@ def run(cfg: Config) -> None:
                 service.on_identified(d.employee_id, ts, d.score, image, d.embedding, digest)
                 live.last_identified = f"{app.service.chat_name(d.employee_id)} at {ts:%H:%M:%S}"
             else:
-                service.on_unknown(ts, image, d.embedding, d.employee_id, d.score, digest, d.quality)
+                service.on_unknown(ts, image, d.embedding, d.employee_id, d.score, digest, d.quality,
+                                   track=d.track, follows=d.follows)
 
     log.info("Running; processing window %s-%s", cfg.schedule.window_start, cfg.schedule.window_end)
     while True:

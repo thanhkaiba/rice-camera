@@ -169,7 +169,7 @@
     <p class="hint" style="margin-top:0">Every selected card is confirmed as this person: their arrival is recorded from the earliest card and the faces are learned. Only do this when all the selected cards show the same person.</p>
     <form method="post" id="bulk-name" action="{{ url_for('assign_many') }}">
       <div class="form-row" style="flex-wrap:nowrap">
-        <input id="bulk-search" list="employee-options" required autocomplete="off" placeholder="Search by name or email…" aria-label="Choose an employee by name or email" style="flex:1; min-width:0">
+        <div class="suggest-wrap"><input id="bulk-search" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search by name or email…" aria-label="Choose an employee by name or email" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="bulk-suggest"><div class="suggest" id="bulk-suggest" role="listbox" hidden></div></div>
         <input type="hidden" name="employee_id" id="bulk-id">
         <button class="primary">{{ icon('check') }}Confirm <span id="bulk-count">0</span> card(s)</button>
       </div>
@@ -198,7 +198,7 @@
       <input type="hidden" name="photo_selection" value="1">
       <strong id="pick-label">Someone else?</strong>
       <div class="form-row" style="flex-wrap:nowrap">
-        <input id="pick-search" list="employee-options" required autocomplete="off" placeholder="Search by name or email…" aria-label="Choose an employee by name or email" style="flex:1; min-width:0">
+        <div class="suggest-wrap"><input id="pick-search" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search by name or email…" aria-label="Choose an employee by name or email" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="pick-suggest"><div class="suggest" id="pick-suggest" role="listbox" hidden></div></div>
         <input type="hidden" name="employee_id" id="pick-id">
         <datalist id="employee-options">
           {% for id in employees %}<option value="{{ employee_labels.get(id, '') }}" data-id="{{ id }}"></option>{% endfor %}
@@ -267,12 +267,47 @@
     document.getElementById('bulk-search').focus();
   });
 
-  // Employee search boxes: the typed label becomes the person's id.
+  // Employee search boxes. The page draws its own suggestion list: a browser's datalist picker is
+  // hidden behind the keyboard or missing on phones, and it only matches with the right accents.
+  // Matching ignores accents and case ("nguyen" finds "Nguyễn"); every typed word must occur.
+  const fold = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+  const people = [...document.getElementById('employee-options')?.options || []]
+    .map(o => ({id: o.dataset.id, label: o.value, key: fold(o.value)}));
   function bindSearch(input, hiddenId) {
-    input?.addEventListener('input', () => {
-      const option = [...document.getElementById('employee-options').options].find(o => o.value === input.value);
-      document.getElementById(hiddenId).value = option ? option.dataset.id : '';
-      input.setCustomValidity(option ? '' : 'Choose an employee from the suggestions.');
+    if (!input) return;
+    const hidden = document.getElementById(hiddenId), list = input.nextElementSibling;
+    let items = [], active = -1;
+    const close = () => { list.hidden = true; list.innerHTML = ''; items = []; active = -1; input.setAttribute('aria-expanded', 'false'); };
+    const choose = p => { input.value = p.label; hidden.value = p.id; input.setCustomValidity(''); close(); };
+    const highlight = () => [...list.children].forEach((b, i) => b.classList.toggle('active', i === active));
+    const render = () => {
+      const words = fold(input.value.trim()).split(/\s+/).filter(Boolean);
+      items = people.filter(p => words.every(w => p.key.includes(w))).slice(0, 8);
+      list.innerHTML = '';
+      items.forEach(p => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.setAttribute('role', 'option'); b.textContent = p.label;
+        b.addEventListener('pointerdown', e => { e.preventDefault(); choose(p); });  // before the input blurs
+        list.append(b);
+      });
+      active = -1;
+      list.hidden = !items.length;
+      input.setAttribute('aria-expanded', String(!list.hidden));
+    };
+    input.addEventListener('input', () => {
+      const exact = people.find(p => p.label === input.value);
+      hidden.value = exact ? exact.id : '';
+      input.setCustomValidity(exact ? '' : 'Choose an employee from the suggestions.');
+      render();
+    });
+    input.addEventListener('focus', render);
+    input.addEventListener('blur', () => setTimeout(close, 150));
+    input.addEventListener('keydown', e => {
+      if (list.hidden) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % items.length; highlight(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + items.length) % items.length; highlight(); }
+      else if (e.key === 'Enter' && (active >= 0 || items.length === 1)) { e.preventDefault(); choose(items[Math.max(active, 0)]); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(); }
     });
   }
   const pickSearch = document.getElementById('pick-search');

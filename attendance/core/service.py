@@ -152,6 +152,7 @@ class AttendanceService:
         self._last_alive = dt.datetime.fromisoformat(saved) if saved else None
         self._last_alive_saved = self._last_alive
         self._last_flush: dt.datetime | None = None
+        self._unknown_rows: dict[int, int] = {}  # face track -> its Review row, for a track that continues it
         self._camera_seen_day: dt.date | None = None
         self._bad_since: dt.datetime | None = None  # when the camera stopped working, in this run
 
@@ -346,7 +347,11 @@ class AttendanceService:
 
     def on_unknown(self, ts: dt.datetime, image: str | None, vector: np.ndarray | None,
                    guess_id: str | None, guess_score: float | None, sha256: str | None = None,
-                   quality: float | None = None) -> int | None:
+                   quality: float | None = None, *, track: int | None = None,
+                   follows: int | None = None) -> int | None:
+        """A face track ended unidentified: a Review card, or a photo added to the card of the track it
+        `follows` (the tracker's word that it is the same walk, see tracker.Decision.follows) while that
+        card is still pending. `track` is the face track's id, so a later track can continue it."""
         ts = self._local(ts)
         again = self._seen_again(vector, guess_id, guess_score, ts.date())
         if again:
@@ -355,13 +360,29 @@ class AttendanceService:
             return None
         group_id = self._ignored_group(vector, ts)
         ignored = group_id is not None
+        continued = None if ignored or follows is None else self._continued_group(follows)
         if ignored:
             log.info("Face at %s belongs to a group ignored today; not reported", ts.strftime("%H:%M:%S"))
+        elif continued is not None:
+            group_id = continued
+            log.info("Unknown face at %s (closest %s %.2f) continues card %s", ts.strftime("%H:%M:%S"), guess_id,
+                     guess_score or 0, group_id)
         else:
             log.info("Unknown face at %s (closest %s %.2f, group %s)", ts.strftime("%H:%M:%S"), guess_id,
                      guess_score or 0, group_id or "new")
-        return self.store.add_unknown(ts.date(), ts, image, self.model_id, vector, guess_id, guess_score,
-                                      group_id, ignored=ignored, sha256=sha256, quality=quality)
+        row = self.store.add_unknown(ts.date(), ts, image, self.model_id, vector, guess_id, guess_score,
+                                     group_id, ignored=ignored, sha256=sha256, quality=quality)
+        if track is not None and not ignored:
+            self._unknown_rows[track] = row
+            while len(self._unknown_rows) > 50:
+                del self._unknown_rows[next(iter(self._unknown_rows))]
+        return row
+
+    def _continued_group(self, track: int) -> int | None:
+        """The pending camera card of `track`, or None once it was named, skipped or deleted."""
+        row = self._unknown_rows.get(track)
+        u = self.store.unknown(row) if row is not None else None
+        return u.group_id if u is not None and u.status == "pending" and u.source == "camera" else None
 
     def _seen_again(self, vector, guess_id: str | None, guess_score: float | None, day: dt.date) -> str | None:
         """Whether an unclear face is someone already checked in today passing again (not worth a
