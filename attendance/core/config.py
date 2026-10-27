@@ -46,6 +46,9 @@ class ScheduleConfig:
         return parse_clock(self.window_start), parse_clock(self.late_after), parse_clock(self.window_end)
 
 
+MAX_CAMERAS = 4
+
+
 @dataclass
 class CameraConfig:
     url: str = ""  # rtsp://..., a video file, or a webcam index such as "0"
@@ -58,6 +61,14 @@ class CameraConfig:
     # empty = the whole picture. Cropping to the walkway makes faces bigger for the detector and
     # ignores people sitting elsewhere in the room. Easiest to set on the Live camera page.
     area: str = ""
+    # More cameras (a second door), one address per line. They share these settings, except the
+    # detection area, which applies to the first camera only. Each camera costs as much CPU as the first.
+    more: str = ""
+
+    def urls(self) -> list[str]:
+        """Every camera address: `url` first, then the lines of `more` (blank lines ignored)."""
+        out = [self.url.strip()] if self.url.strip() else []
+        return out + [line.strip() for line in self.more.splitlines() if line.strip()]
 
     def area_box(self, shape) -> tuple[int, int, int, int] | None:
         """The area in pixels of a frame of `shape`, or None for the whole frame."""
@@ -307,6 +318,11 @@ class Config:
             raise ValueError("process_fps must be between 0 and 30")
         if not 0 <= self.camera.decode_threads <= 32:
             raise ValueError("camera.decode_threads must be between 0 (FFmpeg's choice) and 32")
+        urls = self.camera.urls()
+        if len(urls) > MAX_CAMERAS:
+            raise ValueError(f"at most {MAX_CAMERAS} cameras: each one costs as much CPU as the first")
+        if len(set(urls)) != len(urls):
+            raise ValueError("the same camera address is listed twice")
         if r.det_size < 160 or (r.backend == "insightface" and r.det_size % 32):
             raise ValueError("det_size must be at least 160 and, for insightface, a multiple of 32 (e.g. 640, 960)")
         if self.retention_days < 1:

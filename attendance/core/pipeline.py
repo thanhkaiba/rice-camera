@@ -102,6 +102,8 @@ def save_crop(app: App, decision: Decision, ts: dt.datetime) -> str | None:
             label = f"{app.store.employees().get(who, who)}  match {decision.score or 0:.2f}"
         else:
             label = "unidentified face"
+        if decision.camera is not None:
+            label += f"  camera {decision.camera + 1}"
         frame, bbox = decision.scene
         (app.data_dir / scene_photo(rel.as_posix())).write_bytes(
             render_scene(frame, bbox, f"{ts:%Y-%m-%d %H:%M:%S} ({ts:%z})  {label}"))
@@ -248,9 +250,37 @@ def fetch_models(app: App, retry_s: float = 60.0) -> None:
             time.sleep(retry_s)
 
 
+class _CameraSlot:
+    """One camera in the loop: its reader, its own face tracker and the state of its last frame.
+    The cameras share the models, the gallery, the service and the settings; the detection area
+    belongs to the first camera."""
+
+    def __init__(self, index: int, url: str, app: App):
+        from ..vision.processing import FrameProcessor
+
+        self.index, self.url = index, url
+        self.camera = None  # vision.camera.Camera once opened
+        self.processor = FrameProcessor(app, use_area=index == 0)
+        self.face_regions: list = []  # where faces were in the last analysed frame
+        self.health = FrameHealth()
+        self.last_processed = self.last_chosen = self.last_recorded = self.last_drawn = 0.0
+        self.fps_count = 0
+        self.fps = self.source_fps = 0.0
+        self.state = "connecting"
+        self.ok = True
+        self.faces: list[str] = []
+        self.people = 0
+
+    def label(self, total: int) -> str:
+        return f"camera {self.index + 1}" if total > 1 else "camera"
+
+    def summary(self, total: int) -> dict:
+        return {"index": self.index, "label": self.label(total).capitalize(), "state": self.state,
+                "fps": round(self.fps, 1), "source_fps": round(self.source_fps, 1), "faces": self.faces}
+
+
 def run(cfg: Config) -> None:
     from ..vision.camera import Camera
-    from ..vision.processing import FrameProcessor
     from ..vision.recognizer import enhance_low_light
 
     app = App(cfg)
@@ -281,33 +311,100 @@ def run(cfg: Config) -> None:
     if missing:
         log.warning("No reference photos for: %s", ", ".join(missing))
 
-    processor = FrameProcessor(app)
-    face_regions: list = []  # where faces were in the last analysed frame
-    health = FrameHealth()
-    camera: Camera | None = None
-    last_processed = last_chosen = last_ping = last_tick = last_recorded = last_drawn = 0.0
+    slots: list[_CameraSlot] = []
+    last_ping = last_tick = 0.0
     placement_saved = time.time()
-    fps_count, fps_since = 0, time.time()
+    fps_since = time.time()
     was_in_window = False
 
-    def handle(decisions: list[Decision]) -> None:
+    def handle(decisions: list[Decision], slot: _CameraSlot) -> None:
+        several = len(slots) > 1
         for d in decisions:
             ts = d.ts.astimezone(service.tz)
+            d.camera = slot.index if several else None
             image = save_crop(app, d, ts)
             digest = evidence_digest(app.data_dir, image)
+            tag = f" ({slot.label(len(slots))})" if several else ""
             if d.kind == "identified":
                 service.on_identified(d.employee_id, ts, d.score, image, d.embedding, digest)
-                live.last_identified = f"{app.service.chat_name(d.employee_id)} at {ts:%H:%M:%S}"
+                live.last_identified = f"{app.service.chat_name(d.employee_id)} at {ts:%H:%M:%S}{tag}"
             else:
+                # Track ids are per camera: the service keys them by (camera, track).
                 service.on_unknown(ts, image, d.embedding, d.employee_id, d.score, digest, d.quality,
-                                   track=d.track, follows=d.follows)
+                                   track=None if d.track is None else (slot.index, d.track),
+                                   follows=None if d.follows is None else (slot.index, d.follows))
+
+    def watch(slot: _CameraSlot, fps: float, in_window: bool, enrolling: bool, collecting: bool) -> bool:
+        """Open the camera if needed and analyse its newest frame when one is due. True if a frame
+        was analysed."""
+        cam = slot.camera
+        if cam is None or cam.silent_for() > CAMERA_RESTART_S or cam.decode_threads != cfg.camera.decode_threads:
+            if cam is not None:
+                if cam.silent_for() > CAMERA_RESTART_S:
+                    log.warning("No frames for %.0fs, reopening the %s", cam.silent_for(), slot.label(len(slots)))
+                cam.stop(wait_s=1.0)  # do not let a hung reader hold up the loop
+            slot.camera = cam = Camera(slot.url, cfg.camera.decode_threads, name=slot.label(len(slots))).start()
+            slot.state = "connecting"
+        frame, frame_time = cam.latest()
+        slot.ok = frame is not None
+        if frame is None:
+            slot.state = "no picture (reconnecting)" if cam.started_for() > 10 else "connecting"
+            return False
+        if frame_time - slot.last_processed < 1.0 / fps:
+            return False
+        slot.last_processed = frame_time  # paces the analysis on the newest frame
+        frame, frame_time = cam.sharpest(slot.last_chosen, slot.face_regions)
+        slot.last_chosen = frame_time
+        problem = slot.health.update(frame, frame_time)
+        slot.ok = problem is None
+        slot.state = f"problem: {problem}" if problem else "ok"
+        raw = frame
+        if cfg.camera.enhance_low_light:
+            frame = enhance_low_light(frame)
+        ts = dt.datetime.fromtimestamp(frame_time, service.tz)
+        try:
+            # An enrolment walk is a rehearsal: faces are kept as references, not as arrivals.
+            decisions, matched, people = slot.processor.process(frame, ts, record=in_window and not enrolling,
+                                                                raw=raw if raw is not frame else None)
+            if enrolling:
+                app.enrolment.observe([(f, c) for f, c, _ in matched], frame)
+            elif collecting:
+                app.collector.observe(matched, frame, ts)
+            handle(decisions, slot)
+            if in_window and not enrolling:
+                app.placement.add_frame(ts.date(), [f for f, _, _ in matched], cfg.recognition,
+                                        frame_time - slot.last_recorded)
+                slot.last_recorded = frame_time
+        except Exception:
+            # One bad frame must not stop the camera (a restart would lose every track).
+            log.exception("Frame at %s from the %s could not be processed; skipping it", ts.strftime("%H:%M:%S"),
+                          slot.label(len(slots)))
+            decisions, matched, people = [], [], []
+        if slot.processor.person_error and live.problem is None:
+            live.problem = slot.processor.person_error
+        slot.face_regions = [_grow(f.bbox, frame.shape) for f, _, _ in matched]
+        labelled = [(f, face_label(app, f, c)) for f, c, _ in matched]
+        slot.faces = [text for _, (text, _) in labelled]
+        slot.people = len(people)
+        for f, c, _ in matched:
+            if vote_for(c, f.quality_ok, f.size_ok, cfg.recognition) is not None:
+                tag = f" ({slot.label(len(slots))})" if len(slots) > 1 else ""
+                live.last_match = f"{app.service.chat_name(c[0][0])} {c[0][1]:.2f} at {ts:%H:%M:%S}{tag}"
+        if (live.wants_frame() and slot.index == live.viewed
+                and frame_time - slot.last_drawn >= 1.0 / PREVIEW_FPS):
+            slot.last_drawn = frame_time
+            area = cfg.camera.area_box(frame.shape) if slot.index == 0 else None
+            live.set_frame(draw(frame, labelled, people, area), frame, camera=slot.index)
+        slot.fps_count += 1
+        return True
 
     log.info("Running; processing window %s-%s", cfg.schedule.window_start, cfg.schedule.window_end)
     while True:
         now = service.now()
         in_window = service.in_window(now) and not app.maintenance
         if was_in_window and not in_window:
-            handle(processor.flush())
+            for slot in slots:
+                handle(slot.processor.flush(), slot)
             app.placement.save()  # before the summary, which reads it
         was_in_window = in_window
         camera_ok = True
@@ -317,74 +414,55 @@ def run(cfg: Config) -> None:
         collecting = not enrolling and recognizer is not None and app.collector.running(now, in_window)
         watching = in_window or live.previewing or enrolling
         fps = cfg.camera.process_fps if watching else min(cfg.camera.process_fps, cfg.collect.fps)
-        if (watching or collecting) and recognizer is not None and cfg.camera.url and not app.maintenance:
-            if (camera is None or camera.source != cfg.camera.url or camera.silent_for() > CAMERA_RESTART_S
-                    or camera.decode_threads != cfg.camera.decode_threads):
-                if camera is not None:
-                    if camera.source == cfg.camera.url and camera.silent_for() > CAMERA_RESTART_S:
-                        log.warning("No frames for %.0fs, reopening the camera", camera.silent_for())
-                    camera.stop(wait_s=1.0)  # do not let a hung reader hold up the loop
-                camera = Camera(cfg.camera.url, cfg.camera.decode_threads).start()
-                live.camera_state = "connecting"
-            frame, frame_time = camera.latest()
-            camera_ok = frame is not None
-            if frame is None:
-                live.camera_state = "no picture (reconnecting)" if camera.started_for() > 10 else "connecting"
-                time.sleep(0.05)
-            elif frame_time - last_processed >= 1.0 / fps:
-                last_processed = frame_time  # paces the analysis on the newest frame
-                frame, frame_time = camera.sharpest(last_chosen, face_regions)
-                last_chosen = frame_time
-                problem = health.update(frame, frame_time)
-                camera_ok = problem is None
-                live.camera_state = f"problem: {problem}" if problem else "ok"
-                raw = frame
-                if cfg.camera.enhance_low_light:
-                    frame = enhance_low_light(frame)
-                ts = dt.datetime.fromtimestamp(frame_time, service.tz)
-                try:
-                    # An enrolment walk is a rehearsal: faces are kept as references, not as arrivals.
-                    decisions, matched, people = processor.process(frame, ts, record=in_window and not enrolling,
-                                                                   raw=raw if raw is not frame else None)
-                    if enrolling:
-                        app.enrolment.observe([(f, c) for f, c, _ in matched], frame)
-                    elif collecting:
-                        app.collector.observe(matched, frame, ts)
-                    handle(decisions)
-                    if in_window and not enrolling:
-                        app.placement.add_frame(ts.date(), [f for f, _, _ in matched], cfg.recognition,
-                                                frame_time - last_recorded)
-                        last_recorded = frame_time
-                except Exception:
-                    # One bad frame must not stop the camera (a restart would lose every track).
-                    log.exception("Frame at %s could not be processed; skipping it", ts.strftime("%H:%M:%S"))
-                    decisions, matched, people = [], [], []
-                if processor.person_error and live.problem is None:
-                    live.problem = processor.person_error
-                face_regions = [_grow(f.bbox, frame.shape) for f, _, _ in matched]
-                labelled = [(f, face_label(app, f, c)) for f, c, _ in matched]
-                live.faces = [text for _, (text, _) in labelled]
-                live.people = len(people)
-                if live.wants_frame() and frame_time - last_drawn >= 1.0 / PREVIEW_FPS:
-                    last_drawn = frame_time
-                    live.set_frame(draw(frame, labelled, people, cfg.camera.area_box(frame.shape)), frame)
-                fps_count += 1
-            else:
-                time.sleep(0.02)
+        urls = cfg.camera.urls()
+        if (watching or collecting) and recognizer is not None and urls and not app.maintenance:
+            if [slot.url for slot in slots] != urls:  # cameras added, removed or changed in Settings
+                for slot in slots:
+                    handle(slot.processor.flush(), slot)
+                    if slot.camera is not None:
+                        slot.camera.stop(wait_s=1.0)
+                slots = [_CameraSlot(i, url, app) for i, url in enumerate(urls)]
+                if len(slots) > 1:
+                    log.info("Watching %d cameras", len(slots))
+            # The camera that has waited longest goes first, so none of them starves the others.
+            analysed = [watch(slot, fps, in_window, enrolling, collecting)
+                        for slot in sorted(slots, key=lambda s: s.last_processed)]
+            if not any(analysed):
+                time.sleep(0.02 if all(slot.ok for slot in slots) else 0.05)
+            camera_ok = all(slot.ok for slot in slots)
+            bad = next((slot for slot in slots if not slot.ok), None)
+            state = f"{bad.state} ({bad.label(len(slots))})" if bad and len(slots) > 1 else bad.state if bad else "ok"
+            shown = slots[live.viewed] if live.viewed < len(slots) else slots[0]
+            live.camera_state, live.faces, live.people = state if not shown.ok else shown.state, shown.faces, shown.people
         else:
-            if camera is not None:
-                camera.stop()
-                camera = None
+            for slot in slots:
+                handle(slot.processor.flush(), slot)
+                if slot.camera is not None:
+                    slot.camera.stop()
+            slots = []
             live.camera_state = (f"paused ({app.maintenance})" if app.maintenance
-                                 else "off (outside the camera hours)" if cfg.camera.url
+                                 else "off (outside the camera hours)" if urls
                                  else "off (no camera address in Settings)")
             if in_window or (app.maintenance and service.in_window(now)):
                 camera_ok = False  # should be working but cannot: count it as an outage
+            live.faces, live.people = [], 0
             time.sleep(0.5)
 
         if time.time() - fps_since >= 5:
-            live.fps, fps_count, fps_since = fps_count / (time.time() - fps_since), 0, time.time()
-            live.source_fps = camera.received_fps() if camera is not None else 0.0
+            elapsed = time.time() - fps_since
+            for slot in slots:
+                slot.fps, slot.fps_count = slot.fps_count / elapsed, 0
+                slot.source_fps = slot.camera.received_fps() if slot.camera is not None else 0.0
+            fps_since = time.time()
+            shown = slots[live.viewed] if live.viewed < len(slots) else slots[0] if slots else None
+            live.fps = shown.fps if shown else 0.0
+            live.source_fps = shown.source_fps if shown else 0.0
+        if slots:
+            live.cameras = [slot.summary(len(slots)) for slot in slots]
+        else:
+            live.cameras = [{"index": i, "label": f"Camera {i + 1}" if len(urls) > 1 else "Camera",
+                             "state": live.camera_state, "fps": 0.0, "source_fps": 0.0, "faces": []}
+                            for i in range(len(urls))]
         if time.time() - placement_saved >= 60:
             placement_saved = time.time()
             app.placement.save()

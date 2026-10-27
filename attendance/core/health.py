@@ -119,6 +119,16 @@ def disk(app: "App") -> dict:
     return {"free_gb": round(free_gb, 1), "total_gb": round(usage.total / (1 << 30)), "low": free_gb < LOW_DISK_GB}
 
 
+def camera_detail(cfg: "Config", live) -> str:
+    """The frame rates for the Status page: one line, every camera when there are several."""
+    if len(live.cameras) > 1:
+        return " · ".join(f"{c['label']}: {c['fps']} of {cfg.camera.process_fps} frames/s"
+                          + (f", sends {c['source_fps']}/s" if c["source_fps"] else "") for c in live.cameras)
+    source = getattr(live, "source_fps", 0.0)
+    return (f"{round(live.fps, 1)} of {cfg.camera.process_fps} frames/s analysed"
+            + (f" · camera sends {round(source, 1)}/s" if source else ""))
+
+
 def status(app: "App") -> dict:
     """Everything on the Status page."""
     from .. import __version__
@@ -131,7 +141,8 @@ def status(app: "App") -> dict:
         "camera": {"state": live.camera_state, "ok": live.camera_state == "ok", "problem": live.problem,
                    "fps": round(live.fps, 1), "target_fps": cfg.camera.process_fps,
                    "source_fps": round(getattr(live, "source_fps", 0.0), 1), "decode_threads": cfg.camera.decode_threads,
-                   "in_window": app.service.in_window(app.service.now()), "configured": bool(cfg.camera.url)},
+                   "in_window": app.service.in_window(app.service.now()), "configured": bool(cfg.camera.urls()),
+                   "cameras": list(live.cameras), "detail": camera_detail(cfg, live)},
         "uptime": camera_uptime(app),
         "usage": process_usage(),
         "backup": {"folder": cfg.backup.folder, "at": backup.get("at"), "ok": backup.get("ok"),

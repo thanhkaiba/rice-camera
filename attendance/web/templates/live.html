@@ -8,10 +8,15 @@
       <span class="chip" title="Camera hours on work days">{{ icon('clock') }}{{ cfg.schedule.window_start }}–{{ cfg.schedule.window_end }}</span>
       <span class="chip" title="Use this page to position the camera">{{ icon('area') }}position &amp; detection area</span>
     </div>
+    {% if cameras|length > 1 %}
+    <div class="btn-group" id="cams" style="margin-top:10px">
+      {% for url in cameras %}<a class="btn" href="?cam={{ loop.index0 }}" data-cam="{{ loop.index0 }}">{{ icon('camera') }}Camera {{ loop.index }}<span class="small muted" data-cam-state></span></a>{% endfor %}
+    </div>
+    {% endif %}
   </div>
   <form method="post" action="{{ url_for('preview') }}" class="actions">
     <button formaction="{{ url_for('capture') }}" title="Freeze the picture and add its faces as reference photos">{{ icon('camera') }}Capture faces</button>
-    <a class="btn" href="{{ url_for('live_full_jpg') }}" target="_blank" rel="noopener" title="The camera picture at full resolution, to check focus and sharpness">{{ icon('image') }}Full size</a>
+    <a class="btn" href="{{ url_for('live_full_jpg') }}" id="full-size" target="_blank" rel="noopener" title="The camera picture at full resolution, to check focus and sharpness">{{ icon('image') }}Full size</a>
     <button name="action" value="start" class="primary" id="start" hidden title="Turn the camera on for 15 minutes outside camera hours">{{ icon('play') }}Preview 15 min</button>
     <button name="action" value="stop" id="stop" hidden>{{ icon('stop') }}Stop</button>
   </form>
@@ -33,7 +38,7 @@
       </div>
       <div id="no-frame" class="no-frame"><span class="ico">{{ icon('live') }}</span><strong>No picture</strong><span class="small" id="no-frame-why"></span></div>
     </div>
-    <div class="card" style="margin-top:16px">
+    <div class="card" style="margin-top:16px" id="area-card">
       <form method="post" action="{{ url_for('set_area') }}" class="row between" style="align-items:flex-start">
         <div style="flex:1 1 320px">
           <strong class="row"><span style="color:var(--brand)">{{ icon('area') }}</span>Detection area</strong>
@@ -55,7 +60,8 @@
       <div><span class="k" title="Frames analysed per second">FPS</span><span class="v tnum" id="fps">–</span></div>
       <div><span class="k">Faces in view</span><span class="v" id="faces" style="font-weight:500">–</span></div>
       <div id="people-box" hidden><span class="k">People followed</span><span class="v" id="people">–</span></div>
-      <div><span class="k">Last recognised</span><span class="v" id="last" style="font-weight:500">–</span></div>
+      <div><span class="k" title="The last face that matched someone in a frame, during camera hours or not. Not an arrival by itself: that takes several agreeing frames">Last match</span><span class="v" id="last-match" style="font-weight:500">–</span></div>
+      <div><span class="k" title="The last arrival the camera recorded (camera hours only)">Last check-in</span><span class="v" id="last" style="font-weight:500">–</span></div>
       <div><span class="k" title="Learned from how this camera sees faces">Camera angle</span><span class="v small" id="pose" style="font-weight:500">–</span></div>
     </div>
     {% if collect.enabled %}
@@ -107,9 +113,18 @@
 {% block scripts %}
 <script>
   const frame = document.getElementById('frame');
+  // ?cam=N shows the Nth camera (0 = the first); the detection area belongs to the first camera.
+  const cam = Math.max(0, parseInt(new URLSearchParams(location.search).get('cam') || '0', 10) || 0);
+  document.querySelectorAll('#cams a').forEach(a => a.classList.toggle('primary', +a.dataset.cam === cam));
+  document.getElementById('area-card').hidden = cam > 0;
+  document.getElementById('full-size').href = '{{ url_for("live_full_jpg") }}?cam=' + cam;
   async function refresh() {
     try {
-      const s = await (await fetch('{{ url_for("live_json") }}', {cache: 'no-store'})).json();
+      const s = await (await fetch('{{ url_for("live_json") }}?cam=' + cam, {cache: 'no-store'})).json();
+      (s.cameras || []).forEach(c => {
+        const el = document.querySelector('#cams a[data-cam="' + c.index + '"] [data-cam-state]');
+        if (el) el.textContent = ' · ' + c.state + (c.state === 'ok' ? ' · ' + c.fps + ' fps' : '');
+      });
       const cam = document.getElementById('camera');
       cam.textContent = s.camera;
       cam.className = 'badge ' + (s.camera === 'ok' ? 'ok' : s.camera.startsWith('problem') || s.camera.startsWith('no picture') ? 'bad' : 'info');
@@ -118,6 +133,7 @@
       document.getElementById('people-box').hidden = s.people === null;
       document.getElementById('people').textContent = s.people === null ? '–' : s.people;
       document.getElementById('last').textContent = s.last_identified || '–';
+      document.getElementById('last-match').textContent = s.last_match || '–';
       document.getElementById('pose').textContent = s.pose || '–';
       const p = document.getElementById('problem'); p.hidden = !s.problem; p.textContent = s.problem || '';
       document.getElementById('start').hidden = s.in_window || s.previewing;
@@ -138,7 +154,7 @@
       document.getElementById('enrol-note').textContent = en.note || '';
       showGuide(en);
       const fresh = s.frame_age !== null && s.frame_age < 10;
-      if (fresh && !paused) frame.src = '{{ url_for("live_jpg") }}?t=' + Date.now();
+      if (fresh && !paused) frame.src = '{{ url_for("live_jpg") }}?cam=' + cam + '&t=' + Date.now();
       frame.style.display = fresh ? 'block' : 'none';
       document.getElementById('no-frame').hidden = fresh;
       document.getElementById('no-frame-why').textContent =

@@ -151,7 +151,12 @@
       {{ field('camera', 'decode_threads', 'Decoder threads', 'CPU cores reading the video · 0 = all', type='number', step='1') }}
     </div>
     <div class="form-row" style="margin-top:14px">
-      {{ field('camera', 'area', 'Detection area', 'Draw it on the Camera page · empty = whole picture', cls='grow') }}
+      <label class="field grow">More cameras
+        <textarea name="camera.more" rows="2" placeholder="rtsp://… one address per line" spellcheck="false">{{ s.camera.more }}</textarea>
+        <span class="hint">A second door, for example. Same settings as above; the detection area applies to the first camera only. Each camera costs as much CPU as the first.</span>{{ src('camera.more') }}</label>
+    </div>
+    <div class="form-row" style="margin-top:14px">
+      {{ field('camera', 'area', 'Detection area', 'Draw it on the Camera page · empty = whole picture · first camera only', cls='grow') }}
     </div>
     <div class="stack">{{ check('camera', 'enhance_low_light', 'Brighten dark frames') }}</div>
     <hr>

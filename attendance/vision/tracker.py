@@ -86,6 +86,7 @@ class Decision:
     quality: float | None = None  # of the face in `crop` (the track's best), as the Image score / 100
     track: int | None = None  # the face track this decision ends
     follows: int | None = None  # for an unknown: the track of the unknown decision it continues, if any
+    camera: int | None = None  # which camera, when there are several (set by the camera loop)
 
 
 @dataclass

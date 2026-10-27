@@ -22,13 +22,15 @@ def _shift(bbox, offset):
 
 
 class FrameProcessor:
-    def __init__(self, app, mode: str | None = None, *, realtime: bool = True):
+    def __init__(self, app, mode: str | None = None, *, realtime: bool = True, use_area: bool = True):
         """`mode` overrides cfg.tracking.mode (the benchmark runs both); otherwise the setting is
         read on every frame, so switching it on the Settings page takes effect right away.
         Offline videos use realtime=False: expiry follows video timestamps regardless of CPU speed.
+        `use_area`: analyse only camera.area of each frame (the first camera); False = the whole frame.
         """
         self.app = app
         self.cfg = app.cfg
+        self.use_area = use_area
         self.face_tracker = FaceTracker(self.cfg.recognition)
         self._mode = mode
         self._detector: PersonDetector | None = None
@@ -64,7 +66,7 @@ class FrameProcessor:
 
         Only camera.area of the frame is analysed when it is set; the boxes returned are in
         whole-frame pixels."""
-        area = self.cfg.camera.area_box(frame.shape)
+        area = self.cfg.camera.area_box(frame.shape) if self.use_area else None
         if area is not None:
             x0, y0, x1, y1 = area
             decisions, matched, people = self._process(frame[y0:y1, x0:x1], ts, record, (frame, (x0, y0)), raw)

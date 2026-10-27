@@ -73,8 +73,9 @@ def focus(frame, regions) -> float:
 
 
 class Camera:
-    def __init__(self, url: str, decode_threads: int = 0):
+    def __init__(self, url: str, decode_threads: int = 0, name: str = "camera"):
         self.source = url
+        self.name = name  # for the log, when there are several cameras
         self.url = int(url) if url.isdigit() else url
         self.decode_threads = decode_threads
         self._arrivals: deque = deque()  # when recent frames came in, for the camera's frame rate
@@ -148,11 +149,11 @@ class Camera:
         while not self._stop.is_set():
             cap = open_capture(self.url, self.decode_threads)
             if not cap.isOpened():
-                log.warning("Cannot open camera, retrying in %.0fs", backoff)
+                log.warning("Cannot open the %s, retrying in %.0fs", self.name, backoff)
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, 30.0)
                 continue
-            log.info("Camera connected")
+            log.info("%s connected", self.name.capitalize())
             backoff = 1.0
             # A recorded video file is played at its real speed, so it can stand in for the camera when testing.
             is_file = isinstance(self.url, str) and "://" not in self.url
@@ -162,7 +163,7 @@ class Camera:
                     time.sleep(frame_gap)
                 ok, frame = cap.read()
                 if not ok:
-                    log.warning("Camera stream interrupted, reconnecting")
+                    log.warning("%s stream interrupted, reconnecting", self.name.capitalize())
                     break
                 now = time.time()
                 with self._lock:

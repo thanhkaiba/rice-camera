@@ -33,7 +33,7 @@ def register(app: Flask, core: "App") -> None:
     def live_page():
         return render_template("live.html", cfg=cfg, in_window=service.in_window(service.now()),
                                employees=service.shown_names(), enrol=core.enrolment.status(),
-                               collect=core.collector.status())
+                               collect=core.collector.status(), cameras=cfg.camera.urls())
 
     @app.post("/live/enrol")
     def enrol_start():
@@ -62,9 +62,16 @@ def register(app: Flask, core: "App") -> None:
         store.log(service.now(), current_user(cfg), "enrol at the door", name)
         return redirect(url_for("live_page"))
 
+    def which_camera() -> int:
+        """?cam=N on the live requests: which camera to show (0 = the first)."""
+        try:
+            return max(0, int(request.args.get("cam", 0)))
+        except ValueError:
+            return 0
+
     @app.get("/live.jpg")
     def live_jpg():
-        jpeg, _ = live.frame()
+        jpeg, _ = live.frame(which_camera())
         if jpeg is None:
             abort(404)
         return Response(jpeg, mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
@@ -72,7 +79,7 @@ def register(app: Flask, core: "App") -> None:
     @app.get("/live/full.jpg")
     def live_full_jpg():
         """The camera picture at full resolution, unlabelled: to judge focus and sharpness."""
-        live.frame()  # counts as a viewer
+        live.frame(which_camera())  # counts as a viewer
         raw = live.raw_frame()
         if raw is None:
             abort(404)
@@ -80,10 +87,11 @@ def register(app: Flask, core: "App") -> None:
 
     @app.get("/live.json")
     def live_json():
-        _, frame_time = live.frame()  # counts as a viewer, so the camera loop keeps drawing frames
+        _, frame_time = live.frame(which_camera())  # counts as a viewer, so the camera loop keeps drawing frames
         return jsonify(camera=live.camera_state, problem=live.problem, fps=round(live.fps, 1), faces=live.faces,
                        people=live.people if cfg.tracking.mode == "person" else None, pose=core.pose.describe(),
-                       last_identified=live.last_identified, previewing=live.previewing,
+                       last_identified=live.last_identified, last_match=live.last_match, previewing=live.previewing,
+                       cameras=live.cameras, cam=live.viewed,
                        in_window=service.in_window(service.now()), enrol=core.enrolment.status(),
                        collect=core.collector.status(),
                        frame_age=round(time.time() - frame_time, 1) if frame_time else None)

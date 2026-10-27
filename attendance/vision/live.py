@@ -53,11 +53,12 @@ class LiveStatus:
     source_fps: float = 0.0  # frames a second the camera delivers and the computer decodes
     faces: list[str] = field(default_factory=list)
     people: int = 0  # people followed in the last frame (person tracking)
-    last_identified: str = ""
+    last_identified: str = ""  # the last arrival recorded (a track that reached a decision)
+    last_match: str = ""  # the last face that matched someone in a single frame, counted or not
+    cameras: list[dict] = field(default_factory=list)  # one {index, label, state, fps, source_fps, faces} per camera
+    viewed: int = 0  # the camera the live page shows; only its picture is drawn and encoded
     preview_until: float = 0.0
-    _jpeg: bytes | None = None
-    _jpeg_time: float = 0.0
-    _raw: np.ndarray | None = None  # the analysed picture without labels, for capturing reference photos
+    _frames: dict[int, tuple[bytes, float, np.ndarray | None]] = field(default_factory=dict)  # per camera
     _viewer_seen: float = 0.0
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -75,19 +76,24 @@ class LiveStatus:
         """Only spend CPU on drawing and encoding frames while someone has the live page open."""
         return time.time() - self._viewer_seen < VIEWER_TIMEOUT_S
 
-    def set_frame(self, jpeg: bytes, raw: np.ndarray | None = None) -> None:
+    def set_frame(self, jpeg: bytes, raw: np.ndarray | None = None, camera: int = 0) -> None:
         with self._lock:
-            self._jpeg, self._jpeg_time = jpeg, time.time()
-            self._raw = raw  # each camera picture is a new array, so no copy is needed here
+            self._frames[camera] = (jpeg, time.time(), raw)  # each camera picture is a new array: no copy needed
 
-    def raw_frame(self) -> np.ndarray | None:
-        """The newest unlabelled picture while it is fresh (someone has the live page open)."""
+    def raw_frame(self, camera: int | None = None) -> np.ndarray | None:
+        """The newest unlabelled picture of a camera (the viewed one by default) while it is fresh
+        (someone has the live page open)."""
         with self._lock:
-            if self._raw is None or time.time() - self._jpeg_time > VIEWER_TIMEOUT_S:
+            jpeg, at, raw = self._frames.get(self.viewed if camera is None else camera, (None, 0.0, None))
+            if raw is None or time.time() - at > VIEWER_TIMEOUT_S:
                 return None
-            return self._raw.copy()
+            return raw.copy()
 
-    def frame(self) -> tuple[bytes | None, float]:
+    def frame(self, camera: int | None = None) -> tuple[bytes | None, float]:
+        """The labelled picture of a camera; asking for one makes it the viewed camera."""
         self._viewer_seen = time.time()
+        if camera is not None:
+            self.viewed = max(0, camera)
         with self._lock:
-            return self._jpeg, self._jpeg_time
+            jpeg, at, _ = self._frames.get(self.viewed if camera is None else camera, (None, 0.0, None))
+            return jpeg, at
