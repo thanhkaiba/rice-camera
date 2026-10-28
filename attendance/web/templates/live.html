@@ -114,13 +114,13 @@
 <script>
   const frame = document.getElementById('frame');
   // ?cam=N shows the Nth camera (0 = the first); the detection area belongs to the first camera.
-  const cam = Math.max(0, parseInt(new URLSearchParams(location.search).get('cam') || '0', 10) || 0);
-  document.querySelectorAll('#cams a').forEach(a => a.classList.toggle('primary', +a.dataset.cam === cam));
-  document.getElementById('area-card').hidden = cam > 0;
-  document.getElementById('full-size').href = '{{ url_for("live_full_jpg") }}?cam=' + cam;
+  const camIndex = Math.max(0, parseInt(new URLSearchParams(location.search).get('cam') || '0', 10) || 0);
+  document.querySelectorAll('#cams a').forEach(a => a.classList.toggle('primary', +a.dataset.cam === camIndex));
+  document.getElementById('area-card').hidden = camIndex > 0;
+  document.getElementById('full-size').href = '{{ url_for("live_full_jpg") }}?cam=' + camIndex;
   async function refresh() {
     try {
-      const s = await (await fetch('{{ url_for("live_json") }}?cam=' + cam, {cache: 'no-store'})).json();
+      const s = await (await fetch('{{ url_for("live_json") }}?cam=' + camIndex, {cache: 'no-store'})).json();
       (s.cameras || []).forEach(c => {
         const el = document.querySelector('#cams a[data-cam="' + c.index + '"] [data-cam-state]');
         if (el) el.textContent = ' · ' + c.state + (c.state === 'ok' ? ' · ' + c.fps + ' fps' : '');
@@ -154,7 +154,7 @@
       document.getElementById('enrol-note').textContent = en.note || '';
       showGuide(en);
       const fresh = s.frame_age !== null && s.frame_age < 10;
-      if (fresh && !paused) frame.src = '{{ url_for("live_jpg") }}?cam=' + cam + '&t=' + Date.now();
+      if (fresh && !paused) frame.src = '{{ url_for("live_jpg") }}?cam=' + camIndex + '&t=' + Date.now();
       frame.style.display = fresh ? 'block' : 'none';
       document.getElementById('no-frame').hidden = fresh;
       document.getElementById('no-frame-why').textContent =

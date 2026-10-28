@@ -69,3 +69,14 @@ def test_tracks_of_different_cameras_never_share_a_card(env):
     c = service.on_unknown(at(8, 30, 6), "c.jpg", v, None, None, track=(0, 2), follows=(0, 1))
     assert store.unknown(b).group_id == b
     assert store.unknown(c).group_id == store.unknown(a).group_id
+
+
+def test_live_page_script_keeps_the_camera_index_apart_from_the_camera_badge(core):
+    """1.1.33 named the camera index `cam` and the refresh function already declared `const cam`
+    for the camera badge: every poll raised before the fetch and the page said "cannot reach the program"."""
+    app, clock, sent = core
+    page = client(app).get("/live").data.decode()
+    script = page[page.index("const camIndex"):]
+    assert "?cam=' + camIndex, {cache" in script and "?cam=' + camIndex + '&t='" in script
+    for wrong in ("'?cam=' + cam,", "'?cam=' + cam +", "'?cam=' + cam;"):
+        assert wrong not in script
