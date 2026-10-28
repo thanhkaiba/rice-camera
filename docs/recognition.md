@@ -142,7 +142,7 @@ Lessons built into the settings:
 2. **Quality gate:** small, blurred, turned-away or weakly detected faces **do not vote**, unless a big, clearly detected face matches one person far above the threshold. Turn and tilt are measured from the camera's usual view of faces, learned automatically.
 3. **Several references per person:** a person's score is the mean of their two closest reference photos.
 4. **Clear margin:** the best match must beat the runner-up by a margin.
-5. **Several frames must agree:** at least twice as many votes as everyone else combined. A track that ends one vote short is still accepted when all its votes agree and the match is very strong (fast walkers).
+5. **Several frames must agree:** at least twice as many votes as everyone else combined. A track that ends one vote short is still accepted when all its votes agree and its best match is at least 0.05 above the accept score (fast walkers: a walk past the door at a few analysed frames a second often gives only two good frames). The log line of every Review card ends with the frames the walk gave and the votes its closest person got, e.g. `7 frames, 2 votes`.
 6. **No guessing:** everything else goes to review, and each confirmation teaches the system that face; so does a sighting moved to the right person on the Today page.
 7. **Look-alike check:** employees whose photos match each other are flagged before they cause mix-ups.
 8. **Varied references:** reference photos are enrolled together with their mirror image, and a confirmed face that is almost identical (≥ 97%) to one already kept is not stored again.

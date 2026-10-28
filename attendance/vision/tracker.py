@@ -28,8 +28,10 @@ SPLIT_WINDOW = dt.timedelta(seconds=5)
 CONTINUE_WINDOW = SPLIT_WINDOW
 REPORTED_KEPT = 10  # recently reported unknown tracks remembered for that
 # A track that ends one vote short is still accepted when its votes are unanimous and this much
-# above accept_score: someone walking fast past a slow PC may only give two good frames.
-STRONG_BONUS = 0.1
+# above accept_score: someone walking fast past a slow PC may only give two good frames. Over a
+# week of doorway cards, tracks whose best frame scored 0.50-0.55 named the right person 25 times
+# and the wrong one 3 times; at 0.45-0.50 it was 51 to 17, too often wrong for two votes.
+STRONG_BONUS = 0.05
 # A face that fails the pose or sharpness check still votes when it matches one person this far
 # above accept_score, with twice the usual margin. The pose is only estimated from 5 landmarks,
 # and a camera mounted above head height makes every face look tilted down; tested on doorway
@@ -87,6 +89,8 @@ class Decision:
     track: int | None = None  # the face track this decision ends
     follows: int | None = None  # for an unknown: the track of the unknown decision it continues, if any
     camera: int | None = None  # which camera, when there are several (set by the camera loop)
+    frames: int = 0  # frames the track was seen in
+    votes: int = 0  # of those, votes for `employee_id` (the decision, or the unknown's closest person)
 
 
 @dataclass
@@ -196,7 +200,7 @@ class FaceTracker:
         t.decided = person
         self._recent[person] = ts
         return Decision("identified", t.first_ts, person, t.best_score[person], t.best.crop, t.best.embedding,
-                        t.best.body, t.best.scene, t.best.quality)
+                        t.best.body, t.best.scene, t.best.quality, frames=t.frames, votes=t.votes[person])
 
     def _strong_exit(self, t: _Track) -> str | None:
         if len(t.votes) != 1:
@@ -228,7 +232,8 @@ class FaceTracker:
                 person, score = self._guess(t)
                 decisions.append(Decision("unknown", t.first_ts, person, score, t.best.crop, t.best.embedding,
                                           t.best.body, t.best.scene, t.best.quality, track=t.id,
-                                          follows=self._continues(t)))
+                                          follows=self._continues(t), frames=t.frames,
+                                          votes=t.votes.get(person, 0)))
                 self._reported = (self._reported + [t])[-REPORTED_KEPT:]
         self._ended = waiting
         return decisions

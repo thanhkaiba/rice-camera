@@ -53,10 +53,31 @@ def test_identifies_after_enough_agreeing_frames_using_first_seen_time():
 
 def test_two_ordinary_frames_are_not_enough():
     tr = tracker()
-    weak = lambda i: [Observation((100, 100, 180, 180), noisy(A), [("A", 0.50), ("B", 0.1)], True, 0.5)]
+    weak = lambda i: [Observation((100, 100, 180, 180), noisy(A), [("A", 0.48), ("B", 0.1)], True, 0.5)]
     out = frames(tr, weak, 2)  # votes for A, but not far above accept_score
     out += tr.update([], T0 + dt.timedelta(seconds=20))
     assert [d.kind for d in out] == []  # too few frames to report as unknown either
+
+
+def test_two_unanimous_votes_a_little_above_the_accept_score_identify_when_the_track_ends():
+    tr = tracker()
+    fair = lambda i: [Observation((100, 100, 180, 180), A, [("A", 0.51), ("B", 0.2)], True, 0.5)]
+    assert frames(tr, fair, 2) == []
+    out = tr.update([], T0 + dt.timedelta(seconds=20))
+    assert [(d.kind, d.employee_id, d.frames, d.votes) for d in out] == [("identified", "A", 2, 2)]
+    tr = tracker()
+    split = lambda i: [Observation((100, 100, 180, 180), A, [("A", 0.51), ("B", 0.2)] if i else [("B", 0.51), ("A", 0.2)], True, 0.5)]
+    frames(tr, split, 2)
+    out = tr.update([], T0 + dt.timedelta(seconds=20))
+    assert [d.kind for d in out] == []  # not unanimous: no decision, and too short to report
+
+
+def test_unknown_decisions_say_how_many_frames_and_votes_the_walk_gave():
+    tr = tracker()
+    one_vote = lambda i: [Observation((100, 100, 180, 180), A, [("A", 0.5 if i == 0 else 0.3), ("B", 0.1)], True, 0.5)]
+    frames(tr, one_vote, 4)
+    out = tr.update([], T0 + dt.timedelta(seconds=20))
+    assert [(d.kind, d.employee_id, d.frames, d.votes) for d in out] == [("unknown", "A", 4, 1)]
 
 
 def test_two_strong_unanimous_frames_identify_when_the_track_ends():
@@ -138,9 +159,9 @@ def test_different_people_at_the_same_spot_stay_separate_with_slow_frames():
     tr = tracker()
     for i, vector in enumerate([A, A, B]):
         person = 'A' if vector is A else 'B'
-        face = Observation((100, 100, 180, 180), vector, [(person, .5)], True, .8)
+        face = Observation((100, 100, 180, 180), vector, [(person, .48)], True, .8)
         assert tr.update([face], T0 + dt.timedelta(seconds=i * 2.3), frame_interval_s=2.5) == []
-    assert tr.flush() == []  # two A votes and one B vote cannot form a three-vote decision
+    assert tr.flush() == []  # two A votes and one B vote cannot form a three-vote decision (nor a strong two-vote one)
 
 
 def test_next_person_at_same_spot_is_not_merged_into_previous_track():

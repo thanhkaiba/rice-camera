@@ -298,6 +298,41 @@ def test_labels_are_drawn_without_accents():
     assert ascii_label("日本") == "?"
 
 
+def test_own_pictures_are_uploaded_for_the_rotation_and_for_an_occasion(core):
+    from test_web import client, png
+
+    import numpy as np
+
+    from attendance.core import latephoto, occasions
+
+    app, _, _ = core
+    c = client(app)
+    pic = lambda shade: (io.BytesIO(png(np.full((90, 160, 3), shade, np.uint8))), f"p{shade}.png")
+    resp = c.post("/settings/late-background", data={"for": "rotation", "background": [pic(10), pic(20)]},
+                  content_type="multipart/form-data", follow_redirects=True)
+    assert "2 picture(s) saved for the days in turn" in resp.get_data(as_text=True)
+    resp = c.post("/settings/late-background", data={"for": "tet", "background": [pic(30)]},
+                  content_type="multipart/form-data", follow_redirects=True)
+    assert "1 picture(s) saved for Tết" in resp.get_data(as_text=True)
+    assert latephoto.own_pictures(app.data_dir) == [("", "own-1.jpg"), ("", "own-2.jpg"), ("tet", "tet/tet-1.jpg")]
+    # An ordinary day takes one of the rotation pictures, Tết its own.
+    assert latephoto.day_background(app.data_dir, DAY).name.startswith("own-")
+    tet = occasions.BY_KEY["tet"].on(DAY.year)
+    assert latephoto.day_background(app.data_dir, tet).name == "tet-1.jpg"
+    page = c.get("/settings").get_data(as_text=True)
+    assert "Around Tết" in page and 'value="tet/tet-1.jpg"' in page and "Empty = old paintings" not in page
+    assert c.get("/settings/late-backgrounds/tet/tet-1.jpg").status_code == 200
+    assert c.get("/settings/late-backgrounds/../2026-10-22.jpg").status_code == 404
+    resp = c.post("/settings/late-background", data={"remove": "own-1.jpg"}, follow_redirects=True)
+    assert "Picture removed" in resp.get_data(as_text=True)
+    assert [rel for _, rel in latephoto.own_pictures(app.data_dir)] == ["own-2.jpg", "tet/tet-1.jpg"]
+    resp = c.post("/settings/late-background", data={"remove": "../../attendance.db"}, follow_redirects=True)
+    assert "not there any more" in resp.get_data(as_text=True)
+    resp = c.post("/settings/late-background", data={"for": "nonsense", "background": [pic(40)]},
+                  content_type="multipart/form-data", follow_redirects=True)
+    assert "Choose what the pictures are for" in resp.get_data(as_text=True)
+
+
 def test_background_picture_is_uploaded_and_removed_on_the_settings_page(core):
     from test_web import client, png
 
@@ -321,7 +356,7 @@ def test_background_picture_is_uploaded_and_removed_on_the_settings_page(core):
     assert c.get("/settings/late-background.jpg").mimetype == "image/jpeg"
     assert "Your picture is used" in c.get("/settings").get_data(as_text=True)
     resp = c.post("/settings/late-background", data={"remove": "1"}, follow_redirects=True)
-    assert "drawn background is used again" in resp.get_data(as_text=True)
+    assert "Picture removed" in resp.get_data(as_text=True)
     assert not latephoto.background_path(app.data_dir).exists()
 
 

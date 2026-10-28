@@ -332,7 +332,8 @@ def run(cfg: Config) -> None:
                 # Track ids are per camera: the service keys them by (camera, track).
                 service.on_unknown(ts, image, d.embedding, d.employee_id, d.score, digest, d.quality,
                                    track=None if d.track is None else (slot.index, d.track),
-                                   follows=None if d.follows is None else (slot.index, d.follows))
+                                   follows=None if d.follows is None else (slot.index, d.follows),
+                                   frames=d.frames, votes=d.votes)
 
     def watch(slot: _CameraSlot, fps: float, in_window: bool, enrolling: bool, collecting: bool) -> bool:
         """Open the camera if needed and analyse its newest frame when one is due. True if a frame

@@ -58,6 +58,45 @@ def background_path(data_dir: Path) -> Path:
     return data_dir / FOLDER / BACKGROUND_FILE
 
 
+ROTATION = "own"  # late/backgrounds/own-<n>.jpg: the admin's pictures shown in turn (see day_background)
+
+
+def own_pictures(data_dir: Path) -> list[tuple[str, str]]:
+    """The admin's own pictures under late/backgrounds, as (group key, path relative to that folder):
+    group "" for the pictures shown in turn, else the occasion key (its folder)."""
+    root = data_dir / FOLDER / BACKGROUNDS
+    if not root.is_dir():
+        return []
+    out = []
+    for p in sorted(root.rglob("*")):
+        if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png"):
+            rel = p.relative_to(root)
+            out.append((rel.parts[0] if len(rel.parts) > 1 else "", rel.as_posix()))
+    return out
+
+
+def own_picture_path(data_dir: Path, rel: str) -> Path:
+    """The file for a path from own_pictures; ValueError when it points outside the folder."""
+    root = (data_dir / FOLDER / BACKGROUNDS).resolve()
+    path = (root / rel).resolve()
+    if path == root or root not in path.parents or path.suffix.lower() not in (".jpg", ".jpeg", ".png"):
+        raise ValueError("not one of the background pictures")
+    return path
+
+
+def add_own_picture(data_dir: Path, jpeg: bytes, occasion: str = "") -> str:
+    """Keep a picture for the day's rotation (no occasion) or for an occasion (its key), named so
+    day_background finds it: own-<n>.jpg or <key>/<key>-<n>.jpg. Returns the path as own_pictures gives it."""
+    folder = data_dir / FOLDER / BACKGROUNDS / occasion if occasion else data_dir / FOLDER / BACKGROUNDS
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = occasion or ROTATION
+    n = 1
+    while (folder / f"{stem}-{n}.jpg").exists():
+        n += 1
+    (folder / f"{stem}-{n}.jpg").write_bytes(jpeg)
+    return (f"{occasion}/" if occasion else "") + f"{stem}-{n}.jpg"
+
+
 def token(secret: str, day: dt.date) -> str:
     """The unguessable part of the picture's address: Google Chat fetches the picture without the
     admin password, while nobody can browse the pictures of other days."""

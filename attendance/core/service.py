@@ -348,11 +348,16 @@ class AttendanceService:
     def on_unknown(self, ts: dt.datetime, image: str | None, vector: np.ndarray | None,
                    guess_id: str | None, guess_score: float | None, sha256: str | None = None,
                    quality: float | None = None, *, track: int | None = None,
-                   follows: int | None = None) -> int | None:
+                   follows: int | None = None, frames: int | None = None,
+                   votes: int | None = None) -> int | None:
         """A face track ended unidentified: a Review card, or a photo added to the card of the track it
         `follows` (the tracker's word that it is the same walk, see tracker.Decision.follows) while that
-        card is still pending. `track` is the face track's id, so a later track can continue it."""
+        card is still pending. `track` is the face track's id, so a later track can continue it.
+        `frames` and `votes` (frames seen, votes for the closest person) are logged, to tell a walk
+        that gave no usable frame from one that fell one vote short."""
         ts = self._local(ts)
+        seen = "" if frames is None else f"; {frames} frames, {votes or 0} votes"
+
         again = self._seen_again(vector, guess_id, guess_score, ts.date())
         if again:
             log.info("Unclear face at %s resembles %s (%.2f, next not checked in: %s), who is already checked in; "
@@ -365,11 +370,11 @@ class AttendanceService:
             log.info("Face at %s belongs to a group ignored today; not reported", ts.strftime("%H:%M:%S"))
         elif continued is not None:
             group_id = continued
-            log.info("Unknown face at %s (closest %s %.2f) continues card %s", ts.strftime("%H:%M:%S"), guess_id,
-                     guess_score or 0, group_id)
+            log.info("Unknown face at %s (closest %s %.2f%s) continues card %s", ts.strftime("%H:%M:%S"), guess_id,
+                     guess_score or 0, seen, group_id)
         else:
-            log.info("Unknown face at %s (closest %s %.2f, group %s)", ts.strftime("%H:%M:%S"), guess_id,
-                     guess_score or 0, group_id or "new")
+            log.info("Unknown face at %s (closest %s %.2f, group %s%s)", ts.strftime("%H:%M:%S"), guess_id,
+                     guess_score or 0, group_id or "new", seen)
         row = self.store.add_unknown(ts.date(), ts, image, self.model_id, vector, guess_id, guess_score,
                                      group_id, ignored=ignored, sha256=sha256, quality=quality)
         if track is not None and not ignored:

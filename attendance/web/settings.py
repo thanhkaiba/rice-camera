@@ -132,6 +132,8 @@ def register(app: Flask, core: "App") -> None:
         return render_template("settings.html", s=settings.current(cfg), cfg=cfg, leave=leave_status(core),
                                overrides=settings.overrides(cfg, store),
                                late_background=latephoto.background_path(core.data_dir).exists(),
+                               late_backgrounds=latephoto.own_pictures(core.data_dir), occasion_list=occasions.OCCASIONS,
+                               occasion_names={o.key: o.name for o in occasions.OCCASIONS},
                                google=core.chat.api.status(),
                                occasion=occasions.occasion_on(service.now().date()),
                                upcoming=occasions.upcoming(service.now().date()),
@@ -188,23 +190,50 @@ def register(app: Flask, core: "App") -> None:
 
     @app.post("/settings/late-background")
     def late_background():
-        """The background of the late message's picture: a picture the admin chose, or none (drawn)."""
-        path = latephoto.background_path(core.data_dir)
-        if request.form.get("remove"):
-            path.unlink(missing_ok=True)
-            store.log(service.now(), current_user(cfg), "late message background", "removed")
-            return done("The drawn background is used again.", "settings_page")
-        upload = request.files.get("background")
-        if upload is None or not upload.filename:
+        """The background of the late message's picture: the admin's pictures, used every day (one
+        picture), in turn (one a day) or around an occasion; or none (the bundled paintings, else drawn)."""
+        single = latephoto.background_path(core.data_dir)
+        remove = request.form.get("remove", "")
+        if remove:
+            if remove in ("single", "1"):
+                single.unlink(missing_ok=True)
+            else:
+                try:
+                    latephoto.own_picture_path(core.data_dir, remove).unlink()
+                except (ValueError, OSError):
+                    return failed("That picture is not there any more.", "settings_page")
+            store.log(service.now(), current_user(cfg), "late message background", f"removed {remove}")
+            return done("Picture removed; the next late picture is made without it.", "settings_page")
+        uploads = [f for f in request.files.getlist("background") if f.filename]
+        if not uploads:
             return failed("Choose a picture.", "settings_page")
+        use = request.form.get("for", "single")
+        if use not in ("single", "rotation") and use not in occasions.BY_KEY:
+            return failed("Choose what the pictures are for.", "settings_page")
         try:
-            image = decode_image(upload.read())
+            images = [encode_jpeg(decode_image(f.read())) for f in uploads]
         except ValueError as exc:
             return failed(f"Not saved: {exc}", "settings_page")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(encode_jpeg(image))
-        store.log(service.now(), current_user(cfg), "late message background", upload.filename)
-        return done("Background saved; the next picture uses it.", "settings_page")
+        if use == "single":
+            single.parent.mkdir(parents=True, exist_ok=True)
+            single.write_bytes(images[0])
+            kept = [single.name]
+        else:
+            kept = [latephoto.add_own_picture(core.data_dir, jpeg, "" if use == "rotation" else use) for jpeg in images]
+        store.log(service.now(), current_user(cfg), "late message background", f"{use}: " + ", ".join(kept))
+        what = ("Background saved; the next picture uses it." if use == "single" else
+                f"{len(kept)} picture(s) saved for " + ("the days in turn." if use == "rotation" else f"{occasions.BY_KEY[use].name}."))
+        return done(what, "settings_page")
+
+    @app.get("/settings/late-backgrounds/<path:rel>")
+    def late_own_background(rel: str):
+        try:
+            path = latephoto.own_picture_path(core.data_dir, rel)
+        except ValueError:
+            abort(404)
+        if not path.exists():
+            abort(404)
+        return send_from_directory(path.parent, path.name, max_age=0)
 
     @app.get("/settings/late-background.jpg")
     def late_background_jpg():

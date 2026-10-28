@@ -14,6 +14,18 @@ def run_until(service, clock, end, step=dt.timedelta(seconds=30), camera_ok=True
         service.tick(camera_ok)
 
 
+def test_unknown_face_log_says_how_many_frames_and_votes_the_walk_gave(env, caplog):
+    import logging
+
+    service, _, clock, sent = env
+    caplog.set_level(logging.INFO, logger="attendance.core.service")
+    service.on_unknown(at(9, 12), "x.jpg", person_vector(21), "B", 0.41, frames=7, votes=2)
+    service.on_unknown(at(9, 13), "y.jpg", person_vector(22), None, None)
+    lines = [r.getMessage() for r in caplog.records if "Unknown face" in r.getMessage()]
+    assert "closest B 0.41, group new; 7 frames, 2 votes)" in lines[0]
+    assert "frames" not in lines[1]
+
+
 def test_on_time_seen_again_after_deadline_is_not_late(env):
     service, _, clock, sent = env
     run_until(service, clock, at(9, 20))
