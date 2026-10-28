@@ -279,6 +279,15 @@ class _CameraSlot:
                 "fps": round(self.fps, 1), "source_fps": round(self.source_fps, 1), "faces": self.faces}
 
 
+def frame_due(frame_time: float, last_processed: float, fps: float, source_fps: float = 0.0) -> bool:
+    """Whether the newest frame is the one to analyse for `fps` analyses a second. Frames arrive at the
+    camera's own pace, so the frame nearest the due time counts, not only one at or after it: with a
+    15 fps camera and 5 analyses a second wanted, the frame 200 ms after the last one is often at
+    199 ms, and waiting for the next one (267 ms) gave 3.7 a second instead of 5."""
+    slack = 0.5 / source_fps if source_fps > 0 else 0.0
+    return frame_time - last_processed >= 1.0 / fps - slack
+
+
 def run(cfg: Config) -> None:
     from ..vision.camera import Camera
     from ..vision.recognizer import enhance_low_light
@@ -351,7 +360,7 @@ def run(cfg: Config) -> None:
         if frame is None:
             slot.state = "no picture (reconnecting)" if cam.started_for() > 10 else "connecting"
             return False
-        if frame_time - slot.last_processed < 1.0 / fps:
+        if not frame_due(frame_time, slot.last_processed, fps, cam.received_fps()):
             return False
         slot.last_processed = frame_time  # paces the analysis on the newest frame
         frame, frame_time = cam.sharpest(slot.last_chosen, slot.face_regions)

@@ -64,21 +64,27 @@ def exe_in(folder: Path) -> Path:
 
 
 def latest_release(repo: str = REPO) -> tuple[str, str, str | None] | None:
-    """(version, download URL, published checksum or None) of the newest release that has a package
-    for this computer."""
-    req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases/latest",
+    """(version, download URL, published checksum or None) of the highest-numbered recent release
+    that has a package for this computer. GitHub's own "latest" is the release published last, which
+    is the older version when two tags are built at the same time (1.1.34 finished after 1.1.35)."""
+    req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases?per_page=10",
                                  headers={"Accept": "application/vnd.github+json", "User-Agent": "FaceAttendance"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            release = json.load(resp)
+            releases = json.load(resp)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:  # no release published yet
             return None
         raise
-    for asset in release.get("assets", []):
-        if asset["name"] == asset_name():
-            return release["tag_name"].lstrip("v"), asset["browser_download_url"], asset.get("digest")
-    return None
+    best = None
+    for release in releases:
+        if release.get("draft") or release.get("prerelease"):
+            continue
+        version = release.get("tag_name", "").lstrip("v")
+        for asset in release.get("assets", []):
+            if asset["name"] == asset_name() and (best is None or parse(version) > parse(best[0])):
+                best = (version, asset["browser_download_url"], asset.get("digest"))
+    return best
 
 
 def installed(home: Path) -> list[tuple[str, Path]]:

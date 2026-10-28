@@ -71,6 +71,37 @@ def test_tracks_of_different_cameras_never_share_a_card(env):
     assert store.unknown(c).group_id == store.unknown(a).group_id
 
 
+def test_analysis_takes_the_camera_frame_nearest_the_due_time():
+    from attendance.core.pipeline import frame_due
+
+    gap = 1 / 15  # a 15 fps camera, 5 analyses a second wanted
+    assert not frame_due(2 * gap, 0.0, 5, 15)  # 133 ms: too soon
+    assert frame_due(3 * gap - 0.001, 0.0, 5, 15)  # 199 ms: the frame nearest 200 ms is due
+    assert not frame_due(3 * gap - 0.001, 0.0, 5, 0.0)  # camera rate unknown: no slack
+    assert frame_due(0.2, 0.0, 5, 0.0)
+
+
+def test_updater_takes_the_highest_release_not_the_last_published(monkeypatch):
+    import io
+    import json
+
+    from attendance import updater
+
+    releases = [{"tag_name": "v1.1.34", "assets": [{"name": updater.asset_name(), "browser_download_url": "u34"}]},
+                {"tag_name": "v1.1.35", "assets": [{"name": updater.asset_name(), "browser_download_url": "u35", "digest": "d"}]},
+                {"tag_name": "v9.0.0", "prerelease": True, "assets": [{"name": updater.asset_name(), "browser_download_url": "u9"}]},
+                {"tag_name": "v1.1.36", "assets": [{"name": "other.zip", "browser_download_url": "x"}]}]
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr(updater.urllib.request, "urlopen", lambda req, timeout=30: Resp(json.dumps(releases).encode()))
+    assert updater.latest_release("x/y") == ("1.1.35", "u35", "d")
+
+
 def test_live_page_script_keeps_the_camera_index_apart_from_the_camera_badge(core):
     """1.1.33 named the camera index `cam` and the refresh function already declared `const cam`
     for the camera badge: every poll raised before the fetch and the page said "cannot reach the program"."""
