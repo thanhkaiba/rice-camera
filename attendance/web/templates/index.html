@@ -88,7 +88,7 @@
     <tbody>
       {% for a in rep.late %}{{ row('late', a.employee_id, a.name, a) }}{% endfor %}
       {% for id, name in rep.not_seen %}{{ row('not_seen', id, name) }}{% endfor %}
-      {% for id, name, kind in rep.on_leave %}{{ row('on_leave', id, name, None, kind) }}{% endfor %}
+      {% for id, name, kind in rep.on_leave %}{{ row('on_leave', id, name, rep.permitted_arrivals.get(id), kind) }}{% endfor %}
       {% for a in rep.on_time %}{{ row('on_time', a.employee_id, a.name, a) }}{% endfor %}
       {% for id, name, a in rep.exempt %}{{ row('exempt', id, name, a) }}{% endfor %}
     </tbody>

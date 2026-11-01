@@ -21,6 +21,7 @@ def register(app: Flask, core: "App") -> None:
     def employees():
         from ..cli import seed
         from ..vision.faces import GOOD_PHOTOS
+        from ..integrations.base_timeoff import permissions
 
         counts = {}
         thumbs = {}
@@ -45,7 +46,8 @@ def register(app: Flask, core: "App") -> None:
                                look_alikes=quality_report["look_alikes"], names=names, quality=library.quality(),
                                good_photos=GOOD_PHOTOS, photo_scores=scores, recognition=recognition,
                                quality_report=quality_report,
-                               on_leave=store.leaves_on(service.now().date()),
+                               on_leave={**permissions(store, service.now().date())[1],
+                                         **store.leaves_on(service.now().date())},
                                seed_status=seed.read_status(core), in_window=service.in_window(service.now()))
 
     @app.post("/employees/quality")
@@ -84,6 +86,19 @@ def register(app: Flask, core: "App") -> None:
         library.reload()
         store.log(service.now(), current_user(cfg), "import employees", f"{n} rows")
         return done(f"Imported {n} employees.", "employees")
+
+    @app.post('/employees/base-usernames')
+    def import_base_usernames():
+        file = request.files.get('file')
+        if not file:
+            return failed('Choose a Base member CSV file.', 'employees')
+        try:
+            count, missing = store.import_base_usernames(file.read().decode('utf-8-sig'))
+        except (ValueError, UnicodeDecodeError) as exc:
+            return failed(f'Base mapping failed: {exc}', 'employees')
+        store.log(service.now(), current_user(cfg), 'import Base usernames',
+                  f'{count} mapped; {len(missing)} emails absent from camera system')
+        return done(f'Mapped {count} Base usernames; {len(missing)} emails absent from camera system.', 'employees')
 
     @app.post("/employees/seed")
     def import_seed():
@@ -148,7 +163,8 @@ def register(app: Flask, core: "App") -> None:
         try:
             store.update_employee(employee_id, request.form.get("name", ""), request.form.get("active") == "on",
                                   request.form.get("chat_user"), request.form.get("exempt") == "on",
-                                  email=request.form.get("email", person.email))
+                                  email=request.form.get("email", person.email),
+                                  base_username=request.form.get('base_username', person.base_username))
         except ValueError as exc:
             return failed(str(exc), "employee", employee_id=employee_id)
         library.reload()

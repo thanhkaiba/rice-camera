@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from flask import Flask, abort, flash, redirect, render_template, request, url_for
 
 from ..store import LEAVE_KINDS
+from ..integrations.base_timeoff import permissions as base_permissions
 from . import current_user, done
 
 if TYPE_CHECKING:
@@ -57,6 +58,8 @@ def register(app: Flask, core: "App") -> None:
         w = service.window(day)
         arrival = store.checkins(day).get(employee_id)
         leave = store.leaves_on(day).get(employee_id)
+        permitted_late, permitted_absence = base_permissions(store, day)
+        leave = leave or (permitted_late if arrival is not None else permitted_absence).get(employee_id)
         row = {"day": day, "workday": workday, "time": None, "status": "", "kind": "info"}
         if arrival is not None:
             ts = service._local(arrival.first_seen)

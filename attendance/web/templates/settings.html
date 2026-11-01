@@ -285,6 +285,9 @@
 
   <section class="card tab" id="hr">
     <h2 class="row">{{ icon('hr') }}HR system</h2>
+    <label class="field">Base Timeoff token (V2)<input name="base_api_key" type="password" autocomplete="off"
+      placeholder="{{ 'saved · leave empty to keep' if s['']['base_api_key'] else 'none' }}">{{ src('base_api_key') }}
+      <span class="hint">Requires Timeoff read scope. Save settings, then Load now to check. Keep API address below empty when using Base.</span></label>
     <p class="hint" style="margin-top:0">Holidays, make-up days and leave. API format: docs/hr-api.md</p>
     <div class="form-row">
       <label class="field grow">API address<input name="leave_api.url" value="{{ s.leave_api.url }}" placeholder="https://hr.example.com/api/attendance-calendar">{{ src('leave_api.url') }}</label>

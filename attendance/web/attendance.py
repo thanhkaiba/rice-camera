@@ -155,9 +155,12 @@ def register(app: Flask, core: "App") -> None:
 
     @app.post("/day/<day>/late-message")
     def send_late_message(day: str):
+        from ..integrations.leave_api import base_ready
         d = _date(day, service.now().date())
         if not cfg.late_message.enabled:
             return failed("Turn on the late message in Settings first.", "index", day=day)
+        if not base_ready(cfg, store, service.now(), d):
+            return failed('Base leave data is not ready; refresh leave data and check employee usernames.', 'index', day=day)
         if service.send_late_message(d, current_user(cfg)):
             return done("Late message posted to Google Chat.", "index", day=day)
         return done("Nobody was late, so no message was sent.", "index", day=day)

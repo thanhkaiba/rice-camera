@@ -5,6 +5,7 @@ employees_file: employees.csv  # columns: email,name; initial import or attachin
 healthcheck_url: ""            # e.g. https://hc-ping.com/<uuid>; pinged every minute so you get an alert if this PC stops
 retention_days: 90             # camera photos of arrivals and unknown faces are deleted after this many days
 late_evidence_days: 365        # photos of days on which a person was late are kept this long, as evidence
+base_api_key: ""              # Base Timeoff V2; prefer BASE_ACCESS_TOKEN env var; needs Timeoff read scope
 
 # Most settings below can also be changed on the admin page (Settings); values saved there
 # take precedence over this file. The recognition backend, web host/port and data_dir can

@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import re
 import sqlite3
 import unicodedata
 import uuid
@@ -15,6 +16,46 @@ from .schema import CHAT_COLUMNS, Employee, Reference, _blob, _vec, normalize_ch
 
 
 class EmployeeStoreMixin:
+    @staticmethod
+    def normalize_base_username(value: str) -> str:
+        value = value.strip().lstrip('@').lower()
+        if value and not re.fullmatch(r'[a-z0-9_.-]+', value):
+            raise ValueError('invalid Base username')
+        return value
+
+    def import_base_usernames(self, csv_text: str) -> tuple[int, list[str]]:
+        """Update only Base usernames, matched by email; unknown employees are left out."""
+        reader = csv.DictReader(io.StringIO(csv_text.lstrip('\ufeff')))
+        fields = {f.strip().lower() for f in reader.fieldnames or []}
+        if 'email' not in fields or not fields.intersection({'username', 'base_username'}):
+            raise ValueError('the CSV needs Email and Username or base_username columns')
+        mapping, usernames = {}, set()
+        for row in reader:
+            row = {k.strip().lower(): (v or '').strip() for k, v in row.items() if k}
+            if not any(row.values()):
+                continue
+            email = normalize_email(row.get('email', ''))
+            username = self.normalize_base_username(row.get('base_username', row.get('username', '')))
+            if not username or email in mapping or username in usernames:
+                raise ValueError(f'row {reader.line_num}: missing or duplicate email/username')
+            mapping[email] = username
+            usernames.add(username)
+        with self._lock, self._db:
+            people = self.all_employees()
+            by_email = {p.email.lower(): p for p in people if p.email}
+            assigned = {p.base_username: p.id for p in people if p.base_username}
+            updates, missing = [], []
+            for email, username in mapping.items():
+                person = by_email.get(email)
+                if person is None:
+                    missing.append(email)
+                    continue
+                if username in assigned and assigned[username] != person.id:
+                    raise ValueError(f'Base username already assigned: {username}')
+                updates.append((username, person.id))
+            self._db.executemany('UPDATE employees SET base_username = ? WHERE id = ?', updates)
+        return len(updates), missing
+
     def import_employees(self, csv_text: str) -> int:
         """Upsert by email; attach a legacy record only when its name maps to exactly one email."""
         reader = csv.DictReader(io.StringIO(csv_text.lstrip("\ufeff")))
@@ -33,11 +74,12 @@ class EmployeeStoreMixin:
                 if email in seen:
                     raise ValueError(f"duplicate email {email}")
                 chat_user = normalize_chat_user(next((r[c] for c in CHAT_COLUMNS if r.get(c)), ""))
+                base_username = self.normalize_base_username(r.get('base_username', ''))
             except ValueError as exc:
                 raise ValueError(f"row {reader.line_num}: {exc}") from None
             seen.add(email)
-            rows.append((email, r["name"], chat_user))
-        name_counts = Counter(unicodedata.normalize("NFC", name).casefold() for _, name, _ in rows)
+            rows.append((email, r["name"], chat_user, base_username))
+        name_counts = Counter(unicodedata.normalize("NFC", name).casefold() for _, name, _, _ in rows)
         with self._lock, self._db:
             people = self.all_employees()
             by_email = {p.email: p.id for p in people if p.email}
@@ -46,20 +88,24 @@ class EmployeeStoreMixin:
                 if not p.email:
                     legacy[unicodedata.normalize("NFC", p.name).casefold()].append(p.id)
             updates = []
-            for email, name, chat_user in rows:
+            for email, name, chat_user, base_username in rows:
                 employee_id = by_email.get(email)
                 key = unicodedata.normalize("NFC", name).casefold()
                 if employee_id is None and legacy[key]:
                     if len(legacy[key]) != 1 or name_counts[key] != 1:
                         raise ValueError(f"ambiguous legacy employee name {name}; set their emails individually first")
                     employee_id = legacy[key][0]
-                updates.append((employee_id or uuid.uuid4().hex, email, name, chat_user))
-            self._db.executemany(
-                "INSERT INTO employees (id, email, name, active, chat_user) VALUES (?, ?, ?, 1, ?) "
-                "ON CONFLICT(id) DO UPDATE SET email = excluded.email, name = excluded.name, active = 1, "
-                "chat_user = CASE WHEN excluded.chat_user != '' THEN excluded.chat_user ELSE employees.chat_user END",
-                updates,
-            )
+                updates.append((employee_id or uuid.uuid4().hex, email, name, chat_user, base_username))
+            try:
+                self._db.executemany(
+                    "INSERT INTO employees (id, email, name, active, chat_user, base_username) VALUES (?, ?, ?, 1, ?, ?) "
+                    "ON CONFLICT(id) DO UPDATE SET email = excluded.email, name = excluded.name, active = 1, "
+                    "chat_user = CASE WHEN excluded.chat_user != '' THEN excluded.chat_user ELSE employees.chat_user END, "
+                    "base_username = CASE WHEN excluded.base_username != '' THEN excluded.base_username ELSE employees.base_username END",
+                    updates,
+                )
+            except sqlite3.IntegrityError:
+                raise ValueError('employee email or Base username already exists') from None
         return len(rows)
 
     def add_employee(self, email: str, name: str) -> str:
@@ -74,7 +120,8 @@ class EmployeeStoreMixin:
         return employee_id
 
     def update_employee(self, employee_id: str, name: str, active: bool, chat_user: str | None = None,
-                        exempt: bool | None = None, *, email: str | None = None) -> None:
+                        exempt: bool | None = None, *, email: str | None = None,
+                        base_username: str | None = None) -> None:
         if not name.strip():
             raise ValueError("name is required")
         person = self.employee(employee_id)
@@ -82,12 +129,13 @@ class EmployeeStoreMixin:
             raise ValueError("employee not found")
         email = normalize_email(email if email is not None else person.email)
         chat_user = normalize_chat_user(chat_user) if chat_user is not None else person.chat_user
+        username = self.normalize_base_username(base_username) if base_username is not None else person.base_username
         try:
-            self._exec("UPDATE employees SET email = ?, name = ?, active = ?, chat_user = ?, exempt = ? WHERE id = ?",
+            self._exec("UPDATE employees SET email = ?, name = ?, active = ?, chat_user = ?, exempt = ?, base_username = ? WHERE id = ?",
                        (email, name.strip(), int(active), chat_user,
-                        int(exempt if exempt is not None else person.exempt), employee_id))
+                        int(exempt if exempt is not None else person.exempt), username, employee_id))
         except sqlite3.IntegrityError:
-            raise ValueError(f"employee email {email} already exists") from None
+            raise ValueError('employee email or Base username already exists') from None
 
     def employee_by_email(self, email: str) -> Employee | None:
         rows = self._all("SELECT * FROM employees WHERE email = ? COLLATE NOCASE", (normalize_email(email),))
@@ -116,7 +164,7 @@ class EmployeeStoreMixin:
 
     @staticmethod
     def _employee(r) -> Employee:
-        return Employee(r["id"], r["name"], bool(r["active"]), r["chat_user"] or "", bool(r["exempt"]), r["email"] or "")
+        return Employee(r["id"], r["name"], bool(r["active"]), r["chat_user"] or "", bool(r["exempt"]), r["email"] or "", r['base_username'] or '')
 
     def all_employees(self) -> list[Employee]:
         return [self._employee(r) for r in self._all("SELECT * FROM employees ORDER BY active DESC, name")]

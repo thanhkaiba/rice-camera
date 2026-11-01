@@ -118,6 +118,8 @@
       <form method="post" action="{{ url_for('update_employee', employee_id=person.id) }}" class="stack" style="margin:0">
         <label class="field">Email<input type="email" name="email" value="{{ person.email }}" required autocomplete="email"></label>
         <label class="field">Name<input name="name" value="{{ person.name }}" required></label>
+        <label class="field">Base username<input name="base_username" value="{{ person.base_username }}" autocomplete="off">
+          <span class="hint">From Base Account; used to match Timeoff requests.</span></label>
         <label class="field">Google Chat user ID<input name="chat_user" value="{{ person.chat_user }}" placeholder="e.g. 112233445566778899000" autocomplete="off">
           <span class="hint">For @mentions · the number at the end of the user's page address in Google Admin.</span></label>
         <label class="switch"><input type="checkbox" name="active" {{ 'checked' if person.active }}><span>Tracked by the camera

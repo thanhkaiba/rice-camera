@@ -29,6 +29,7 @@ from typing import Callable
 
 from ..core.config import Config
 from ..store import Store, normalize_email
+from . import base_timeoff
 
 log = logging.getLogger(__name__)
 
@@ -94,12 +95,14 @@ class LeaveSync:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.cfg.leave_api.url.strip())
+        return bool(self.cfg.base_api_key or self.cfg.leave_api.url.strip())
 
     def due(self) -> bool:
         if not self.enabled:
             return False
         now = self._now()
+        if self.cfg.base_api_key and now.astimezone(base_timeoff.VN).weekday() >= 5:
+            return False
         status = read_status(self.store)
         if not status.get("at"):
             return True
@@ -112,6 +115,8 @@ class LeaveSync:
 
     def sync(self) -> dict:
         now = self._now()
+        if self.cfg.base_api_key:
+            return self._sync_base(now)
         api = self.cfg.leave_api
         start = now.date() - dt.timedelta(days=api.days_back)
         end = now.date() + dt.timedelta(days=api.days_ahead)
@@ -145,9 +150,54 @@ class LeaveSync:
         self.store.put(STATUS_KEY, json.dumps(status))
         return status
 
+    def _sync_base(self, now: dt.datetime) -> dict:
+        day = now.astimezone(base_timeoff.VN).date()
+        if day.weekday() >= 5:
+            return {'ok': True, 'message': 'Base sync skipped on weekend'}
+        status = read_status(self.store)
+        try:
+            snapshot = base_timeoff.fetch(day, self._late_after(day).astimezone(base_timeoff.VN).time(),
+                                          self.cfg.base_api_key)
+        except Exception as exc:
+            # Do not store response bodies or exception text: Base may echo credentials.
+            message = f'Base Timeoff update failed ({type(exc).__name__}); check token, scope and shift format'
+            status = {**status, 'at': now.isoformat(), 'ok': False, 'message': message}
+            log.warning('%s; attendance messages deferred', message)
+        else:
+            missing = sum(p.active and not p.exempt and not p.base_username for p in self.store.all_employees())
+            status = {'at': now.isoformat(), 'ok': True, 'last_success': now.isoformat(),
+                      'day': day.isoformat(), 'message': f'{len(snapshot)} Base users with morning permissions; '
+                      f'{missing} tracked employees without Base username'}
+            with self.store._lock, self.store._db:
+                self.store._db.executemany(
+                    'INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                    [(f'base_timeoffs:{day}', json.dumps(snapshot)), (STATUS_KEY, json.dumps(status))])
+            return status
+        self.store.put(STATUS_KEY, json.dumps(status))
+        return status
+
+
+def base_ready(cfg: Config, store: Store, now: dt.datetime, day: dt.date | None = None) -> bool:
+    if not cfg.base_api_key:
+        return True
+    day = day or now.astimezone(base_timeoff.VN).date()
+    status = read_status(store)
+    if (not status.get('ok') or status.get('day') != day.isoformat()
+            or store.get(f'base_timeoffs:{day}') is None):
+        return False
+    last = dt.datetime.fromisoformat(status['last_success'])
+    if now - last > dt.timedelta(minutes=cfg.leave_api.refresh_minutes + 2):
+        return False
+    return all(p.base_username for p in store.all_employees() if p.active and not p.exempt)
+
 
 def warning(cfg: Config, store: Store, now: dt.datetime) -> str | None:
     """A warning line when leave data is configured but not current."""
+    if cfg.base_api_key:
+        if not base_ready(cfg, store, now):
+            return ('⚠️ Base Timeoff is unavailable, stale, or employee usernames are missing. '
+                    'Attendance is provisional; violation messages are deferred. Check Leave sync and People.')
+        return None
     if not cfg.leave_api.url.strip():
         return None
     status = read_status(store)

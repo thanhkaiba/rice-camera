@@ -22,6 +22,7 @@ import numpy as np
 
 from . import latephoto
 from ..integrations import leave_api
+from ..integrations.base_timeoff import permissions as base_permissions
 from .config import Config, parse_clock
 from ..vision.gallery import Gallery
 from ..vision.tracker import vote_for
@@ -77,6 +78,7 @@ class DayReport:
     late: list[Arrival] = field(default_factory=list)
     not_seen: list[tuple[str, str]] = field(default_factory=list)  # (id, name)
     on_leave: list[tuple[str, str, str]] = field(default_factory=list)  # (id, name, kind label)
+    permitted_arrivals: dict[str, Arrival] = field(default_factory=dict)
     # People not counted as late or absent (e.g. the boss): (id, name, arrival if seen)
     exempt: list[tuple[str, str, Arrival | None]] = field(default_factory=list)
     no_photos: list[tuple[str, str]] = field(default_factory=list)
@@ -312,6 +314,8 @@ class AttendanceService:
         Marks "late_message" only when something was sent, and "late_message_skipped" when nobody
         was late, so the page can tell the two apart. An automatic send gives up when the message
         was marked meanwhile (the admin's "Send now" and the scheduler racing)."""
+        if not leave_api.base_ready(self.cfg, self.store, self.now(), day):
+            return False
         text = self.late_text(day)
         if text is None:
             self.store.mark_notice(day, "late_message_skipped", self.now())
@@ -687,6 +691,9 @@ class AttendanceService:
     def _announce(self, employee_id: str, ts: dt.datetime) -> None:
         """A camera arrival after the late time, or after the "not seen" list (admin changes are not posted)."""
         day = ts.date()
+        if (not leave_api.base_ready(self.cfg, self.store, self.now(), day)
+                or employee_id in base_permissions(self.store, day)[0]):
+            return
         if (not self.is_workday(day) or employee_id in self.store.leaves_on(day)
                 or employee_id in self.store.exempt_ids()):
             return
@@ -710,6 +717,7 @@ class AttendanceService:
         employees = self.store.employees()
         checkins = self.store.checkins(day)
         leave = self.store.leaves_on(day)
+        permitted_late, permitted_absence = base_permissions(self.store, day)
         enrolled = self.gallery.counts()
         exempt = self.store.exempt_ids()
         for emp_id, name in employees.items():
@@ -720,9 +728,14 @@ class AttendanceService:
                 continue
             if c is not None:
                 a = Arrival(emp_id, name, self._local(c.first_seen), c.source, c.image, c.score)
-                (rep.late if a.ts >= w.late_from else rep.on_time).append(a)
-            elif emp_id in leave:
-                rep.on_leave.append((emp_id, name, LEAVE_KINDS.get(leave[emp_id], leave[emp_id])))
+                if a.ts >= w.late_from and emp_id in permitted_late:
+                    rep.on_leave.append((emp_id, name, permitted_late[emp_id]))
+                    rep.permitted_arrivals[emp_id] = a
+                else:
+                    (rep.late if a.ts >= w.late_from else rep.on_time).append(a)
+            elif emp_id in leave or emp_id in permitted_absence:
+                kind = leave.get(emp_id) or permitted_absence[emp_id]
+                rep.on_leave.append((emp_id, name, LEAVE_KINDS.get(kind, kind)))
             else:
                 rep.not_seen.append((emp_id, name))
             if emp_id not in enrolled:
@@ -851,8 +864,13 @@ class AttendanceService:
         if self.is_workday(day):
             w = self.window(day)
             self._track_health(now, w, camera_ok, camera_state)
+            base_ready = leave_api.base_ready(self.cfg, self.store, now)
+            if not base_ready:
+                if not self.store.notice_sent(day, 'base_deferred'):
+                    self._send(leave_api.warning(self.cfg, self.store, now), day)
+                    self.store.mark_notice(day, 'base_deferred', now)
 
-            if (self.cfg.google_chat.late_time_list and now >= w.late_from
+            if (base_ready and self.cfg.google_chat.late_time_list and now >= w.late_from
                     and not self.store.notice_sent(day, "deadline")
                     and not self.store.notice_sent(day, "deadline_skipped")):
                 rep = self.report(day)
@@ -867,12 +885,12 @@ class AttendanceService:
 
             lm = self.cfg.late_message
             send_at = dt.datetime.combine(day, parse_clock(lm.send_at), tzinfo=self.tz) if lm.send_at else w.end
-            if (lm.enabled and lm.auto_send and now >= send_at
+            if (base_ready and lm.enabled and lm.auto_send and now >= send_at
                     and not self.store.notice_sent(day, "late_message")
                     and not self.store.notice_sent(day, "late_message_skipped")):
                 self.send_late_message(day, auto=True)
 
-            if now >= w.end and not self.store.notice_sent(day, "summary"):
+            if base_ready and now >= w.end and not self.store.notice_sent(day, "summary"):
                 rep = self.report(day)
                 # Without the summary, its warnings (the camera or computer was down, leave data
                 # is stale) still go out: they are problems to fix, not attendance news.

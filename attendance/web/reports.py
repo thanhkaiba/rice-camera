@@ -97,7 +97,8 @@ def register(app: Flask, core: "App") -> None:
                 rows.append([d.day, emp_id, name, "no_camera_data" if d.no_camera_data else "not_seen",
                              "", "", "", outage])
             for emp_id, name, kind in d.on_leave:
-                rows.append([d.day, emp_id, name, "on_leave", "", "", kind, outage])
+                arrival = d.permitted_arrivals.get(emp_id)
+                rows.append([d.day, emp_id, name, "on_leave", arrival.time if arrival else "", "", kind, outage])
         emails = store.employee_emails()
         for row in rows:
             row[1] = emails.get(row[1], "")

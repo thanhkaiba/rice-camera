@@ -12,6 +12,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS employees (
     id TEXT PRIMARY KEY,
     email TEXT,
+    base_username TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
     chat_user TEXT NOT NULL DEFAULT '',  -- Google Chat user ID, used to @mention the person
@@ -139,6 +140,7 @@ class Employee:
     chat_user: str = ""
     exempt: bool = False  # not counted as late or absent
     email: str = ""
+    base_username: str = ""
 
 
 @dataclass
@@ -257,7 +259,7 @@ def _blob(vector) -> bytes | None:
 def migrate(db: sqlite3.Connection) -> None:
     """Add columns introduced after a database was created."""
     added = {"embeddings": [("image", "TEXT"), ("quality_ok", "INTEGER"), ("quality_score", "REAL")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'"), ("quality", "REAL")],
-             "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT")],
+             "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT"), ("base_username", "TEXT NOT NULL DEFAULT ''")],
              "sightings": [("camera_id", "TEXT"), ("model", "TEXT"), ("vector", "BLOB"), ("sha256", "TEXT")],
              "calendar": [("source", "TEXT NOT NULL DEFAULT 'hr'")], "leaves": [("source", "TEXT NOT NULL DEFAULT 'hr'")]}
     for table, columns in added.items():
@@ -268,6 +270,7 @@ def migrate(db: sqlite3.Connection) -> None:
                 if (table, name) == ("sightings", "camera_id"):
                     db.execute("UPDATE sightings SET camera_id = employee_id WHERE source = 'camera'")
     db.execute("CREATE UNIQUE INDEX IF NOT EXISTS employees_email ON employees(email COLLATE NOCASE)")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS employees_base_username ON employees(base_username COLLATE NOCASE) WHERE base_username != ''")
     # Databases from before sightings existed: each arrival becomes its first sighting.
     if not db.execute("SELECT 1 FROM sightings LIMIT 1").fetchone():
         db.execute("INSERT INTO sightings (day, employee_id, ts, source, score, image, camera_id) "

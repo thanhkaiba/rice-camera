@@ -13,7 +13,7 @@ from ..store import Store
 
 KEY = "settings"
 BASELINE = "_file_settings"  # attribute on the Config: the values from config.yaml, before overrides
-SECRET = {"password", "viewer_password", "token", "webhook_url"}  # never shown, only "set"/"empty"
+SECRET = {"password", "viewer_password", "token", "webhook_url", "base_api_key"}  # never shown, only "set"/"empty"
 
 # section ("" = top level) -> editable fields
 EDITABLE: dict[str, list[str]] = {
@@ -32,7 +32,7 @@ EDITABLE: dict[str, list[str]] = {
     "updates": ["enabled"],
     "backup": ["folder", "time", "keep_days", "include_photos"],
     "collect": ["enabled", "start", "end", "min_score", "per_day", "enough", "fps", "review_per_day"],
-    "": ["retention_days", "late_evidence_days", "healthcheck_url"],
+    "": ["retention_days", "late_evidence_days", "healthcheck_url", "base_api_key"],
 }
 
 

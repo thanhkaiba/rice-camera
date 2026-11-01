@@ -64,6 +64,8 @@ Face photos are personal data: inform employees and get consent. Camera snapshot
 
 ## Development
 
+Person Re-ID and entry/exit planning (Vietnamese): [research and proposed design](docs/person-reid-design.md), [current project review and incremental roadmap](docs/person-reid-project-review.md). These describe proposed work; the current application records attendance sightings, not entry/exit occupancy.
+
 Import the portable employee/photo/review dataset after pulling the code: [hướng dẫn chi tiết bằng tiếng Việt](docs/seed-import.md). The `seed/` directory must be transferred separately because Git ignores it.
 
 ```bash

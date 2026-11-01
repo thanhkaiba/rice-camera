@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import os
 import string
 import sys
 from dataclasses import dataclass, field
@@ -263,6 +264,7 @@ class Config:
     data_dir: str = "data"
     employees_file: str = "employees.csv"  # email,name CSV, imported initially or once to attach legacy emails
     healthcheck_url: str = ""
+    base_api_key: str = field(default='', repr=False)  # Base Timeoff V2; BASE_ACCESS_TOKEN overrides this
     retention_days: int = 90  # face photos of arrivals and unknown faces are deleted after this
     # Snapshots of a day on which someone was late are kept this long instead, as evidence in case
     # the person disputes it (never shorter than retention_days).
@@ -374,6 +376,8 @@ class Config:
             raise ValueError("tracking.full_frame_every must be between 1 and 30")
         if self.leave_api.refresh_minutes < 1:
             raise ValueError("leave_api.refresh_minutes must be at least 1")
+        if self.base_api_key and self.leave_api.url.strip():
+            raise ValueError('configure Base Timeoff or the generic leave_api, not both')
         if self.google_chat.unknown_batch_minutes < 0:
             raise ValueError("unknown_batch_minutes must not be negative")
         self.tz  # raises on an unknown time zone
@@ -401,6 +405,7 @@ def load(path: str | Path) -> Config:
     with path.open(encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     cfg = _build(Config, data)
+    cfg.base_api_key = os.environ.get('BASE_ACCESS_TOKEN', cfg.base_api_key).strip()
     cfg.base_dir = path.resolve().parent
     cfg.validate()
     return cfg

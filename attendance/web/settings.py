@@ -158,7 +158,7 @@ def register(app: Flask, core: "App") -> None:
             for name in names:
                 key = f"{section}.{name}" if section else name
                 value = current[section][name]
-                if name in ("password", "token", "viewer_password"):
+                if name in ("password", "token", "viewer_password", "base_api_key"):
                     if form.get(key):
                         changes.setdefault(section, {})[name] = form[key]
                 elif name == "work_days":
