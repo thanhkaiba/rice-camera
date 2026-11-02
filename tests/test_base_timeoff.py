@@ -220,7 +220,7 @@ def test_mapping_upload_and_permission_display(core, monkeypatch):
     assert app.leave_sync.sync()['ok']
     clock.t = at(10, 20)
     app.service.on_identified('B', clock(), .8, None)
-    page = c.get('/?tab=requests').get_data(as_text=True)
+    page = c.get('/?tab=coming_late').get_data(as_text=True)
     assert 'pending' in page and '10:20' in page
     exported = c.get(f'/report/details.csv?start={DAY}&end={DAY}').get_data(as_text=True)
     assert 'Coming late' in exported and '10:20' in exported
@@ -322,6 +322,7 @@ def test_personal_page_also_honors_base_permission(core, monkeypatch):
 
 @pytest.mark.parametrize('approved', [False, True])
 def test_today_separates_wfh_and_coming_late_requests(core, monkeypatch, approved):
+    import re
     from test_web import client
     app, clock, _ = core
     connect(app, monkeypatch, [item(), item('alice', '1978', '9:00-18:00'),
@@ -332,13 +333,16 @@ def test_today_separates_wfh_and_coming_late_requests(core, monkeypatch, approve
     c = client(app)
     page = c.get(f'/?day={DAY}').get_data(as_text=True)
     assert 'data-emp="C"' in page
-    assert ('data-emp="A"' in page) == (not approved)
+    assert 'data-emp="A"' in page
     assert 'data-emp="B"' in page  # 10:20 is later than the approved 09:30 deadline too.
-    page = c.get(f'/?day={DAY}&tab=requests').get_data(as_text=True)
-    assert 'data-emp="A"' in page and 'data-emp="B"' in page
-    assert 'data-emp="C"' not in page
-    assert 'WFH' in page and 'Coming late' in page
-    assert ('pending' in page) == (not approved)
+    ids = re.findall(r'data-emp="([^"]+)"', page)
+    everyone = re.search(r'data-filter="all"><div class="n">(\d+)</div>', page)
+    assert everyone and int(everyone[1]) == len(ids) == len(set(ids)) == 3
+    for tab, employee, other in [('wfh', 'A', 'B'), ('coming_late', 'B', 'A')]:
+        tile = re.search(r'data-filter="' + tab + r'"><div class="n">(\d+)</div>', page)
+        assert tile and tile[1] == '1'
+        members = re.findall(r'<tr[^>]*data-emp="([^"]+)"[^>]*data-requests="([^"]*)"', page)
+        assert [emp for emp, groups in members if tab in groups.split()] == [employee]
     assert '10:20' in page
 
 
@@ -372,7 +376,7 @@ def test_coming_late_requires_approval_and_respects_requested_end(
         assert any(e == 'B' for e, _, _ in rep.on_leave)
     web = create_app(app)
     c = web.test_client()
-    page = c.get('/?tab=requests').get_data(as_text=True)
+    page = c.get('/?tab=coming_late').get_data(as_text=True)
     assert ('pending' in page) == (not approved)
     assert (f'Late {minutes} min' in page) == is_late
     sig = token(app.store, web.secret_key, 'B', create=True)
