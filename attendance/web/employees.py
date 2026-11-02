@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from typing import TYPE_CHECKING
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for
 
-from . import current_user, done, failed
+from . import current_user, done, failed, leave_status
 
 if TYPE_CHECKING:
     from ..core.pipeline import App
@@ -130,6 +131,14 @@ def register(app: Flask, core: "App") -> None:
         from ..vision.faces import GOOD_PHOTOS
 
         person = store.employee(employee_id) or abort(404)
+        today = service.now().date()
+        timeoff_snapshot = store.get(f'base_timeoffs:{today}')
+        timeoff_requests = json.loads(timeoff_snapshot or '{}').get(person.base_username, []) if person.base_username else []
+        base_upcoming = json.loads(store.get('base_upcoming') or '{}')
+        base_upcoming['entries'] = [
+            {**entry, 'date': dt.date.fromisoformat(entry['day'])}
+            for entry in base_upcoming.pop('users', {}).get(person.base_username, [])
+            if entry['day'] > today.isoformat()]
         refs = store.references(cfg.recognition.model_id(), employee_id)
         weeks = {}
         other_photos = []
@@ -155,7 +164,10 @@ def register(app: Flask, core: "App") -> None:
                                look_alikes=[(p.b if p.a == employee_id else p.a, p.score)
                                             for p in quality_report["look_alikes"] if employee_id in (p.a, p.b)],
                                names=service.shown_names(active_only=False),
-                               leaves=store.leaves(employee_id=employee_id, ending_after=service.now().date()))
+                               leaves=store.leaves(employee_id=employee_id, ending_after=today),
+                               timeoff_requests=timeoff_requests, timeoff_synced=timeoff_snapshot is not None,
+                               timeoff_day=today, timeoff_status=leave_status(core),
+                               base_enabled=bool(cfg.base_api_key), base_upcoming=base_upcoming)
 
     @app.post("/employees/<employee_id>")
     def update_employee(employee_id: str):

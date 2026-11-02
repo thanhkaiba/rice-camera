@@ -62,6 +62,7 @@ class Arrival:
     source: str
     image: str | None
     score: float | None = None
+    late_after: dt.datetime | None = None
 
     @property
     def time(self) -> str:
@@ -79,6 +80,7 @@ class DayReport:
     not_seen: list[tuple[str, str]] = field(default_factory=list)  # (id, name)
     on_leave: list[tuple[str, str, str]] = field(default_factory=list)  # (id, name, kind label)
     permitted_arrivals: dict[str, Arrival] = field(default_factory=dict)
+    requests: dict[str, str] = field(default_factory=dict)
     # People not counted as late or absent (e.g. the boss): (id, name, arrival if seen)
     exempt: list[tuple[str, str, Arrival | None]] = field(default_factory=list)
     no_photos: list[tuple[str, str]] = field(default_factory=list)
@@ -111,7 +113,7 @@ def email_name(email: str) -> str:
 
 
 def minutes_late(a: Arrival, w: Window) -> int:
-    return int((a.ts - w.late_after).total_seconds() // 60)
+    return int((a.ts - (a.late_after or w.late_after)).total_seconds() // 60)
 
 
 @dataclass
@@ -691,8 +693,7 @@ class AttendanceService:
     def _announce(self, employee_id: str, ts: dt.datetime) -> None:
         """A camera arrival after the late time, or after the "not seen" list (admin changes are not posted)."""
         day = ts.date()
-        if (not leave_api.base_ready(self.cfg, self.store, self.now(), day)
-                or employee_id in base_permissions(self.store, day)[0]):
+        if not leave_api.base_ready(self.cfg, self.store, self.now(), day):
             return
         if (not self.is_workday(day) or employee_id in self.store.leaves_on(day)
                 or employee_id in self.store.exempt_ids()):
@@ -702,7 +703,10 @@ class AttendanceService:
         if not self.cfg.google_chat.notify_late_arrivals:
             return  # the late message lists them all once
         if ts >= w.late_from:
-            late = int((ts - w.late_after).total_seconds() // 60)
+            arrival = next((a for a in self.report(day).late if a.employee_id == employee_id), None)
+            if arrival is None:
+                return
+            late = minutes_late(arrival, w)
             self._send(f"🟠 {self.who(employee_id)} arrived at {when}, {late} min late.", day)
         elif self.store.notice_sent(day, "deadline"):
             # They were on the "not seen" list, but turned out to have arrived on time.
@@ -717,7 +721,7 @@ class AttendanceService:
         employees = self.store.employees()
         checkins = self.store.checkins(day)
         leave = self.store.leaves_on(day)
-        permitted_late, permitted_absence = base_permissions(self.store, day)
+        permitted_late, permitted_absence, rep.requests = base_permissions(self.store, day)
         enrolled = self.gallery.counts()
         exempt = self.store.exempt_ids()
         for emp_id, name in employees.items():
@@ -728,8 +732,12 @@ class AttendanceService:
                 continue
             if c is not None:
                 a = Arrival(emp_id, name, self._local(c.first_seen), c.source, c.image, c.score)
-                if a.ts >= w.late_from and emp_id in permitted_late:
-                    rep.on_leave.append((emp_id, name, permitted_late[emp_id]))
+                permission = permitted_late.get(emp_id)
+                if permission and permission[1] is not None:
+                    a.late_after = max(w.late_after, dt.datetime.combine(day, permission[1], self.tz))
+                if (a.ts >= w.late_from and permission
+                        and (permission[1] is None or a.ts < a.late_after + dt.timedelta(minutes=1))):
+                    rep.on_leave.append((emp_id, name, permission[0]))
                     rep.permitted_arrivals[emp_id] = a
                 else:
                     (rep.late if a.ts >= w.late_from else rep.on_time).append(a)

@@ -172,9 +172,25 @@ class LeaveSync:
                 self.store._db.executemany(
                     'INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
                     [(f'base_timeoffs:{day}', json.dumps(snapshot)), (STATUS_KEY, json.dumps(status))])
+            self._sync_base_upcoming(now)
             return status
         self.store.put(STATUS_KEY, json.dumps(status))
         return status
+
+    def _sync_base_upcoming(self, now: dt.datetime) -> None:
+        today = now.astimezone(base_timeoff.VN).date()
+        start = today + dt.timedelta(days=1)
+        end = today + dt.timedelta(days=self.cfg.leave_api.days_ahead)
+        cached = json.loads(self.store.get('base_upcoming') or '{}')
+        try:
+            users = base_timeoff.fetch_upcoming(start, end, self.cfg.base_api_key)
+        except Exception as exc:
+            cached['ok'] = False
+            log.warning('Base upcoming leave update failed (%s)', type(exc).__name__)
+        else:
+            cached = {'users': users, 'from': start.isoformat(), 'to': end.isoformat(),
+                      'ok': True, 'last_success': now.isoformat()}
+        self.store.put('base_upcoming', json.dumps(cached))
 
 
 def base_ready(cfg: Config, store: Store, now: dt.datetime, day: dt.date | None = None) -> bool:

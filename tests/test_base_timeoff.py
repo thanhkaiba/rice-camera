@@ -60,22 +60,23 @@ def test_api_pagination_filters_and_rejection():
         base_timeoff.fetch(DAY, dt.time(10), 'secret', post=lambda f: {'code': 0, 'message': 'invalid'})
 
 
-def connect(app, monkeypatch, rows):
+def connect(app, monkeypatch, rows, *, approved=False):
     app.cfg.base_api_key = 'secret'
     app.store.import_base_usernames('Email,Username\nbob@example.com,bob\nalice@example.com,alice\ncarol@example.com,carol\n')
-    monkeypatch.setattr(base_timeoff, 'fetch', lambda *a: base_timeoff.parse(rows, DAY, dt.time(10), approved=False))
+    monkeypatch.setattr(base_timeoff, 'fetch', lambda *a: base_timeoff.parse(rows, DAY, dt.time(10), approved=approved))
+    monkeypatch.setattr(base_timeoff, 'fetch_upcoming', lambda *a: {})
 
 
 def test_sync_excuses_late_but_still_requires_checkin(core, monkeypatch):
     app, clock, sent = core
-    connect(app, monkeypatch, [item(), item('alice', '1967', 'Full day')])
+    connect(app, monkeypatch, [item(value='9:00-10:30'), item('alice', '1967', 'Full day')], approved=True)
     assert app.leave_sync.sync()['ok']
     assert ('B', 'Bob') in app.service.report(DAY).not_seen
     clock.t = at(10, 20)
     app.service.on_identified('B', clock(), .8, None)
     rep = app.service.report(DAY)
     assert not rep.late
-    assert any(e == 'B' and 'pending' in label.lower() for e, _, label in rep.on_leave)
+    assert any(e == 'B' and 'Coming late' in label for e, _, label in rep.on_leave)
     assert app.store.checkins(DAY)['B'].first_seen == clock()
     assert not app.service.late_people(DAY)
     assert not any('Bob' in m and 'min late' in m for m in sent)
@@ -219,10 +220,89 @@ def test_mapping_upload_and_permission_display(core, monkeypatch):
     assert app.leave_sync.sync()['ok']
     clock.t = at(10, 20)
     app.service.on_identified('B', clock(), .8, None)
-    page = c.get('/').get_data(as_text=True)
-    assert 'pending approval' in page and '10:20' in page
+    page = c.get('/?tab=requests').get_data(as_text=True)
+    assert 'pending' in page and '10:20' in page
     exported = c.get(f'/report/details.csv?start={DAY}&end={DAY}').get_data(as_text=True)
     assert 'Coming late' in exported and '10:20' in exported
+
+
+@pytest.mark.parametrize('approved', [False, True])
+def test_person_detail_shows_own_timeoff_requests(core, monkeypatch, approved):
+    from test_web import client
+    app, _, _ = core
+    connect(app, monkeypatch, [item(), item(group='1978', value='9:00-18:00'),
+                               item(group='1967', value='9:00-13:00'),
+                               item('alice', value='9:00-11:45')], approved=approved)
+    assert app.leave_sync.sync()['ok']
+    page = client(app).get('/employees/B').get_data(as_text=True)
+    assert 'Timeoff requests' in page
+    assert 'Coming late' in page and 'WFH' in page and 'Holiday' in page
+    assert '9:00-09:30' in page and '9:00-18:00' in page and '9:00-13:00' in page
+    assert ('Approved' if approved else 'Pending') in page
+    assert '11:45' not in page
+
+
+def test_person_detail_distinguishes_missing_sync_from_no_requests(core, monkeypatch):
+    from test_web import client
+    app, _, _ = core
+    connect(app, monkeypatch, [])
+    c = client(app)
+    assert 'No synced request data for today.' in c.get('/employees/B').get_data(as_text=True)
+    assert app.leave_sync.sync()['ok']
+    assert 'No requests for today.' in c.get('/employees/B').get_data(as_text=True)
+
+
+def test_fetch_upcoming_includes_future_afternoon_leave_and_exact_dates():
+    tomorrow = DAY + dt.timedelta(days=1)
+    end = DAY + dt.timedelta(days=60)
+    calls = []
+    rows = [item(group='1967', value='Afternoon', day=tomorrow),
+            item(group='1978', value='9:00-18:00', day=end),
+            item(group='1967', day=DAY), item(group='1967', day=end + dt.timedelta(days=1)),
+            item(group='1977', day=tomorrow)]
+    def post(form):
+        calls.append(form)
+        return {'code': 1, 'page': form['page'], 'total_items': len(rows), 'timeoffs': rows}
+    result = base_timeoff.fetch_upcoming(tomorrow, end, 'secret', post=post)
+    assert [(r['day'], r['kind'], r['shift'], r['approved']) for r in result['bob']] == [
+        (str(tomorrow), 'Holiday', 'Afternoon', True),
+        (str(tomorrow), 'Holiday', 'Afternoon', False),
+        (str(end), 'WFH', '9:00-18:00', True),
+        (str(end), 'WFH', '9:00-18:00', False)]
+    assert all(f['start_date_to'] == end.strftime('%d/%m/%Y') and
+               f['end_date_from'] == tomorrow.strftime('%d/%m/%Y') for f in calls)
+
+
+def test_people_upcoming_leave_uses_base_and_preserves_cache_on_failure(core, monkeypatch, caplog):
+    from attendance.integrations.leave_api import base_ready
+    from test_web import client
+    app, clock, _ = core
+    connect(app, monkeypatch, [])
+    tomorrow = DAY + dt.timedelta(days=1)
+    app.store.add_leave('B', tomorrow, tomorrow, 'sick', 'manual-only-note')
+    future = {'bob': [{'day': str(tomorrow), 'kind': 'Holiday', 'shift': 'Afternoon', 'approved': False, 'absence': True}],
+              'alice': [{'day': str(tomorrow), 'kind': 'WFH', 'shift': 'Full day', 'approved': True, 'absence': True}]}
+    def fetch(start, end, token):
+        assert (start, end, token) == (tomorrow, DAY + dt.timedelta(days=60), 'secret')
+        return future
+    monkeypatch.setattr(base_timeoff, 'fetch_upcoming', fetch)
+    assert app.leave_sync.sync()['ok']
+    page = client(app).get('/employees/B').get_data(as_text=True)
+    assert 'Holiday' in page and 'Afternoon' in page and 'Pending' in page
+    assert 'manual-only-note' not in page and 'WFH' not in page
+    assert app.service.report(DAY).on_leave == []
+    def fail(*args):
+        raise ValueError('secret')
+    monkeypatch.setattr(base_timeoff, 'fetch_upcoming', fail)
+    assert app.leave_sync.sync()['ok'] and base_ready(app.cfg, app.store, clock())
+    page = client(app).get('/employees/B').get_data(as_text=True)
+    assert 'Holiday' in page and 'Upcoming leave could not be refreshed from Base.' in page
+    assert 'secret' not in page and 'secret' not in caplog.text
+    clock.t = at(8, 0, day=tomorrow)
+    assert 'Holiday' not in client(app).get('/employees/B').get_data(as_text=True)
+    monkeypatch.setattr(base_timeoff, 'fetch_upcoming', lambda *a: {})
+    assert app.leave_sync.sync()['ok']
+    assert 'Holiday' not in client(app).get('/employees/B').get_data(as_text=True)
 
 
 def test_personal_page_also_honors_base_permission(core, monkeypatch):
@@ -236,5 +316,100 @@ def test_personal_page_also_honors_base_permission(core, monkeypatch):
     web = create_app(app)
     sig = token(app.store, web.secret_key, 'B', create=True)
     page = web.test_client().get(f'/p/B/{sig}').get_data(as_text=True)
-    assert 'Coming late' in page and 'pending approval' in page
-    assert 'Late 20 min' not in page
+    assert 'Coming late' in page and 'pending' in page
+    assert 'Late 20 min' in page
+
+
+@pytest.mark.parametrize('approved', [False, True])
+def test_today_separates_wfh_and_coming_late_requests(core, monkeypatch, approved):
+    from test_web import client
+    app, clock, _ = core
+    connect(app, monkeypatch, [item(), item('alice', '1978', '9:00-18:00'),
+                               item('carol', '1967', '9:00-18:00')], approved=approved)
+    assert app.leave_sync.sync()['ok']
+    clock.t = at(10, 20)
+    app.service.on_identified('B', clock(), .8, None)
+    c = client(app)
+    page = c.get(f'/?day={DAY}').get_data(as_text=True)
+    assert 'data-emp="C"' in page
+    assert ('data-emp="A"' in page) == (not approved)
+    assert 'data-emp="B"' in page  # 10:20 is later than the approved 09:30 deadline too.
+    page = c.get(f'/?day={DAY}&tab=requests').get_data(as_text=True)
+    assert 'data-emp="A"' in page and 'data-emp="B"' in page
+    assert 'data-emp="C"' not in page
+    assert 'WFH' in page and 'Coming late' in page
+    assert ('pending' in page) == (not approved)
+    assert '10:20' in page
+
+
+@pytest.mark.parametrize('approved,hour,minute,second,is_late,minutes', [
+    (True, 9, 30, 0, False, 0),
+    (True, 9, 30, 59, False, 0),
+    (True, 9, 31, 0, True, 1),
+    (False, 9, 20, 0, True, 20),
+])
+def test_coming_late_requires_approval_and_respects_requested_end(
+        core, monkeypatch, approved, hour, minute, second, is_late, minutes):
+    import csv
+    import io
+    from attendance.core.service import minutes_late
+    from attendance.core.evidence import build
+    from attendance.web import create_app
+    from attendance.web.personal import token
+    app, clock, sent = core
+    app.cfg.schedule.late_after = '09:00'
+    connect(app, monkeypatch, [item()], approved=approved)
+    clock.t = at(hour, minute, second)
+    assert app.leave_sync.sync()['ok']
+    app.service.on_identified('B', clock(), .8, None)
+    rep = app.service.report(DAY)
+    assert bool(rep.late) == is_late
+    assert bool(app.service.late_people(DAY)) == is_late
+    assert any('Bob' in m and 'min late' in m for m in sent) == is_late
+    if is_late:
+        assert minutes_late(rep.late[0], rep.window) == minutes
+    else:
+        assert any(e == 'B' for e, _, _ in rep.on_leave)
+    web = create_app(app)
+    c = web.test_client()
+    page = c.get('/?tab=requests').get_data(as_text=True)
+    assert ('pending' in page) == (not approved)
+    assert (f'Late {minutes} min' in page) == is_late
+    sig = token(app.store, web.secret_key, 'B', create=True)
+    personal = c.get(f'/p/B/{sig}').get_data(as_text=True)
+    assert (f'Late {minutes} min' in personal) == is_late
+    exported = c.get(f'/report/details.csv?start={DAY}&end={DAY}').get_data(as_text=True)
+    bob = next(row for row in csv.DictReader(io.StringIO(exported)) if row['email'] == 'bob@example.com')
+    assert bob['status'] == ('late' if is_late else 'on_leave')
+    if is_late:
+        assert bob['minutes_late'] == str(minutes)
+    assert ('pending' in str(bob)) == (not approved)
+    assert ('pending' in build(app.service, DAY, 'B').status) == (not approved)
+
+
+@pytest.mark.parametrize('group', ['1978', '1967'])
+def test_pending_absence_does_not_excuse_attendance(core, monkeypatch, group):
+    app, clock, _ = core
+    connect(app, monkeypatch, [item(group=group, value='9:00-18:00')])
+    assert app.leave_sync.sync()['ok']
+    assert ('B', 'Bob') in app.service.report(DAY).not_seen
+    clock.t = at(10, 20)
+    app.service.on_identified('B', clock(), .8, None)
+    assert [a.employee_id for a in app.service.report(DAY).late] == ['B']
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+def test_multiple_requests_use_latest_approved_deadline(core, monkeypatch, reverse):
+    from attendance.core.service import minutes_late
+    app, clock, _ = core
+    connect(app, monkeypatch, [])
+    rows = [item(value='9:00-10:30'), item(value='9:00-09:30')]
+    approved = base_timeoff.parse(rows[::-1] if reverse else rows, DAY, dt.time(10), approved=True)
+    approved['bob'] += base_timeoff.parse([item(value='9:00-11:30')], DAY, dt.time(10), approved=False)['bob']
+    monkeypatch.setattr(base_timeoff, 'fetch', lambda *a: approved)
+    clock.t = at(10, 45)
+    assert app.leave_sync.sync()['ok']
+    app.service.on_identified('B', clock(), .8, None)
+    rep = app.service.report(DAY)
+    assert [a.employee_id for a in rep.late] == ['B']
+    assert minutes_late(rep.late[0], rep.window) == 15

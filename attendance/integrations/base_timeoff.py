@@ -1,4 +1,4 @@
-"""Base Timeoff V2: exact-day morning permissions, separate from manual/HR leave."""
+"""Base Timeoff V2: exact-day morning permissions and upcoming leave."""
 from __future__ import annotations
 
 import datetime as dt
@@ -28,7 +28,7 @@ def _post(form):
         return json.load(response)
 
 
-def parse(rows, day: dt.date, late_after: dt.time, *, approved: bool) -> dict:
+def parse(rows, day: dt.date, late_after: dt.time, *, approved: bool, morning_only: bool = True) -> dict:
     result = {}
     for row in rows:
         username = row['username'].strip().lstrip('@').lower()
@@ -58,7 +58,7 @@ def parse(rows, day: dt.date, late_after: dt.time, *, approved: bool) -> dict:
                     if end <= start:
                         raise ValueError('invalid Base shift interval')
                     morning = start < dt.time(12) if group == '1977' else start <= late_after < end
-                if not morning:
+                if morning_only and not morning:
                     continue
                 kind = KINDS.get(group)
                 if kind is None:
@@ -70,14 +70,12 @@ def parse(rows, day: dt.date, late_after: dt.time, *, approved: bool) -> dict:
     return result
 
 
-def fetch(day: dt.date, late_after: dt.time, token: str, *, post=_post) -> dict:
-    """Fetch only approved and pending requests; an incomplete response never replaces the cache."""
-    result = {}
+def _pages(start: dt.date, end: dt.date, token: str, post):
     for status in ('approved', 'pending'):
         page, seen, previous = 0, 0, set()
         while page < 1000:
-            data = post({'access_token_v2': token, 'start_date_to': day.strftime('%d/%m/%Y'),
-                         'end_date_from': day.strftime('%d/%m/%Y'), 's': status, 'page': page})
+            data = post({'access_token_v2': token, 'start_date_to': end.strftime('%d/%m/%Y'),
+                         'end_date_from': start.strftime('%d/%m/%Y'), 's': status, 'page': page})
             if not isinstance(data, dict) or str(data.get('code')) != '1':
                 raise ValueError('Base rejected the request; check token V2 validity and Timeoff scope')
             rows = data.get('timeoffs')
@@ -90,9 +88,7 @@ def fetch(day: dt.date, late_after: dt.time, token: str, *, post=_post) -> dict:
             if rows and fingerprint in previous:
                 raise ValueError('Base repeated a page; attendance deferred')
             previous.add(fingerprint)
-            parsed = parse(rows, day, late_after, approved=status == 'approved')
-            for username, entries in parsed.items():
-                result.setdefault(username, []).extend(entries)
+            yield rows, status == 'approved'
             seen += len(rows)
             if seen >= total:
                 break
@@ -101,17 +97,56 @@ def fetch(day: dt.date, late_after: dt.time, token: str, *, post=_post) -> dict:
             page += 1
         else:
             raise ValueError('Base pagination exceeded limit')
+
+
+def fetch(day: dt.date, late_after: dt.time, token: str, *, post=_post) -> dict:
+    """Fetch only approved and pending requests; an incomplete response never replaces the cache."""
+    result = {}
+    for rows, approved in _pages(day, day, token, post):
+        for username, entries in parse(rows, day, late_after, approved=approved).items():
+            result.setdefault(username, []).extend(entries)
     return result
 
 
-def permissions(store, day: dt.date) -> tuple[dict, dict]:
+def fetch_upcoming(start: dt.date, end: dt.date, token: str, *, post=_post) -> dict:
+    """Approved and pending leave, including afternoon shifts, without granting attendance permissions."""
+    result = {}
+    if end < start:
+        return result
+    for rows, approved in _pages(start, end, token, post):
+        dates = {dt.datetime.fromtimestamp(int(shift['datetime']), VN).date()
+                 for row in rows for shift in row['shifts']}
+        for day in sorted(d for d in dates if start <= d <= end):
+            parsed = parse(rows, day, dt.time(12), approved=approved, morning_only=False)
+            for username, entries in parsed.items():
+                for entry in entries:
+                    if entry['absence']:
+                        value = {'day': day.isoformat(), **entry}
+                        if value not in result.setdefault(username, []):
+                            result[username].append(value)
+    for entries in result.values():
+        entries.sort(key=lambda entry: entry['day'])
+    return result
+
+
+def permissions(store, day: dt.date) -> tuple[dict, dict, dict]:
+    """Approved arrival permissions (label, deadline), approved absences, and all request labels."""
     snapshot = json.loads(store.get(f'base_timeoffs:{day}') or '{}')
-    late, absent = {}, {}
+    late, absent, requests = {}, {}, {}
     for person in store.all_employees():
         entries = snapshot.get(person.base_username, []) if person.base_username else []
         for entry in entries:
-            label = entry['kind'] + ('' if entry['approved'] else ' (pending approval)') + ': ' + entry['shift']
-            late[person.id] = label
+            label = entry['kind'] + ('' if entry['approved'] else ' (pending)') + ': ' + entry['shift']
+            requests[person.id] = requests[person.id] + '; ' + label if person.id in requests else label
+            if not entry['approved']:
+                continue
             if entry['absence']:
                 absent[person.id] = label
-    return late, absent
+                late[person.id] = (label, None)
+            else:
+                interval = re.fullmatch(r'\d{1,2}:\d{2}\s*-\s*(\d{1,2}:\d{2})', entry['shift'])
+                if interval:
+                    until = parse_clock(interval[1])
+                    if person.id not in late or (late[person.id][1] is not None and until > late[person.id][1]):
+                        late[person.id] = (label, until)
+    return late, absent, requests

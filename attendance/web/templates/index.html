@@ -16,6 +16,7 @@
       {% elif status == 'exempt' %}<span class="badge {{ 'ok' if a else 'info' }}" title="Never counted as late or absent">{{ 'Arrived' if a else 'Not here' }} · not counted</span>
       {% elif rep.no_camera_data %}<span class="badge info">No camera data</span>
       {% else %}<span class="badge bad">Not seen</span>{% endif %}
+      {% if status != 'on_leave' and (note or rep.requests.get(emp_id)) %}<div class="cell-sub"><span class="badge info">{{ note or rep.requests[emp_id] }}</span></div>{% endif %}
     </td>
     <td class="num tnum">{{ a.time if a else '–' }}</td>
     <td class="hide-sm">{% if a %}<span class="src" title="{{ SOURCES.get(a.source, a.source) }}">{{ icon(SRC_ICON.get(a.source, 'info')) }}{% if a.score %}<span class="tnum">{{ '%.0f'|format(a.score * 100) }}%</span>{% endif %}</span>{% endif %}</td>
@@ -33,10 +34,11 @@
     </div>
   </div>
   <form class="actions" method="get">
-    <a class="btn btn-sm icon" href="{{ url_for('index', day=prev_day.isoformat()) }}" title="Previous day" aria-label="Previous day">{{ icon('chevron-left') }}</a>
+    {% if requests_tab %}<input type="hidden" name="tab" value="requests">{% endif %}
+    <a class="btn btn-sm icon" href="{{ url_for('index', day=prev_day.isoformat(), tab='requests' if requests_tab else None) }}" title="Previous day" aria-label="Previous day">{{ icon('chevron-left') }}</a>
     <input type="date" name="day" value="{{ rep.day.isoformat() }}" data-autosubmit aria-label="Pick a day">
-    <a class="btn btn-sm icon" href="{{ url_for('index', day=next_day.isoformat()) }}" title="Next day" aria-label="Next day">{{ icon('chevron-right') }}</a>
-    {% if rep.day != today %}<a class="btn btn-sm btn-soft" href="{{ url_for('index') }}">{{ icon('today') }}Today</a>{% endif %}
+    <a class="btn btn-sm icon" href="{{ url_for('index', day=next_day.isoformat(), tab='requests' if requests_tab else None) }}" title="Next day" aria-label="Next day">{{ icon('chevron-right') }}</a>
+    {% if rep.day != today %}<a class="btn btn-sm btn-soft" href="{{ url_for('index', tab='requests' if requests_tab else None) }}">{{ icon('today') }}Today</a>{% endif %}
   </form>
 </div>
 
@@ -59,14 +61,21 @@
   {% for id, name in rep.no_photos %}<a href="{{ url_for('employee', employee_id=id) }}">{{ name }}</a>{{ ', ' if not loop.last }}{% endfor %}</span></div>{% endif %}
 {% if rep.day == today and rep.workday and not started %}<div class="alert info"><span class="ico">{{ icon('clock') }}</span><span>Camera starts at {{ rep.window.start.strftime('%H:%M') }}.</span></div>{% endif %}
 
+<nav class="seg" aria-label="Today views">
+  <a href="{{ url_for('index', day=rep.day.isoformat()) }}" {% if not requests_tab %}class="on" aria-current="page"{% endif %}>Attendance</a>
+  <a href="{{ url_for('index', day=rep.day.isoformat(), tab='requests') }}" {% if requests_tab %}class="on" aria-current="page"{% endif %}>WFH &amp; Coming late <span class="tnum">{{ request_leaves|length }}</span></a>
+</nav>
+
+{% if not requests_tab %}
 <div class="tiles">
-  <button class="tile active" type="button" data-filter="all"><div class="n">{{ rep.total + rep.on_leave|length + rep.exempt|length }}</div><div class="l">Everyone</div></button>
+  <button class="tile active" type="button" data-filter="all"><div class="n">{{ rep.total + attendance_leaves|length + rep.exempt|length }}</div><div class="l">Everyone</div></button>
   <button class="tile late" type="button" data-filter="late"><div class="n">{{ rep.late|length }}</div><div class="l">Late</div></button>
   <button class="tile bad" type="button" data-filter="not_seen"><div class="n">{{ rep.not_seen|length }}</div><div class="l">Not seen</div></button>
   <button class="tile ok" type="button" data-filter="on_time"><div class="n">{{ rep.on_time|length }}</div><div class="l">On time</div></button>
-  <button class="tile info" type="button" data-filter="on_leave"><div class="n">{{ rep.on_leave|length }}</div><div class="l">On leave</div></button>
+  <button class="tile info" type="button" data-filter="on_leave"><div class="n">{{ attendance_leaves|length }}</div><div class="l">On leave</div></button>
   {% if rep.pending_unknowns %}<a class="tile bad" href="{{ url_for('unknowns') }}" title="Faces to review"><div class="n">{{ rep.pending_unknowns }}</div><div class="l">Review {{ icon('chevron-right') }}</div></a>{% endif %}
 </div>
+{% endif %}
 
 <div class="row between" style="margin-bottom:12px">
   <div class="search" style="flex: 0 1 340px"><input type="search" id="search" placeholder="Search…" aria-label="Search by name or email"></div>
@@ -86,20 +95,29 @@
   <table id="people">
     <thead><tr><th style="width:60px"></th><th>Person</th><th>Status</th><th class="num">Arrived</th><th class="hide-sm">Source</th><th></th></tr></thead>
     <tbody>
+      {% if requests_tab %}
+      {% for id, name, kind in request_leaves %}
+        {% set status, arrival = request_status.get(id, ('on_leave', rep.permitted_arrivals.get(id))) %}
+        {{ row(status, id, name, arrival, kind) }}
+      {% endfor %}
+      {% else %}
       {% for a in rep.late %}{{ row('late', a.employee_id, a.name, a) }}{% endfor %}
       {% for id, name in rep.not_seen %}{{ row('not_seen', id, name) }}{% endfor %}
-      {% for id, name, kind in rep.on_leave %}{{ row('on_leave', id, name, rep.permitted_arrivals.get(id), kind) }}{% endfor %}
+      {% for id, name, kind in attendance_leaves %}{{ row('on_leave', id, name, rep.permitted_arrivals.get(id), kind) }}{% endfor %}
       {% for a in rep.on_time %}{{ row('on_time', a.employee_id, a.name, a) }}{% endfor %}
       {% for id, name, a in rep.exempt %}{{ row('exempt', id, name, a) }}{% endfor %}
+      {% endif %}
     </tbody>
   </table>
-  {% if not (rep.late or rep.not_seen or rep.on_leave or rep.on_time or rep.exempt) %}
+  {% if requests_tab and not request_leaves %}
+    <div class="empty-state">No WFH or Coming late requests for this day.</div>
+  {% elif not requests_tab and not (rep.late or rep.not_seen or attendance_leaves or rep.on_time or rep.exempt) %}
     <div class="empty-state"><span class="ico">{{ icon('employees') }}</span><span>No people yet. <a href="{{ url_for('employees') }}">Add them</a>, or let the camera collect faces.</span></div>
   {% endif %}
   <div class="empty-state" id="empty" hidden><span class="ico">{{ icon('search') }}</span>Nobody matches.</div>
 </div>
 
-{% if late_msg.enabled and rep.workday %}
+{% if not requests_tab and late_msg.enabled and rep.workday %}
 <div class="card" style="margin-top:16px">
   <div class="card-head">
     <h2 class="row">{{ icon('chat') }}Late message</h2>
@@ -246,7 +264,7 @@
   }
 
   // The chosen filter is kept in the address, so it survives the automatic refresh.
-  let filter = location.hash.slice(1) || 'all';
+  let filter = {% if requests_tab %}'all'{% else %}location.hash.slice(1) || 'all'{% endif %};
   const search = document.getElementById('search');
   // Click anywhere on a row (handy on phones, where the Edit column may be off-screen).
   document.querySelectorAll('#people tr.editable').forEach(tr => tr.addEventListener('click', e => {

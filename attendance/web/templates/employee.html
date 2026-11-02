@@ -132,8 +132,49 @@
     </div>
 
     <div class="card">
+      <div class="card-head"><h2 class="row">{{ icon('hr') }}Timeoff requests</h2>
+        <span class="hint tnum">Today · {{ timeoff_day.strftime('%d %b %Y') }}</span></div>
+      {% if timeoff_status.warning %}<p class="hint">{{ timeoff_status.warning|replace('⚠️ ', '') }}</p>{% endif %}
+      {% if not person.base_username %}
+        <p class="muted" style="margin:0">Add a Base username in Details to match this person's requests.</p>
+      {% elif not timeoff_synced %}
+        <p class="muted" style="margin:0">No synced request data for today.</p>
+      {% elif timeoff_requests %}
+        <div class="list">
+        {% for entry in timeoff_requests %}
+          <div>
+            <span><strong>{{ entry.kind }}</strong><br><span class="cell-sub tnum">{{ entry.shift }}</span></span>
+            <span class="badge {{ 'ok' if entry.approved else 'info' }}">{{ 'Approved' if entry.approved else 'Pending' }}</span>
+          </div>
+        {% endfor %}
+        </div>
+        <p class="hint" style="margin-bottom:0">From Base Timeoff{% if timeoff_status.last_success %} · synced {{ timeoff_status.last_success.strftime('%H:%M') }}{% endif %}. Pending requests do not excuse late or missing arrivals.</p>
+      {% else %}
+        <p class="muted" style="margin:0">No requests for today.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
       <div class="card-head"><h2 class="row">{{ icon('calendar') }}Upcoming leave</h2>
-        <a class="btn btn-sm ghost" href="{{ url_for('calendar_page') }}" title="Everyone's leave, holidays and extra work days">{{ icon('calendar') }}All</a></div>
+        {% if base_enabled %}<span class="badge plain">{{ icon('hr') }}Base</span>{% else %}<a class="btn btn-sm ghost" href="{{ url_for('calendar_page') }}" title="Everyone's leave, holidays and extra work days">{{ icon('calendar') }}All</a>{% endif %}</div>
+      {% if base_enabled %}
+        {% if base_upcoming.ok is defined and not base_upcoming.ok %}<p class="hint">Upcoming leave could not be refreshed from Base. Showing the last available data.</p>{% endif %}
+        {% if not person.base_username %}
+          <p class="muted" style="margin:0">Add a Base username in Details to match this person's requests.</p>
+        {% elif not base_upcoming.last_success %}
+          <p class="muted" style="margin:0">No upcoming leave synced from Base yet.</p>
+        {% else %}
+          <div class="list">
+          {% for entry in base_upcoming.entries %}
+            <div>
+              <span><span class="tnum">{{ entry.date.strftime('%d %b %Y') }}</span> · <strong>{{ entry.kind }}</strong><br><span class="cell-sub">{{ entry.shift }}</span></span>
+              <span class="badge {{ 'ok' if entry.approved else 'info' }}">{{ 'Approved' if entry.approved else 'Pending' }}</span>
+            </div>
+          {% else %}<p class="muted" style="margin:0">No upcoming leave in Base.</p>{% endfor %}
+          </div>
+          <p class="hint" style="margin-bottom:0">From Base Timeoff · synced {{ base_upcoming.last_success[:16]|replace('T', ' ') }} · through {{ base_upcoming.to }}. Change requests in Base.</p>
+        {% endif %}
+      {% else %}
       <div class="list">
       {% for l in leaves %}
         <div><span class="tnum">{{ l.start.strftime('%d %b') }}{% if l.end != l.start %} – {{ l.end.strftime('%d %b') }}{% endif %}
@@ -161,6 +202,7 @@
           <div><button class="primary">{{ icon('check') }}Save leave</button></div>
         </form>
       </details>
+      {% endif %}
     </div>
 
     <div class="card">

@@ -88,14 +88,16 @@ def register(app: Flask, core: "App") -> None:
         rows = []
         for d in rep.days:
             outage = "; ".join(f"camera down {a:%H:%M}-{b:%H:%M}" for a, b in d.outages)
+            notes = {emp: "; ".join(filter(None, [outage, label])) for emp, label in d.requests.items()}
             for a in d.on_time:
-                rows.append([d.day, a.employee_id, a.name, "on_time", a.time, 0, SOURCES.get(a.source, a.source), outage])
+                rows.append([d.day, a.employee_id, a.name, "on_time", a.time, 0,
+                             SOURCES.get(a.source, a.source), notes.get(a.employee_id, outage)])
             for a in d.late:
                 rows.append([d.day, a.employee_id, a.name, "late", a.time, minutes_late(a, d.window),
-                             SOURCES.get(a.source, a.source), outage])
+                             SOURCES.get(a.source, a.source), notes.get(a.employee_id, outage)])
             for emp_id, name in d.not_seen:
                 rows.append([d.day, emp_id, name, "no_camera_data" if d.no_camera_data else "not_seen",
-                             "", "", "", outage])
+                             "", "", "", notes.get(emp_id, outage)])
             for emp_id, name, kind in d.on_leave:
                 arrival = d.permitted_arrivals.get(emp_id)
                 rows.append([d.day, emp_id, name, "on_leave", arrival.time if arrival else "", "", kind, outage])

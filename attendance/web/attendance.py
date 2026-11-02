@@ -71,6 +71,16 @@ def register(app: Flask, core: "App") -> None:
         today = service.now().date()
         day = _date(request.args.get("day"), today)
         rep = service.report(day)
+        requests_tab = request.args.get("tab") == "requests"
+        request_kinds = ("WFH", "Coming late", "Working remotely")
+        labels = {**dict((emp, kind) for emp, _, kind in rep.on_leave), **rep.requests}
+        request_leaves = [(emp, name, labels[emp]) for emp, name in store.employees().items()
+                          if emp in labels and any(kind in labels[emp] for kind in request_kinds)]
+        request_ids = {emp for emp, _, _ in request_leaves}
+        attendance_leaves = [row for row in rep.on_leave if row[0] not in request_ids]
+        request_status = {a.employee_id: (status, a) for status, arrivals in
+                          (("late", rep.late), ("on_time", rep.on_time)) for a in arrivals}
+        request_status.update({emp: ("not_seen", None) for emp, _ in rep.not_seen})
         sightings: dict[str, list[dict]] = {}
         arrivals = store.checkins(day)
         for x in store.sightings(day):
@@ -81,6 +91,8 @@ def register(app: Flask, core: "App") -> None:
                 "source": SOURCES.get(x.source, x.source), "score": round(x.score * 100) if x.score else None,
                 "image": url_for("media", path=x.image) if x.image else None})
         return render_template("index.html", rep=rep, employees=store.employees(), sightings=sightings,
+                               requests_tab=requests_tab, request_leaves=request_leaves,
+                               attendance_leaves=attendance_leaves, request_status=request_status,
                                late=lambda a: minutes_late(a, rep.window), today=today,
                                prev_day=day - dt.timedelta(days=1), next_day=day + dt.timedelta(days=1),
                                leave=leave_status(core), started=service.now() >= rep.window.start,

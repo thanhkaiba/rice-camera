@@ -173,6 +173,8 @@ def build(service, day: dt.date, employee_id: str) -> Evidence:
         status = "Not seen" + (" (no camera data that day)" if rep.no_camera_data else "")
     else:
         status = "Not on the list that day"
+    if employee_id in rep.requests and rep.requests[employee_id] not in status:
+        status += " · " + rep.requests[employee_id]
 
     items = []
     for s in store.sightings(day, employee_id):

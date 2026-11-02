@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from flask import Flask, abort, flash, redirect, render_template, request, url_for
 
 from ..store import LEAVE_KINDS
-from ..integrations.base_timeoff import permissions as base_permissions
+from ..core.service import minutes_late
 from . import current_user, done
 
 if TYPE_CHECKING:
@@ -58,16 +58,17 @@ def register(app: Flask, core: "App") -> None:
         w = service.window(day)
         arrival = store.checkins(day).get(employee_id)
         leave = store.leaves_on(day).get(employee_id)
-        permitted_late, permitted_absence = base_permissions(store, day)
-        leave = leave or (permitted_late if arrival is not None else permitted_absence).get(employee_id)
+        rep = service.report(day)
+        leave = leave or next((label for emp, _, label in rep.on_leave if emp == employee_id), None)
+        late = next((a for a in rep.late if a.employee_id == employee_id), None)
         row = {"day": day, "workday": workday, "time": None, "status": "", "kind": "info"}
         if arrival is not None:
             ts = service._local(arrival.first_seen)
             row["time"] = f"{ts:%H:%M}"
             if exempt or not workday or leave:
                 row["status"], row["kind"] = "Arrived", "ok"
-            elif ts >= w.late_from:
-                row["status"], row["kind"] = f"Late {int((ts - w.late_after).total_seconds() // 60)} min", "late"
+            elif late is not None:
+                row["status"], row["kind"] = f"Late {minutes_late(late, w)} min", "late"
             else:
                 row["status"], row["kind"] = "On time", "ok"
         if leave:
@@ -76,6 +77,8 @@ def register(app: Flask, core: "App") -> None:
             row["status"] = row["status"] or note or "Not a work day"
         elif arrival is None and not exempt:
             row["status"], row["kind"] = ("Not seen", "bad") if now >= w.late_from else ("", "info")
+        if employee_id in rep.requests and not leave:
+            row["status"] += (" · " if row["status"] else "") + rep.requests[employee_id]
         return row
 
     @app.get("/p/<employee_id>/<sig>")
