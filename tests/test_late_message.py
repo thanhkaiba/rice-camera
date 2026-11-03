@@ -461,3 +461,39 @@ def test_backgrounds_take_turns_by_day_and_the_admins_own_come_first(tmp_path):
     single = latephoto.background_path(tmp_path)
     cv2.imwrite(str(single), np.full((90, 160, 3), 200, np.uint8))
     assert latephoto.day_background(tmp_path, days[0]) == single  # the one uploaded in Settings wins
+
+
+def test_reference_photo_stands_in_when_the_camera_did_not_see_the_person(core):
+    """An arrival entered by hand has no camera picture: the person's best reference photo (the
+    highest quality score, then the newest) is shown instead, whole, on a light card."""
+    import cv2
+    from test_evidence import seen
+
+    from attendance.core import latephoto
+    from conftest import face_image
+
+    app, clock, _ = core
+    clock.t = at(10, 40)
+    late(app, "C", 10, 32)  # by hand, and Carol has no reference photo: no picture
+    assert app.service.late_photo(DAY) is None
+    folder = app.data_dir / "faces" / "C"
+    folder.mkdir(parents=True)
+    for name, score, when in (("a.jpg", 0.5, at(9, 0)), ("b.jpg", 0.9, at(9, 1)), ("c.jpg", 0.9, at(9, 2)),
+                              ("gone.jpg", 1.0, at(9, 3))):
+        if name != "gone.jpg":
+            cv2.imwrite(str(folder / name), face_image(3, 120))
+        app.store.add_embedding(app.cfg.recognition.model_id(), "C", face_image(3)[0, 0], "upload", when,
+                                f"faces/C/{name}", True, score)
+    assert app.service.best_reference_photo("C") == folder / "c.jpg"  # best score, newest; a missing file is skipped
+    rel = app.service.late_photo(DAY)
+    assert rel and (app.data_dir / rel).exists()
+    key = (app.data_dir / rel).with_suffix(".key").read_text()
+    seen(app, "B", at(10, 15))  # the camera's picture is still preferred for someone it saw
+    assert app.service.late_photo(DAY) == rel and (app.data_dir / rel).with_suffix(".key").read_text() != key
+    people = [latephoto.Person("Carol", "10:32", 32, folder / "c.jpg", "", True),
+              latephoto.Person("Bob", "10:15", 15, folder / "c.jpg")]
+    assert latephoto.fingerprint(people, None) != latephoto.fingerprint(
+        [latephoto.Person("Carol", "10:32", 32, folder / "c.jpg"), people[1]], None)
+    card, _ = latephoto._card(people[0])
+    inner = card[latephoto.BORDER:-latephoto.BORDER, latephoto.BORDER:-latephoto.BORDER]
+    assert (inner[-1, 0] == 235).all() and (inner[60, inner.shape[1] // 2] == 30).all()  # light card, face in the upper part

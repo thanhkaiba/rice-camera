@@ -50,6 +50,7 @@ class Person:
     minutes: int  # late by
     photo: Path | None  # the whole person (or the face when that is all there is)
     registered: str = ""  # the "coming late" interval approved on Base (9:00-09:20) that was still missed
+    from_gallery: bool = False  # a reference photo (a face), not the camera's picture of the arrival
 
     def lines(self) -> list[str]:
         """What the tag says under the name."""
@@ -434,6 +435,21 @@ def _fill(photo: np.ndarray, w: int, h: int) -> np.ndarray:
     return photo[:h, x:x + w]
 
 
+def _portrait(photo: np.ndarray, w: int, h: int) -> np.ndarray:
+    """A reference photo (a face, nearly square) shown whole: scaled to the card's width and set
+    in the upper part of a light card, where the camera's pictures have the head."""
+    import cv2
+
+    ph, pw = photo.shape[:2]
+    scale = min(w / pw, h / ph)
+    photo = cv2.resize(photo, (max(1, round(pw * scale)), max(1, round(ph * scale))), interpolation=cv2.INTER_AREA)
+    image = np.full((h, w, 3), 235, np.uint8)
+    y = min(max(0, (h - photo.shape[0]) // 4), h - photo.shape[0])
+    x = (w - photo.shape[1]) // 2
+    image[y:y + photo.shape[0], x:x + photo.shape[1]] = photo
+    return image
+
+
 def _placeholder(w: int, h: int) -> np.ndarray:
     """A grey figure with a question mark, for someone whose arrival was entered without a photo."""
     import cv2
@@ -454,7 +470,12 @@ def _card(person: Person) -> tuple[np.ndarray, np.ndarray]:
 
     photo = cv2.imread(str(person.photo)) if person.photo and person.photo.exists() else None
     inner_w, inner_h = CARD_W - 2 * BORDER, CARD_H - 2 * BORDER
-    inner = _fill(photo, inner_w, inner_h) if photo is not None and photo.size else _placeholder(inner_w, inner_h)
+    if photo is None or not photo.size:
+        inner = _placeholder(inner_w, inner_h)
+    elif person.from_gallery:
+        inner = _portrait(photo, inner_w, inner_h)
+    else:
+        inner = _fill(photo, inner_w, inner_h)
     image = cv2.copyMakeBorder(inner, BORDER, BORDER, BORDER, BORDER, cv2.BORDER_CONSTANT, value=(255, 255, 255))
     alpha = np.zeros((CARD_H, CARD_W), np.float32)
     _rounded(alpha, 0, 0, CARD_W - 1, CARD_H - 1, 1.0, r=16)
@@ -546,7 +567,7 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
 
 # files --------------------------------------------------------------------------------------
 
-LOOK = 5  # raise when the drawing changes, so pictures already made are made again
+LOOK = 6  # raise when the drawing changes, so pictures already made are made again
 
 
 def fingerprint(people: list[Person], background: Path | None) -> str:
@@ -556,7 +577,7 @@ def fingerprint(people: list[Person], background: Path | None) -> str:
         s = p.stat() if p and p.exists() else None
         return (str(p), s.st_size if s else 0, s.st_mtime_ns if s else 0)
 
-    parts = [(p.name, p.time, p.minutes, p.registered, stat(p.photo)) for p in people] + [stat(background), LOOK]
+    parts = [(p.name, p.time, p.minutes, p.registered, p.from_gallery, stat(p.photo)) for p in people] + [stat(background), LOOK]
     return hashlib.sha256(repr(parts).encode()).hexdigest()
 
 

@@ -267,9 +267,10 @@ class AttendanceService:
         return f"{prefix}{lm.intro} {joined}"
 
     def late_photo(self, day: dt.date) -> str | None:
-        """One picture of the day's late people (the whole person as the camera saw them, name and
-        time burned in), made or refreshed as needed: its path under the data folder. None when
-        the picture is switched off, nobody is late, or none of the late people was on camera."""
+        """One picture of the day's late people (the whole person as the camera saw them, or their
+        best reference photo when the arrival was entered by hand; name and time burned in), made
+        or refreshed as needed: its path under the data folder. None when the picture is switched
+        off, nobody is late, or there is no photo of any of the late people."""
         if not self.cfg.late_message.photo:
             return None
         people = self.late_people(day)
@@ -282,9 +283,13 @@ class AttendanceService:
             if a.image:  # the whole person when it was kept, else the face
                 photo = next((data_dir / rel for rel in (body_photo(a.image), a.image) if (data_dir / rel).exists()),
                              None)
+            from_gallery = False
+            if photo is None:
+                photo = self.best_reference_photo(a.employee_id)
+                from_gallery = photo is not None
             items.append(latephoto.Person(self.chat_name(a.employee_id, a.name), a.time, minutes_late(a, w), photo,
-                                          a.registered))
-        if not any(p.photo for p in items):  # nobody on camera (all entered by hand): nothing to show
+                                          a.registered, from_gallery))
+        if not any(p.photo for p in items):  # nobody on camera and no reference photos: nothing to show
             latephoto.remove(data_dir, day)
             return None
         try:
@@ -292,6 +297,16 @@ class AttendanceService:
         except Exception:
             log.exception("Could not make the picture of the late people")
             return None
+
+    def best_reference_photo(self, employee_id: str) -> Path | None:
+        """The person's best reference photo (highest quality score, then the newest) that is still
+        on disk, for the picture of the late people when the camera did not see them."""
+        data_dir = self.cfg.path(self.cfg.data_dir)
+        refs = [r for r in self.store.references(self.model_id, employee_id) if r.image and (data_dir / r.image).exists()]
+        if not refs:
+            return None
+        best = max(refs, key=lambda r: (r.quality_score if r.quality_score is not None else -1.0, r.created_at, r.id))
+        return data_dir / best.image
 
     def _photo_secret(self) -> str:
         secret = self.store.get("late_photo_secret")
