@@ -120,7 +120,7 @@
     <div class="form-row">
       <label class="field grow">Intro<input name="late_message.intro" value="{{ s.late_message.intro }}">{{ src('late_message.intro') }}</label>
       <label class="field grow">Per person<input name="late_message.item" value="{{ s.late_message.item }}">
-        <span class="hint">{mention} {name} {time} {minutes}</span>{{ src('late_message.item') }}</label>
+        <span class="hint">{mention} {name} {time} {minutes} {registered}</span>{{ src('late_message.item') }}</label>
     </div>
     <div class="form-row" style="margin-top:14px; align-items:center">
       {{ check('late_message', 'auto_send', 'Send automatically at') }}

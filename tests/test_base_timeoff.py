@@ -417,3 +417,33 @@ def test_multiple_requests_use_latest_approved_deadline(core, monkeypatch, rever
     rep = app.service.report(DAY)
     assert [a.employee_id for a in rep.late] == ['B']
     assert minutes_late(rep.late[0], rep.window) == 15
+
+
+def test_late_after_a_coming_late_permission_shows_the_registered_interval(core, monkeypatch):
+    """Bob may come at 09:30 (Base, approved) but comes at 10:15: the message and the picture
+    say what he registered and when he arrived."""
+    from test_evidence import seen
+
+    from attendance.core import latephoto
+
+    app, clock, _ = core
+    connect(app, monkeypatch, [item(value='9:00-09:30')], approved=True)
+    assert app.leave_sync.sync()['ok']
+    clock.t = at(10, 40)
+    seen(app, 'B', at(10, 15))
+    seen(app, 'C', at(10, 32))  # no permission: the line stays as before
+    rep = app.service.report(DAY)
+    assert [(a.employee_id, a.registered) for a in rep.late] == [('B', '9:00-09:30'), ('C', '')]
+    assert app.service.late_text(DAY, preview=True) == \
+        'Morning, coming late today: @Bob (10:15, registered 9:00-09:30), and @Carol (10:32)'
+    app.cfg.late_message.item = '{mention} {minutes} min{registered}'
+    assert app.service.late_text(DAY, preview=True) == \
+        'Morning, coming late today: @Bob 15 min, registered 9:00-09:30, and @Carol 32 min'  # late time 10:00
+
+    people = [latephoto.Person('Bob', '10:15', 45, None, '9:00-09:30'), latephoto.Person('Carol', '10:32', 32, None)]
+    assert people[0].lines() == ['Registered 9:00-09:30', 'Arrived 10:15 (+45 min)']
+    assert people[1].lines() == ['10:32  +32 min']
+    assert latephoto.fingerprint(people, None) != latephoto.fingerprint(
+        [latephoto.Person('Bob', '10:15', 45, None), people[1]], None)
+    rel = app.service.late_photo(DAY)
+    assert rel and (app.data_dir / rel).exists()

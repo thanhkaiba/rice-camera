@@ -36,6 +36,7 @@ BORDER = 6  # white edge of a card, px
 PER_ROW = 6  # people in a row at most; more go on further rows so name tags keep their room
 GAP = 34  # between cards in a row
 TAG_GAP, TAG_H = 12, 56  # name tag under a card
+TAG_H3 = 80  # a three-line tag: someone registered as coming late on Base and still came after that
 ROW_GAP = 26
 TOP, BOTTOM = 120, 40  # room for the title above, margin below
 MARGIN = 60
@@ -48,6 +49,13 @@ class Person:
     time: str  # HH:MM
     minutes: int  # late by
     photo: Path | None  # the whole person (or the face when that is all there is)
+    registered: str = ""  # the "coming late" interval approved on Base (9:00-09:20) that was still missed
+
+    def lines(self) -> list[str]:
+        """What the tag says under the name."""
+        if self.registered:
+            return [f"Registered {self.registered}", f"Arrived {self.time} (+{self.minutes} min)"]
+        return [f"{self.time}  +{self.minutes} min"]
 
 
 def photo_path(day: dt.date) -> str:
@@ -453,8 +461,9 @@ def _card(person: Person) -> tuple[np.ndarray, np.ndarray]:
     return image, alpha
 
 
-def _tag(canvas: np.ndarray, cx: int, y: int, name: str, line2: str, width: int) -> None:
-    """A rounded name tag centred on cx with its top at y, the name as large as fits `width`."""
+def _tag(canvas: np.ndarray, cx: int, y: int, name: str, lines: list[str], width: int, height: int) -> None:
+    """A rounded name tag centred on cx with its top at y, the name as large as fits `width`, then
+    `lines` (one or two) in blue below it."""
     import cv2
 
     name = ascii_label(name)
@@ -462,13 +471,18 @@ def _tag(canvas: np.ndarray, cx: int, y: int, name: str, line2: str, width: int)
     while size > 0.42 and _width(name, size, 2) > width - 20:  # shrink a long name before cutting it
         size -= 0.04
     name = _fit(name, width - 20, size, 2)
-    line2 = _fit(line2, width - 20, 0.52)
-    w = min(width, max(_width(name, size, 2), _width(line2, 0.52)) + 28)
+    small = 0.52 if len(lines) == 1 else 0.44
+    while small > 0.36 and max(_width(line, small) for line in lines) > width - 20:  # shrink before cutting
+        small -= 0.02
+    lines = [_fit(line, width - 20, small) for line in lines]
+    w = min(width, max(_width(name, size, 2), *(_width(line, small) for line in lines)) + 28)
     x1, x2 = cx - w // 2, cx + w // 2
-    _rounded(canvas, x1 + 3, y + 3, x2 + 3, y + TAG_H + 3, (40, 40, 40), 10, alpha=0.35)  # shadow
-    _rounded(canvas, x1, y, x2, y + TAG_H, (255, 255, 255), 10)
+    _rounded(canvas, x1 + 3, y + 3, x2 + 3, y + height + 3, (40, 40, 40), 10, alpha=0.35)  # shadow
+    _rounded(canvas, x1, y, x2, y + height, (255, 255, 255), 10)
     cv2.putText(canvas, name, (cx - _width(name, size, 2) // 2, y + 25), FONT, size, (40, 40, 40), 2, cv2.LINE_AA)
-    cv2.putText(canvas, line2, (cx - _width(line2, 0.52) // 2, y + 47), FONT, 0.52, (0, 110, 230), 1, cv2.LINE_AA)
+    for i, line in enumerate(lines):
+        cv2.putText(canvas, line, (cx - _width(line, small) // 2, y + 47 + i * 21), FONT, small, (0, 110, 230), 1,
+                    cv2.LINE_AA)
 
 
 def _banner(canvas: np.ndarray, title: str) -> None:
@@ -505,7 +519,8 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
     rows, per_row = layout(len(people))
     slot = CARD_W + GAP
     width = max(MIN_WIDTH, 2 * MARGIN + per_row * slot)
-    row_h = CARD_H + TAG_GAP + TAG_H + ROW_GAP
+    tag_h = TAG_H3 if any(p.registered for p in people) else TAG_H
+    row_h = CARD_H + TAG_GAP + tag_h + ROW_GAP
     height = max(HEIGHT, TOP + rows * row_h + BOTTOM - ROW_GAP)
     canvas = load_background(background, width, height, seed)
     top = TOP + (height - TOP - BOTTOM - (rows * row_h - ROW_GAP)) // 2  # centre the rows below the banner
@@ -520,8 +535,7 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
             _rounded(shadow, x + 6, y + 8, x + CARD_W + 6, y + CARD_H + 8, (30, 30, 30), 16)
             cv2.addWeighted(shadow, 0.3, canvas, 0.7, 0, canvas)
             _paste(canvas, image, alpha, x, y)
-            _tag(canvas, x + CARD_W // 2, y + CARD_H + TAG_GAP, person.name,
-                 f"{person.time}  +{person.minutes} min", slot - 4)
+            _tag(canvas, x + CARD_W // 2, y + CARD_H + TAG_GAP, person.name, person.lines(), slot - 4, tag_h)
     bottom = top + rows * row_h - ROW_GAP + 8
     banner_right = 24 + _width(_fit(ascii_label(title), width - 160, 0.9, 2), 0.9, 2) + 110
     if background is None or not background.exists():  # fairies and balloons belong to the drawn scenes
@@ -532,7 +546,7 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
 
 # files --------------------------------------------------------------------------------------
 
-LOOK = 4  # raise when the drawing changes, so pictures already made are made again
+LOOK = 5  # raise when the drawing changes, so pictures already made are made again
 
 
 def fingerprint(people: list[Person], background: Path | None) -> str:
@@ -542,7 +556,7 @@ def fingerprint(people: list[Person], background: Path | None) -> str:
         s = p.stat() if p and p.exists() else None
         return (str(p), s.st_size if s else 0, s.st_mtime_ns if s else 0)
 
-    parts = [(p.name, p.time, p.minutes, stat(p.photo)) for p in people] + [stat(background), LOOK]
+    parts = [(p.name, p.time, p.minutes, p.registered, stat(p.photo)) for p in people] + [stat(background), LOOK]
     return hashlib.sha256(repr(parts).encode()).hexdigest()
 
 

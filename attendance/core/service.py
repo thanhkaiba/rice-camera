@@ -63,6 +63,7 @@ class Arrival:
     image: str | None
     score: float | None = None
     late_after: dt.datetime | None = None
+    registered: str = ""  # the "coming late" interval approved on Base (9:00-09:20) that was still missed
 
     @property
     def time(self) -> str:
@@ -258,7 +259,9 @@ class AttendanceService:
         lm, w = self.cfg.late_message, self.window(day)
         items = [lm.item.format(mention=f"@{self.chat_name(a.employee_id, a.name)}" if preview
                                 else self.mention(a.employee_id), name=self.chat_name(a.employee_id, a.name),
-                                time=a.time, minutes=minutes_late(a, w)) for a in people]
+                                time=a.time, minutes=minutes_late(a, w),
+                                registered=f", registered {a.registered}" if a.registered else "")
+                 for a in people]
         joined = items[0] if len(items) == 1 else ", ".join(items[:-1]) + ", and " + items[-1]
         prefix = "" if day == self.now().date() else f"{day:%A %d %b}: "
         return f"{prefix}{lm.intro} {joined}"
@@ -279,7 +282,8 @@ class AttendanceService:
             if a.image:  # the whole person when it was kept, else the face
                 photo = next((data_dir / rel for rel in (body_photo(a.image), a.image) if (data_dir / rel).exists()),
                              None)
-            items.append(latephoto.Person(self.chat_name(a.employee_id, a.name), a.time, minutes_late(a, w), photo))
+            items.append(latephoto.Person(self.chat_name(a.employee_id, a.name), a.time, minutes_late(a, w), photo,
+                                          a.registered))
         if not any(p.photo for p in items):  # nobody on camera (all entered by hand): nothing to show
             latephoto.remove(data_dir, day)
             return None
@@ -740,6 +744,8 @@ class AttendanceService:
                     rep.on_leave.append((emp_id, name, permission[0]))
                     rep.permitted_arrivals[emp_id] = a
                 else:
+                    if a.ts >= w.late_from and permission and permission[1] is not None:
+                        a.registered = permission[0].rpartition(": ")[2]
                     (rep.late if a.ts >= w.late_from else rep.on_time).append(a)
             elif emp_id in leave or emp_id in permitted_absence:
                 kind = leave.get(emp_id) or permitted_absence[emp_id]

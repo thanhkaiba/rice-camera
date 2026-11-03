@@ -20,16 +20,16 @@ def parse_clock(value) -> dt.time:
     return dt.datetime.strptime(str(value).strip(), "%H:%M").time()
 
 
-LATE_MESSAGE_FIELDS = ("mention", "name", "time", "minutes")
+LATE_MESSAGE_FIELDS = ("mention", "name", "time", "minutes", "registered")
 
 
 def check_late_message_item(item: str) -> None:
     """Allow only the documented placeholders: a format string can otherwise reach into objects
     ({mention.__class__}) or crash on an unknown attribute."""
-    error = ValueError("the late message line may only use {mention}, {name}, {time} and {minutes}")
+    error = ValueError("the late message line may only use {mention}, {name}, {time}, {minutes} and {registered}")
     try:
         fields = [name for _, name, _, _ in string.Formatter().parse(item) if name is not None]
-        item.format(mention="@A", name="A", time="10:15", minutes=15)
+        item.format(mention="@A", name="A", time="10:15", minutes=15, registered="")
     except (KeyError, IndexError, ValueError, AttributeError, TypeError):
         raise error from None
     if any(name not in LATE_MESSAGE_FIELDS for name in fields):
@@ -193,7 +193,9 @@ class LateMessageConfig:
     """One Google Chat message a day listing who came late, with an @mention for each person."""
     enabled: bool = True
     intro: str = "Morning, coming late today:"
-    item: str = "{mention} ({time})"  # placeholders: {mention}, {name}, {time}, {minutes}
+    # Placeholders: {mention}, {name}, {time}, {minutes}, {registered} (", registered 9:00-09:20" when
+    # the person had a "coming late" permission on Base and still came after it, else empty).
+    item: str = "{mention} ({time}{registered})"
     auto_send: bool = True
     send_at: str = ""  # empty: when the camera stops (window_end); can also be sent from the Today page
     # Attach one picture of the late people (the whole person as the camera saw them, name and time
