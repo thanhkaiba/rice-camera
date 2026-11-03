@@ -43,6 +43,10 @@ class LookAlike:
     a: str
     b: str
     score: float
+    ref_a: int | None = None  # the two reference photos that match most closely
+    ref_b: int | None = None
+    image_a: str | None = None
+    image_b: str | None = None
 
 
 @dataclass
@@ -360,13 +364,23 @@ class FaceLibrary:
         return sorted(out, key=lambda x: -x[1])
 
     def look_alikes(self, gallery: Gallery | None = None) -> list[LookAlike]:
-        """Pairs of active employees whose reference photos match each other at the acceptance threshold."""
+        """Pairs of active employees whose reference photos match each other at the acceptance
+        threshold, each with the two photos that match most closely."""
         threshold = self.cfg.recognition.accept_score
-        items = sorted((gallery if gallery is not None else self.gallery).snapshot().items())
+        gallery = gallery if gallery is not None else self.gallery
+        active = self.store.employees()
+        by_person: dict[str, list] = {}
+        for ref in self.store.references(self.model_id):
+            if ref.employee_id in active:
+                by_person.setdefault(ref.employee_id, []).append(ref)
+        items = sorted((p, np.stack([gallery.prepare(r.vector) for r in rows])) for p, rows in by_person.items())
         pairs = []
-        for i, (a, ra) in enumerate(items):
-            for b, rb in items[i + 1:]:
-                score = float(np.max(ra @ rb.T))
+        for i, (a, ma) in enumerate(items):
+            for b, mb in items[i + 1:]:
+                sims = ma @ mb.T
+                ia, ib = np.unravel_index(int(np.argmax(sims)), sims.shape)
+                score = float(sims[ia, ib])
                 if score >= threshold:
-                    pairs.append(LookAlike(a, b, score))
+                    ra, rb = by_person[a][ia], by_person[b][ib]
+                    pairs.append(LookAlike(a, b, score, ra.id, rb.id, ra.image, rb.image))
         return sorted(pairs, key=lambda p: -p.score)

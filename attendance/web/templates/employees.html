@@ -21,6 +21,18 @@
 
 <div class="card">{% include '_reference_quality.html' %}</div>
 
+{% if image_scores %}
+<form method="post" action="{{ url_for('delete_photos_everyone') }}" id="delete-low-score-photos" class="card"
+      data-scores="{{ image_scores|tojson|forceescape }}" data-confirm="Delete reference photos below the chosen Image score for everyone? Their face data will also be removed.">
+  <div class="form-row">
+    <label class="field">Delete everyone's photos with an Image score below
+      <input type="number" name="below_score" id="below-score" value="20" min="0" max="100" step="1" required></label>
+    <button class="danger" id="delete-below-score" disabled>{{ icon('trash') }}Delete below score (<span id="low-score-count">0</span>)</button>
+  </div>
+  <p class="hint" style="margin-bottom:0">All people, active or not. Uses the displayed Image score out of 100; photos at the threshold and photos without a score are kept.</p>
+</form>
+{% endif %}
+
 {% if seed_status.state == 'running' %}
   <div class="alert info" id="seed-running"><span class="ico">{{ icon('upload') }}</span><span><strong>Importing the seed</strong> · the camera is paused meanwhile.
     <span id="seed-progress">{{ seed_status.progress }}</span></span></div>
@@ -33,10 +45,15 @@
 {% if people and not counts %}
   <div class="alert info"><span class="ico">{{ icon('sparkles') }}</span><span><strong>No photos yet?</strong> Upload some, or let the camera run and name faces under <a href="{{ url_for('unknowns') }}">Review</a>.</span></div>
 {% endif %}
+{% macro look_alike_photo(employee_id, ref_id, image) -%}
+  {%- if ref_id %}<a class="avatar-link" href="{{ url_for('employee', employee_id=employee_id) }}#reference-{{ ref_id }}" title="Open photo #{{ ref_id }} of {{ names.get(employee_id, employee_id) }}">
+    {%- if image %}<img class="avatar" src="{{ url_for('media', path=image) }}" alt="Photo #{{ ref_id }}" loading="lazy">{% else %}<span class="avatar empty">#{{ ref_id }}</span>{% endif %}</a>{% endif -%}
+{%- endmacro %}
 {% for p in look_alikes %}
-  <div class="alert warn"><span class="ico">{{ icon('alert') }}</span><span><a href="{{ url_for('employee', employee_id=p.a) }}">{{ names.get(p.a, p.a) }}</a> and
+  <div class="alert warn"><span class="ico">{{ icon('alert') }}</span><span class="row" style="gap:10px; flex-wrap:wrap"><span><a href="{{ url_for('employee', employee_id=p.a) }}">{{ names.get(p.a, p.a) }}</a> and
     <a href="{{ url_for('employee', employee_id=p.b) }}">{{ names.get(p.b, p.b) }}</a> have reference photos that look alike ({{ '%.0f'|format(p.score * 100) }}%):
-    check for a misplaced photo and add clearer ones.</span></div>
+    check for a misplaced photo and add clearer ones.{% if p.ref_a %} Closest pair: {{ names.get(p.a, p.a) }} #{{ p.ref_a }} and {{ names.get(p.b, p.b) }} #{{ p.ref_b }}.{% endif %}</span>
+    {{ look_alike_photo(p.a, p.ref_a, p.image_a) }}{{ look_alike_photo(p.b, p.ref_b, p.image_b) }}</span></div>
 {% endfor %}
 
 <div class="table-wrap">
@@ -143,5 +160,20 @@
     needs.setAttribute('aria-pressed', needs.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
     filter();
   });
+  const lowScoreForm = document.getElementById('delete-low-score-photos');
+  if (lowScoreForm) {
+    const scores = JSON.parse(lowScoreForm.dataset.scores);
+    const scoreLimit = document.getElementById('below-score');
+    function updateLowScore() {
+      const threshold = Number(scoreLimit.value);
+      const valid = scoreLimit.value.trim() !== '' && Number.isInteger(threshold) && threshold >= 0 && threshold <= 100;
+      const count = valid ? scores.filter(s => s < threshold).length : 0;
+      document.getElementById('low-score-count').textContent = count;
+      document.getElementById('delete-below-score').disabled = !count;
+      lowScoreForm.dataset.confirm = `Delete ${count} reference photo(s) of everyone with an Image score below ${threshold}/100? Their face data will also be removed.`;
+    }
+    scoreLimit.addEventListener('input', updateLowScore);
+    updateLowScore();
+  }
 </script>
 {% endblock %}

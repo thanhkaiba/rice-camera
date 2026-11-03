@@ -43,7 +43,9 @@ def register(app: Flask, core: "App") -> None:
                 summary["duplicates"] += check.duplicate_of is not None
         names = service.shown_names(active_only=False)
         people = sorted(store.all_employees(), key=lambda e: (not e.active, names[e.id].lower()))
-        return render_template("employees.html", people=people, counts=counts, thumbs=thumbs,
+        image_scores = sorted(r.image_score for r in store.references(cfg.recognition.model_id())
+                              if r.image_score is not None)
+        return render_template("employees.html", people=people, counts=counts, thumbs=thumbs, image_scores=image_scores,
                                look_alikes=quality_report["look_alikes"], names=names, quality=library.quality(),
                                good_photos=GOOD_PHOTOS, photo_scores=scores, recognition=recognition,
                                quality_report=quality_report,
@@ -161,7 +163,8 @@ def register(app: Flask, core: "App") -> None:
                                good=sum(r.quality_ok is True for r in refs),
                                checks=quality_report["checks"], quality_report=quality_report,
                                recognition_params=cfg.recognition,
-                               look_alikes=[(p.b if p.a == employee_id else p.a, p.score)
+                               look_alikes=[(p.b, p.score, p.ref_a, p.image_a, p.ref_b, p.image_b) if p.a == employee_id
+                                            else (p.a, p.score, p.ref_b, p.image_b, p.ref_a, p.image_a)
                                             for p in quality_report["look_alikes"] if employee_id in (p.a, p.b)],
                                names=service.shown_names(active_only=False),
                                leaves=store.leaves(employee_id=employee_id, ending_after=today),
@@ -228,20 +231,49 @@ def register(app: Flask, core: "App") -> None:
             flash(f"{added} photo(s) added.", "ok")
         return redirect(url_for("employee", employee_id=employee_id))
 
+    def below_score_threshold() -> int:
+        """The Image score limit from the form (whole points, 0-100), or a 400."""
+        try:
+            threshold = float(request.form["below_score"])
+        except (KeyError, ValueError):
+            abort(400)
+        if not 0 <= threshold <= 100 or not threshold.is_integer():
+            abort(400)
+        return int(threshold)
+
+    def delete_references(selected: list) -> None:
+        """Delete reference photos (the file, every model's embedding of it) with an audit line each."""
+        emails = {e.id: e.email for e in store.all_employees()}
+        for ref in selected:
+            if ref.image:
+                library.delete_photo(ref.image)
+            else:
+                store.delete_reference(ref.id)
+            store.log(service.now(), current_user(cfg), "delete photo",
+                      f"{emails.get(ref.employee_id, ref.employee_id)} {ref.image or f'#{ref.id}'}")
+        library.reload()
+
+    @app.post("/employees/photos/delete")
+    def delete_photos_everyone():
+        """Delete every person's reference photos below an Image score (the People page)."""
+        threshold = below_score_threshold()
+        refs = store.references(cfg.recognition.model_id())
+        selected = [r for r in refs if r.image_score is not None and r.image_score < threshold]
+        if not selected:
+            return done(f"No photos below {threshold}/100. Nothing deleted.", "employees")
+        delete_references(selected)
+        people = len({r.employee_id for r in selected})
+        return done(f"{len(selected)} photos of {people} {'person' if people == 1 else 'people'} deleted.", "employees")
+
     @app.post("/employees/<employee_id>/photos/delete")
     def delete_photo(employee_id: str):
         person = store.employee(employee_id) or abort(404)
         refs = store.references(cfg.recognition.model_id(), employee_id)
         if "below_score" in request.form:
-            try:
-                threshold = float(request.form["below_score"])
-            except ValueError:
-                abort(400)
-            if not 0 <= threshold <= 100 or not threshold.is_integer():
-                abort(400)
+            threshold = below_score_threshold()
             selected = [r for r in refs if r.image_score is not None and r.image_score < threshold]
             if not selected:
-                return done(f"No photos below {int(threshold)}/100. Nothing deleted.", "employee", employee_id=employee_id)
+                return done(f"No photos below {threshold}/100. Nothing deleted.", "employee", employee_id=employee_id)
         elif "ref_id" in request.form:
             try:
                 ids = {int(value) for value in request.form.getlist("ref_id")}
@@ -254,13 +286,7 @@ def register(app: Flask, core: "App") -> None:
             selected = [r for r in refs if r.image and r.image == request.form.get("image")]
         if not selected:
             abort(400)
-        for ref in selected:
-            if ref.image:
-                library.delete_photo(ref.image)
-            else:
-                store.delete_reference(ref.id)
-            store.log(service.now(), current_user(cfg), "delete photo", f"{person.email} {ref.image or f'#{ref.id}'}")
-        library.reload()
+        delete_references(selected)
         message = "Photo deleted." if len(selected) == 1 else f"{len(selected)} photos deleted."
         return done(message, "employee", employee_id=employee_id)
 

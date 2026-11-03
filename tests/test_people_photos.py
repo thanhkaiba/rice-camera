@@ -609,3 +609,53 @@ def test_seed_import_with_some_photos_rejected_is_done_not_failed(core, tmp_path
     status = json.loads((app.data_dir / seed_module.STATUS_FILE).read_text())
     assert status["state"] == "done" and "rejected" in status["message"]
     assert any(a == "import seed" for _, _, a, _ in app.store.audit())
+
+
+def test_look_alike_warnings_name_the_two_closest_photos(core):
+    """The People page and the person's page say which photo of each person matches most closely,
+    with a thumbnail linking to it."""
+    app, _, _ = core
+    dan = add_person(app, "dan@example.com", "Dan")
+    app.library.add_photo(dan, face_image(1))  # looks like Alice
+    app.library.add_photo(dan, face_image(5))
+    pairs = app.library.look_alikes()
+    alice = app.store.references(app.library.model_id, "A")
+    dans = app.store.references(app.library.model_id, dan)
+    assert len(pairs) == 1 and {pairs[0].a, pairs[0].b} == {"A", dan}
+    by_person = {pairs[0].a: (pairs[0].ref_a, pairs[0].image_a), pairs[0].b: (pairs[0].ref_b, pairs[0].image_b)}
+    assert by_person == {"A": (alice[0].id, alice[0].image), dan: (dans[0].id, dans[0].image)}
+    c = client(app)
+    c.post('/employees/quality')
+    people = c.get("/employees").get_data(as_text=True)
+    assert (f"Closest pair: Alice #{alice[0].id} and Dan #{dans[0].id}." in people  # pairs are ordered by id
+            or f"Closest pair: Dan #{dans[0].id} and Alice #{alice[0].id}." in people)
+    assert f'href="/employees/{dan}#reference-{dans[0].id}"' in people and f'src="/media/{dans[0].image}"' in people
+    page = c.get(f"/employees/{dan}").get_data(as_text=True)
+    assert f'<a href="#reference-{dans[0].id}">photo #{dans[0].id}</a> here' in page
+    assert f'href="/employees/A#reference-{alice[0].id}"' in page
+
+
+def test_delete_photos_below_score_for_everyone(core):
+    from test_review_controls import ReviewControls
+
+    app, _, _ = core
+    kept, gone = [], []
+    for emp, person, score in (("A", 1, 0.1), ("A", 1, 0.2), ("B", 2, 0.19), ("C", 3, None), ("C", 3, 0.0)):
+        app.library.add_photo(emp, face_image(person))
+        ref = app.store.references(app.library.model_id, emp)[-1]
+        app.store.set_reference_quality(ref.image, True, score)
+        (gone if score is not None and round(score * 100) < 20 else kept).append(ref)
+    c = client(app)
+    page = c.get("/employees").get_data(as_text=True)
+    assert 'data-scores="[0, 10, 19, 20]"' in page
+    low = next(f for f in ReviewControls(page).forms if f.get("id") == "delete-low-score-photos")
+    assert low["action"] == "/employees/photos/delete" and low["fields"] == {"below_score": "20"}
+    response = c.post(low["action"], data=low["fields"], follow_redirects=True)
+    assert response.status_code == 200 and "3 photos of 3 people deleted." in response.get_data(as_text=True)
+    remaining = {r.id for r in app.store.references(app.library.model_id)}
+    assert not remaining & {r.id for r in gone} and {r.id for r in kept} <= remaining
+    assert all(not (app.data_dir / r.image).exists() for r in gone)
+    assert "No photos below 20/100" in c.post(low["action"], data=low["fields"], follow_redirects=True).get_data(as_text=True)
+    assert c.post(low["action"], data={"below_score": "20.5"}).status_code == 400
+    audit = [details for _, _, action, details in app.store.audit(limit=50) if action == "delete photo"]
+    assert len(audit) == 3 and all("@example.com" in d for d in audit)

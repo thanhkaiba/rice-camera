@@ -18,10 +18,13 @@
   </div>
 </div>
 
-{% for other, score in look_alikes %}
-  <div class="alert warn"><span class="ico">{{ icon('alert') }}</span><span>Reference photos of {{ title }} look like
+{% for other, score, my_ref, my_image, other_ref, other_image in look_alikes %}
+  <div class="alert warn"><span class="ico">{{ icon('alert') }}</span><span class="row" style="gap:10px; flex-wrap:wrap"><span>Reference photos of {{ title }} look like
     <a href="{{ url_for('employee', employee_id=other) }}">{{ names.get(other, other) }}</a> ({{ '%.0f'|format(score * 100) }}%), so the camera may confuse them:
-    check for a misplaced photo and add clearer ones.</span></div>
+    check for a misplaced photo and add clearer ones.{% if my_ref %} Closest pair: <a href="#reference-{{ my_ref }}">photo #{{ my_ref }}</a> here and
+    <a href="{{ url_for('employee', employee_id=other) }}#reference-{{ other_ref }}">#{{ other_ref }}</a> of {{ names.get(other, other) }}.{% endif %}</span>
+    {% if my_ref %}<a class="avatar-link" href="#reference-{{ my_ref }}" title="Photo #{{ my_ref }} of {{ title }}">{% if my_image %}<img class="avatar" src="{{ url_for('media', path=my_image) }}" alt="Photo #{{ my_ref }}">{% else %}<span class="avatar empty">#{{ my_ref }}</span>{% endif %}</a>
+    <a class="avatar-link" href="{{ url_for('employee', employee_id=other) }}#reference-{{ other_ref }}" title="Photo #{{ other_ref }} of {{ names.get(other, other) }}">{% if other_image %}<img class="avatar" src="{{ url_for('media', path=other_image) }}" alt="Photo #{{ other_ref }}">{% else %}<span class="avatar empty">#{{ other_ref }}</span>{% endif %}</a>{% endif %}</span></div>
 {% endfor %}
 
 <div class="grid-2">
