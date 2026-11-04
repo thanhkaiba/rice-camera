@@ -28,6 +28,7 @@ EDITABLE: dict[str, list[str]] = {
                     "unknown_batch_minutes", "names"],
     "leave_api": ["url", "token", "refresh_minutes"],
     "late_message": ["enabled", "intro", "item", "auto_send", "send_at", "photo", "occasions"],
+    "pending_reminder": ["enabled", "auto_send", "time", "kinds"],
     "web": ["public_url", "password", "viewer_username", "viewer_password"],
     "updates": ["enabled"],
     "backup": ["folder", "time", "keep_days", "include_photos"],

@@ -13,6 +13,7 @@ Rules for a work day (times from config.schedule):
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import secrets
 from dataclasses import dataclass, field
@@ -356,6 +357,56 @@ class AttendanceService:
             text += f"\n📷 <{url}|Picture of the late people>"
         self.chat.send(text, None, self.now(), cards, api=api)
         self.store.log(self.now(), user, "send late message", ", ".join(a.name for a in self.late_people(day)))
+        return True
+
+    # reminder to approve the pending Base requests ----------------------------------
+
+    def pending_requests(self, day: dt.date) -> dict[str, list[tuple[str, str, str]]]:
+        """Pending Base requests of the chosen types for `day`, by the approver they wait for:
+        {approver: [(requester, kind, shift)]}; approver "" when Base names nobody."""
+        from ..integrations.base_timeoff import KINDS
+        kinds = {KINDS[k] for k in self.cfg.pending_reminder.kinds.split(",") if k in KINDS}
+        snapshot = json.loads(self.store.get(f"base_timeoffs:{day}") or "{}")
+        names = {e.base_username: e.id for e in self.store.all_employees() if e.base_username}
+        found: dict[str, list[tuple[str, str, str]]] = {}
+        for username, entries in snapshot.items():
+            for entry in entries:
+                if entry["approved"] or entry["kind"] not in kinds:
+                    continue
+                who = self.chat_name(names[username]) if username in names else username
+                for approver in entry.get("approvers") or [""]:
+                    found.setdefault(approver, []).append((who, entry["kind"], entry["shift"]))
+        return found
+
+    def pending_reminder_text(self, day: dt.date, preview: bool = False) -> str | None:
+        pending = self.pending_requests(day)
+        if not pending:
+            return None
+        names = {e.base_username: e.id for e in self.store.all_employees() if e.base_username}
+        lines = ["⏳ *Base requests waiting for approval:*"]
+        for approver, items in sorted(pending.items()):
+            if not approver:
+                owner = "(no approver named on Base)"
+            elif approver in names:
+                owner = f"@{self.chat_name(names[approver])}" if preview else self.mention(names[approver])
+            else:
+                owner = f"@{approver}"
+            lines.append(f"{owner}: {len(items)} to review")
+            lines += [f"• {who}: {kind} {shift}" for who, kind, shift in sorted(items)]
+        prefix = "" if day == self.now().date() else f"{day:%A %d %b}: "
+        return prefix + "\n".join(lines)
+
+    def send_pending_reminder(self, day: dt.date, user: str = "system", auto: bool = False) -> bool:
+        """Post the reminder; False when nothing is pending. An automatic send gives up when it was
+        marked meanwhile (the admin's button and the scheduler racing)."""
+        text = self.pending_reminder_text(day)
+        if text is None:
+            self.store.mark_notice(day, "pending_reminder_skipped", self.now())
+            return False
+        if not self.store.mark_notice(day, "pending_reminder", self.now()) and auto:
+            return False
+        self.chat.send(text, None, self.now())
+        self.store.log(self.now(), user, "send pending reminder", ", ".join(self.pending_requests(day)))
         return True
 
     # events from the camera pipeline ----------------------------------------------
@@ -914,6 +965,13 @@ class AttendanceService:
                     and not self.store.notice_sent(day, "late_message")
                     and not self.store.notice_sent(day, "late_message_skipped")):
                 self.send_late_message(day, auto=True)
+
+            pr = self.cfg.pending_reminder
+            if (pr.enabled and pr.auto_send and self.cfg.base_api_key and now >= dt.datetime.combine(day, parse_clock(pr.time), tzinfo=self.tz)
+                    and now < w.end and leave_api.base_ready(self.cfg, self.store, now)
+                    and not self.store.notice_sent(day, "pending_reminder")
+                    and not self.store.notice_sent(day, "pending_reminder_skipped")):
+                self.send_pending_reminder(day, auto=True)
 
             if now >= w.end and not self.store.notice_sent(day, "summary"):
                 rep = self.report(day)

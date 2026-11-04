@@ -191,6 +191,15 @@ class GoogleChatConfig:
 
 
 @dataclass
+class PendingReminderConfig:
+    """One Google Chat message a day reminding the approvers of the Base requests still pending."""
+    enabled: bool = True
+    auto_send: bool = True  # off: only the button on the Today page sends it
+    time: str = "09:30"
+    kinds: str = "1977"  # Base request types (group ids, comma separated) that are reminded; 1977 = Coming late
+
+
+@dataclass
 class LateMessageConfig:
     """One Google Chat message a day listing who came late, with an @mention for each person."""
     enabled: bool = True
@@ -280,6 +289,7 @@ class Config:
     google_chat: GoogleChatConfig = field(default_factory=GoogleChatConfig)
     leave_api: LeaveApiConfig = field(default_factory=LeaveApiConfig)
     late_message: LateMessageConfig = field(default_factory=LateMessageConfig)
+    pending_reminder: PendingReminderConfig = field(default_factory=PendingReminderConfig)
     web: WebConfig = field(default_factory=WebConfig)
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
@@ -338,6 +348,12 @@ class Config:
         self.web.viewer_username = self.web.viewer_username.strip()
         if self.web.viewer_password and (not self.web.viewer_username or self.web.viewer_username == self.web.username):
             raise ValueError("the read-only login needs its own user name, different from the admin's")
+        pr = self.pending_reminder
+        pr.time = parse_clock(pr.time).strftime("%H:%M")
+        pr.kinds = ",".join(k for k in (v.strip() for v in pr.kinds.split(",")) if k)
+        from ..integrations.base_timeoff import KINDS
+        if any(k not in KINDS for k in pr.kinds.split(",") if k):
+            raise ValueError(f"pending_reminder.kinds must be Base type ids from {sorted(KINDS)}")
         self.backup.folder = self.backup.folder.strip()
         self.backup.time = parse_clock(self.backup.time).strftime("%H:%M")
         if self.backup.keep_days < 1:

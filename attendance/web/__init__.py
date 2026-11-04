@@ -103,6 +103,16 @@ def late_message_status(core: "App", day: dt.date) -> dict:
             "missing_chat": no_id, "send_at": lm.send_at or cfg.schedule.window_end, "auto": lm.auto_send}
 
 
+def pending_reminder_status(core: "App", day: dt.date) -> dict:
+    """The pending Base requests that the reminder is about, and whether it went out."""
+    cfg, store, service = core.cfg, core.store, core.service
+    if not cfg.pending_reminder.enabled or not cfg.base_api_key:
+        return {"enabled": False}
+    sent = store.notice_time(day, "pending_reminder")
+    return {"enabled": True, "preview": service.pending_reminder_text(day, preview=True),
+            "sent": sent.astimezone(service.tz) if sent else None, "at": cfg.pending_reminder.time, "auto": cfg.pending_reminder.auto_send}
+
+
 def deadline_status(core: "App", day: dt.date) -> dict:
     """What happened at the late time: the not-seen list was posted, or skipped because everyone was in."""
     store, service = core.store, core.service

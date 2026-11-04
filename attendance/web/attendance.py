@@ -20,6 +20,7 @@ from . import (
     first_setup,
     late_message_status,
     leave_status,
+    pending_reminder_status,
 )
 
 if TYPE_CHECKING:
@@ -93,7 +94,8 @@ def register(app: Flask, core: "App") -> None:
                                late=lambda a: minutes_late(a, rep.window), today=today,
                                prev_day=day - dt.timedelta(days=1), next_day=day + dt.timedelta(days=1),
                                leave=leave_status(core), started=service.now() >= rep.window.start,
-                               late_msg=late_message_status(core, day), deadline=deadline_status(core, day),
+                               late_msg=late_message_status(core, day), remind=pending_reminder_status(core, day),
+                               deadline=deadline_status(core, day),
                                notes=store.day_notes(day),
                                backup_warning=core.backup.warning(service.now()))
 
@@ -170,6 +172,15 @@ def register(app: Flask, core: "App") -> None:
         if service.send_late_message(d, current_user(cfg)):
             return done("Late message posted to Google Chat.", "index", day=day)
         return done("Nobody was late, so no message was sent.", "index", day=day)
+
+    @app.post("/day/<day>/remind-approvers")
+    def send_pending_reminder(day: str):
+        d = _date(day, service.now().date())
+        if not cfg.pending_reminder.enabled:
+            return failed("Turn on the reminder in Settings first.", "index", day=day)
+        if service.send_pending_reminder(d, current_user(cfg)):
+            return done("Reminder posted to Google Chat.", "index", day=day)
+        return done("No pending requests of the chosen types, so no message was sent.", "index", day=day)
 
     @app.get("/unknowns")
     def unknowns():

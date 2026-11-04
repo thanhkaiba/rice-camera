@@ -65,6 +65,9 @@ def parse(rows, day: dt.date, late_after: dt.time, *, approved: bool, morning_on
                     kind = f'Unknown Base group {group}; HR review required'
                     log.warning('Unknown Base Timeoff group %s; HR review required', group)
                 entry = {'kind': kind, 'absence': group != '1977', 'approved': approved, 'shift': value}
+                if not approved:  # who still has to approve it: the owners that have not
+                    entry['approvers'] = [str(o['username']).strip().lstrip('@').lower()
+                                          for o in row.get('owners') or [] if not o.get('approved')]
                 if entry not in result.setdefault(username, []):
                     result[username].append(entry)
     return result

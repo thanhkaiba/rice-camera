@@ -11,7 +11,7 @@ from flask import Flask, Response, abort, jsonify, redirect, render_template, re
 from .. import __version__
 from ..cli import updater
 from ..core import latephoto, occasions, settings, transfer
-from ..integrations import chat_api
+from ..integrations import base_timeoff, chat_api
 from ..vision.faces import decode_image, encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
 
@@ -139,7 +139,7 @@ def register(app: Flask, core: "App") -> None:
                                upcoming=occasions.upcoming(service.now().date()),
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
                                update=updater.read_status(core.data_dir), backup=core.backup.status(),
-                               versions=versions())
+                               versions=versions(), base_kinds=base_timeoff.KINDS)
 
     def versions() -> dict:
         """Versions on this computer, for going back to the previous one or forward again."""
@@ -161,6 +161,9 @@ def register(app: Flask, core: "App") -> None:
                 if name in ("password", "token", "viewer_password", "base_api_key"):
                     if form.get(key):
                         changes.setdefault(section, {})[name] = form[key]
+                elif key == "pending_reminder.kinds":
+                    if "pending_reminder.kinds_shown" in form:  # no box ticked = no type reminded
+                        changes.setdefault(section, {})[name] = ",".join(form.getlist(key))
                 elif name == "work_days":
                     changes.setdefault(section, {})[name] = [int(d) for d in form.getlist(key)]
                 elif isinstance(value, bool):

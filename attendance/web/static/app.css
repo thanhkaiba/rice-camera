@@ -204,6 +204,8 @@ input.time24:invalid:not(:placeholder-shown) { border-color: var(--bad); }
 /* work-day chips */
 .days { display: flex; flex-wrap: wrap; gap: 8px; }
 .days label { position: relative; }
+/* pills with a word instead of a weekday letter: as wide as the word */
+.days.words span { width: auto; padding: 0 16px; white-space: nowrap; }
 .days input { position: absolute; opacity: 0; pointer-events: none; }
 .days span { display: grid; place-items: center; width: 52px; height: 40px; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; font-weight: 500; color: var(--muted); background: var(--card);
              transition: all var(--fast); user-select: none; }

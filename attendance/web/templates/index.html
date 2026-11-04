@@ -131,6 +131,20 @@
 </div>
 {% endif %}
 
+{% if remind.enabled %}
+<div class="card" style="margin-top:16px">
+  <div class="card-head">
+    <h2 class="row">{{ icon('clock') }}Base requests to approve</h2>
+    <form method="post" action="{{ url_for('send_pending_reminder', day=rep.day.isoformat()) }}"
+          {% if remind.sent %}data-confirm="The reminder was already sent. Send it again?"{% endif %}>
+      <button {{ 'disabled' if not remind.preview }} title="Remind the approvers in Google Chat">{{ icon('send') }}Remind approvers</button>
+    </form>
+  </div>
+  {% if remind.preview %}<p class="preview-box">{{ remind.preview }}</p>{% else %}<p class="muted">Nothing is waiting for approval 🎉</p>{% endif %}
+  <p class="hint" style="margin:0">{% if remind.sent %}{{ icon('check') }} Reminder sent at {{ remind.sent.strftime('%H:%M') }}.{% elif remind.auto %}{{ icon('clock') }} Sent automatically at {{ remind.at }} when something waits for approval.{% else %}{{ icon('send') }} Sent only by the button.{% endif %}</p>
+</div>
+{% endif %}
+
 <dialog id="edit">
   <div class="dialog-head"><strong id="edit-title">Edit</strong>
     <span class="tools">
