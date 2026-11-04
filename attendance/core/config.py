@@ -205,7 +205,8 @@ class LateMessageConfig:
     enabled: bool = True
     intro: str = "Morning, coming late today:"
     # Placeholders: {mention}, {name}, {time}, {minutes}, {registered} (", registered 9:00-09:20" when
-    # the person had a "coming late" permission on Base and still came after it, else empty).
+    # the person had a "coming late" permission on Base and still came after it, ", request pending 9:00-09:20"
+    # when that request is not approved yet, else empty).
     item: str = "{mention} ({time}{registered})"
     auto_send: bool = True
     send_at: str = ""  # empty: when the camera stops (window_end); can also be sent from the Today page

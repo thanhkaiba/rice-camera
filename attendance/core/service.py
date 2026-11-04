@@ -23,7 +23,7 @@ import numpy as np
 
 from . import latephoto
 from ..integrations import leave_api
-from ..integrations.base_timeoff import permissions as base_permissions
+from ..integrations.base_timeoff import pending_arrivals as base_pending_arrivals, permissions as base_permissions
 from .config import Config, parse_clock
 from ..vision.gallery import Gallery
 from ..vision.tracker import vote_for
@@ -64,7 +64,8 @@ class Arrival:
     image: str | None
     score: float | None = None
     late_after: dt.datetime | None = None
-    registered: str = ""  # the "coming late" interval approved on Base (9:00-09:20) that was still missed
+    registered: str = ""  # the "coming late" interval on Base (9:00-09:20) that was still missed
+    pending: bool = False  # that request is still waiting for approval
 
     @property
     def time(self) -> str:
@@ -264,7 +265,8 @@ class AttendanceService:
         items = [lm.item.format(mention=f"@{self.chat_name(a.employee_id, a.name)}" if preview
                                 else self.mention(a.employee_id), name=self.chat_name(a.employee_id, a.name),
                                 time=a.time, minutes=minutes_late(a, w),
-                                registered=f", registered {a.registered}" if a.registered else "")
+                                registered=f", {'request pending' if a.pending else 'registered'} {a.registered}"
+                                if a.registered else "")
                  for a in people]
         joined = items[0] if len(items) == 1 else ", ".join(items[:-1]) + ", and " + items[-1]
         prefix = "" if day == self.now().date() else f"{day:%A %d %b}: "
@@ -292,7 +294,7 @@ class AttendanceService:
                 photo = self.best_reference_photo(a.employee_id)
                 from_gallery = photo is not None
             items.append(latephoto.Person(self.chat_name(a.employee_id, a.name), a.time, minutes_late(a, w), photo,
-                                          a.registered, from_gallery))
+                                          a.registered, from_gallery, a.pending))
         if not any(p.photo for p in items):  # nobody on camera and no reference photos: nothing to show
             latephoto.remove(data_dir, day)
             return None
@@ -791,6 +793,7 @@ class AttendanceService:
         checkins = self.store.checkins(day)
         leave = self.store.leaves_on(day)
         permitted_late, permitted_absence, rep.requests = base_permissions(self.store, day)
+        pending_late = base_pending_arrivals(self.store, day)
         enrolled = self.gallery.counts()
         exempt = self.store.exempt_ids()
         for emp_id, name in employees.items():
@@ -811,6 +814,8 @@ class AttendanceService:
                 else:
                     if a.ts >= w.late_from and permission and permission[1] is not None:
                         a.registered = permission[0].rpartition(": ")[2]
+                    elif a.ts >= w.late_from and emp_id in pending_late:
+                        a.registered, a.pending = pending_late[emp_id], True
                     (rep.late if a.ts >= w.late_from else rep.on_time).append(a)
             elif emp_id in leave or emp_id in permitted_absence:
                 kind = leave.get(emp_id) or permitted_absence[emp_id]

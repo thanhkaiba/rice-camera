@@ -448,3 +448,25 @@ def test_late_after_a_coming_late_permission_shows_the_registered_interval(core,
         [latephoto.Person('Bob', '10:15', 45, None), people[1]], None)
     rel = app.service.late_photo(DAY)
     assert rel and (app.data_dir / rel).exists()
+
+
+def test_late_with_a_pending_coming_late_request_says_pending(core, monkeypatch):
+    """Bob asked on Base to come at 09:30 but nobody approved it yet; he comes at 10:15. The
+    message and the picture say the request is pending; the minutes count from the usual
+    late time, since nothing was granted."""
+    from attendance.core import latephoto
+    from attendance.integrations.base_timeoff import pending_arrivals
+
+    app, clock, _ = core
+    connect(app, monkeypatch, [item(value='9:00-09:30'), item('alice', '1967', 'Full day')], approved=False)
+    assert app.leave_sync.sync()['ok']
+    assert pending_arrivals(app.store, DAY) == {'B': '9:00-09:30'}  # Alice's absence request is not an arrival
+    clock.t = at(10, 40)
+    app.service.on_identified('B', at(10, 15), .8, None)
+    rep = app.service.report(DAY)
+    assert [(a.employee_id, a.registered, a.pending) for a in rep.late] == [('B', '9:00-09:30', True)]
+    assert app.service.late_text(DAY, preview=True) == 'Morning, coming late today: @Bob (10:15, request pending 9:00-09:30)'
+    person = latephoto.Person('Bob', '10:15', 15, None, '9:00-09:30', pending=True)
+    assert person.lines() == ['Request pending 9:00-09:30', 'Arrived 10:15 (+15 min)']
+    assert latephoto.fingerprint([person], None) != latephoto.fingerprint(
+        [latephoto.Person('Bob', '10:15', 15, None, '9:00-09:30')], None)

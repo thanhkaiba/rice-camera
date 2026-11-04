@@ -153,3 +153,17 @@ def permissions(store, day: dt.date) -> tuple[dict, dict, dict]:
                     if person.id not in late or (late[person.id][1] is not None and until > late[person.id][1]):
                         late[person.id] = (label, until)
     return late, absent, requests
+
+
+def pending_arrivals(store, day: dt.date) -> dict[str, str]:
+    """employee -> the interval (9:00-09:20) of a "coming late" request still waiting for approval."""
+    snapshot = json.loads(store.get(f'base_timeoffs:{day}') or '{}')
+    out = {}
+    for person in store.all_employees():
+        entries = snapshot.get(person.base_username, []) if person.base_username else []
+        for entry in entries:
+            if entry['approved'] or entry['absence']:
+                continue
+            if re.fullmatch(r'\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}', entry['shift']):
+                out[person.id] = entry['shift']
+    return out

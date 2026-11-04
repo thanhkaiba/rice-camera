@@ -51,11 +51,13 @@ class Person:
     photo: Path | None  # the whole person (or the face when that is all there is)
     registered: str = ""  # the "coming late" interval approved on Base (9:00-09:20) that was still missed
     from_gallery: bool = False  # a reference photo (a face), not the camera's picture of the arrival
+    pending: bool = False  # the registered interval is a request still waiting for approval
 
     def lines(self) -> list[str]:
         """What the tag says under the name."""
         if self.registered:
-            return [f"Registered {self.registered}", f"Arrived {self.time} (+{self.minutes} min)"]
+            word = "Request pending" if self.pending else "Registered"
+            return [f"{word} {self.registered}", f"Arrived {self.time} (+{self.minutes} min)"]
         return [f"{self.time}  +{self.minutes} min"]
 
 
@@ -567,7 +569,7 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
 
 # files --------------------------------------------------------------------------------------
 
-LOOK = 6  # raise when the drawing changes, so pictures already made are made again
+LOOK = 7  # raise when the drawing changes, so pictures already made are made again
 
 
 def fingerprint(people: list[Person], background: Path | None) -> str:
@@ -577,7 +579,8 @@ def fingerprint(people: list[Person], background: Path | None) -> str:
         s = p.stat() if p and p.exists() else None
         return (str(p), s.st_size if s else 0, s.st_mtime_ns if s else 0)
 
-    parts = [(p.name, p.time, p.minutes, p.registered, p.from_gallery, stat(p.photo)) for p in people] + [stat(background), LOOK]
+    parts = [(p.name, p.time, p.minutes, p.registered, p.pending, p.from_gallery, stat(p.photo)) for p in people]
+    parts += [stat(background), LOOK]
     return hashlib.sha256(repr(parts).encode()).hexdigest()
 
 
