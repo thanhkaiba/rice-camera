@@ -72,6 +72,11 @@
         <span class="hint">Space name → Apps &amp; integrations → Webhooks → Add</span>{{ src('google_chat.webhook_url') }}</label>
       <button formaction="{{ url_for('test_chat') }}" title="Send a test message to the space">{{ icon('send') }}Test</button>
     </div>
+    <div class="form-row">
+      <label class="field grow">System webhook URL<input name="google_chat.system_webhook_url" value="{{ s.google_chat.system_webhook_url }}" placeholder="https://chat.googleapis.com/v1/spaces/… (empty: the webhook above)">
+        <span class="hint">A separate space for system news only: power unplugged or back, camera down, Base errors. Empty: they go to the space above.</span>{{ src('google_chat.system_webhook_url') }}</label>
+      <button formaction="{{ url_for('test_chat') }}?system=1" title="Send a test message to the system space">{{ icon('send') }}Test</button>
+    </div>
     <div class="stack">
       {{ check('google_chat', 'mention_people', '@mention people in alerts') }}
       {{ check('google_chat', 'notify_late_arrivals', 'Post each late arrival as it happens') }}

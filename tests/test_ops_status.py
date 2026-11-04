@@ -198,7 +198,7 @@ def test_chat_poster_uses_the_saved_webhook_and_queues_on_failure(core, monkeypa
                         lambda target, args, **kw: type("T", (), {"start": lambda self: target(*args)})())
     watchdog.chat_poster(config)("hello")
     assert calls == [("https://chat.example/hook", {"text": "hello · http://pc:8000/status"})]
-    assert [p for _, p, _ in app.store.outbox()] == [{"text": "hello · http://pc:8000/status"}]
+    assert [p for _, p, _ in app.store.outbox()] == [{"text": "hello · http://pc:8000/status", "system": True}]
 
 
 def test_read_only_password_is_never_shown_or_bundled(core):

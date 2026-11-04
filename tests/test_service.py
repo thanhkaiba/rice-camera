@@ -55,8 +55,7 @@ def test_not_seen_by_deadline_is_listed_then_late_arrival_announced(env):
     assert sent[-1] == "🟠 @Bob arrived at 10:23, 23 min late."
 
     run_until(service, clock, at(11, 1))
-    summary = sent[-1]
-    assert summary.startswith("📋")
+    summary = [m for m in sent if m.startswith("📋")][0]
     assert "On time: 1 · Late: 1 · Not seen: 1" in summary
     assert "• @Bob: 10:23 (23 min late)" in summary
     assert "• @Carol" in summary
@@ -196,24 +195,26 @@ def test_camera_outage_is_reported(env):
     service, _, clock, sent = env
     run_until(service, clock, at(9, 30))
     run_until(service, clock, at(9, 50), camera_ok=False)
-    run_until(service, clock, at(10, 1))
+    run_until(service, clock, at(11, 1))
     deadline = [m for m in sent if m.startswith("⏰")][0]
-    assert "was down: 09:30–09:50" in deadline
+    assert "was down" not in deadline  # camera problems go to the system space
+    assert "was down: 09:30–09:50" in [m for m in sent if m.startswith("🛠")][0]
 
 
 def test_system_started_late_reports_the_gap(env):
     service, _, clock, sent = env
     clock.t = at(9, 40)  # PC switched on at 9:40
-    run_until(service, clock, at(10, 1))
-    assert "was down: 08:00–09:40" in [m for m in sent if m.startswith("⏰")][0]
+    run_until(service, clock, at(11, 1))
+    assert "was down: 08:00–09:40" in [m for m in sent if m.startswith("🛠")][0]
 
 
-def test_pc_off_all_morning_sends_only_summary_with_warning(env):
+def test_pc_off_all_morning_sends_summary_and_a_system_report(env):
     service, _, clock, sent = env
     clock.t = at(14, 0)
     service.tick()
-    assert len(sent) == 1 and sent[0].startswith("📋")
-    assert "was down: 08:00–11:00" in sent[0]
+    assert len(sent) == 2 and sent[0].startswith("📋") and sent[1].startswith("🛠")
+    assert "was down" not in sent[0]
+    assert "No camera data at all between 08:00 and 11:00" in sent[1]
 
 
 def test_messages_use_one_thread_per_day(env):

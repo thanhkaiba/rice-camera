@@ -55,7 +55,8 @@ class App:
                 self.store.put("employee_email_csv_imported", "1")
                 log.info("Imported %d employees from %s", n, employees_file)
         self.gallery = Gallery(self.store.embeddings(cfg.recognition.model_id()), cfg.recognition.center_embeddings)
-        self.chat = GoogleChat(lambda: cfg.google_chat.webhook_url, self.store)
+        self.chat = GoogleChat(lambda: cfg.google_chat.webhook_url, self.store,
+                               system_url=lambda: cfg.google_chat.system_webhook_url)
         self.chat.api = ChatApi(self.store, lambda: space_of(cfg.google_chat.webhook_url))
         self.chat.data_dir = cfg.path(cfg.data_dir)
         self.service = AttendanceService(cfg, self.store, self.chat, self.gallery, now=now)

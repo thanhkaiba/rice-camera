@@ -83,7 +83,7 @@ def test_sync_excuses_late_but_still_requires_checkin(core, monkeypatch):
     app.leave_sync.sync()
 
 
-def test_failure_keeps_snapshot_and_defers_messages_then_recovers(core, monkeypatch):
+def test_failure_keeps_snapshot_and_warns_without_blocking_messages_then_recovers(core, monkeypatch):
     app, clock, sent = core
     connect(app, monkeypatch, [item()])
     assert app.leave_sync.sync()['ok']
@@ -93,15 +93,16 @@ def test_failure_keeps_snapshot_and_defers_messages_then_recovers(core, monkeypa
     assert app.store.get(f'base_timeoffs:{DAY}') == previous
     clock.t = at(11, 5)
     app.service.tick()
-    assert not app.store.notice_sent(DAY, 'deadline')
-    assert not app.store.notice_sent(DAY, 'summary')
-    assert not app.service.send_late_message(DAY)
-    assert not app.store.notice_sent(DAY, 'late_message_skipped')
+    # The warning is posted once, and the other messages still go out.
+    assert app.store.notice_sent(DAY, 'base_deferred')
+    assert any('Base Timeoff is unavailable' in m for m in sent)
+    assert app.store.notice_sent(DAY, 'deadline')
+    app.service.send_late_message(DAY)
+    assert (app.store.notice_sent(DAY, 'late_message')
+            or app.store.notice_sent(DAY, 'late_message_skipped'))
     assert app.store.get('cleanup_day') == DAY.isoformat()
     monkeypatch.setattr(base_timeoff, 'fetch', lambda *a: {})
     assert app.leave_sync.sync()['ok']
-    app.service.tick()
-    assert app.store.notice_sent(DAY, 'summary')
     assert app.store.get(f'base_timeoffs:{DAY}') != previous
 
 

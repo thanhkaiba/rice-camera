@@ -21,14 +21,14 @@ if TYPE_CHECKING:
 LOG_TAIL_BYTES = 2_000_000
 DAYS = 30
 HIDDEN = "***"
-SECRET_FIELDS = {"password", "viewer_password", "token", "webhook_url", "healthcheck_url", "base_api_key", "access_token_v2"}
+SECRET_FIELDS = {"password", "viewer_password", "token", "webhook_url", "system_webhook_url", "healthcheck_url", "base_api_key", "access_token_v2"}
 
 _SECRETS = [
     (re.compile(r"(?i)\b(key|token|secret|password|access_token|access_token_v2|base_api_key)=([^&\s\"'<>]+)"), rf"\1={HIDDEN}"),
     (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)([^/\s:@\"']+):([^@\s\"']+)@"), rf"\1\2:{HIDDEN}@"),  # rtsp://user:pass@
     (re.compile(r"(?i)(hc-ping\.com/)[\w-]+"), rf"\1{HIDDEN}"),
     (re.compile(r"(?i)(bearer\s+)[\w.~+/=-]+"), rf"\1{HIDDEN}"),
-    (re.compile(r"(?im)^(\s*(?:password|viewer_password|token|webhook_url|healthcheck_url|base_api_key|access_token_v2)\s*:\s*).+$"), rf"\1{HIDDEN}"),
+    (re.compile(r"(?im)^(\s*(?:password|viewer_password|token|webhook_url|system_webhook_url|healthcheck_url|base_api_key|access_token_v2)\s*:\s*).+$"), rf"\1{HIDDEN}"),
 ]
 
 

@@ -176,6 +176,8 @@ class TrackingConfig:
 @dataclass
 class GoogleChatConfig:
     webhook_url: str = ""
+    # A second space for system news only (power unplugged, camera down, Base errors); empty: the webhook above.
+    system_webhook_url: str = ""
     mention_people: bool = True  # @mention late and missing people (needs their Google Chat user ID)
     # Off by default, the space only gets the late message (late_message) and the problems: each of
     # these adds a message a day, or one per late person.

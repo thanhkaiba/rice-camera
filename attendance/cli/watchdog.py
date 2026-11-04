@@ -91,7 +91,7 @@ def chat_poster(config: Path) -> Callable[[str], None]:
         except Exception:
             log.exception("Could not read the settings for a Google Chat alert")
             return
-        url = cfg.google_chat.webhook_url.strip()
+        url = (cfg.google_chat.system_webhook_url.strip() or cfg.google_chat.webhook_url.strip())
         if not url:
             return
         if cfg.web.public_url:
@@ -102,7 +102,7 @@ def chat_poster(config: Path) -> Callable[[str], None]:
             log.warning("Google Chat alert not delivered, queued: %s", exc)
             store = Store(cfg.path(cfg.data_dir) / "attendance.db")
             try:
-                store.enqueue({"text": text}, dt.datetime.now(dt.timezone.utc))
+                store.enqueue({"text": text, "system": True}, dt.datetime.now(dt.timezone.utc))
             finally:
                 store.close()
 

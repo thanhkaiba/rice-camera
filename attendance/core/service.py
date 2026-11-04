@@ -202,8 +202,11 @@ class AttendanceService:
         self.chat.send(text, f"attendance-{day.isoformat()}", self.now())
 
     def alert(self, text: str) -> None:
-        """System alert, posted in today's thread."""
-        self._send(text, self.now().date())
+        """System alert (power, camera, Base...), posted in today's thread of the system space."""
+        self._send_system(text, self.now().date())
+
+    def _send_system(self, text: str, day: dt.date) -> None:
+        self.chat.send(text, f"attendance-{day.isoformat()}", self.now(), system=True)
 
     def _name(self, employee_id: str) -> str:
         e = self.store.employee(employee_id)
@@ -335,8 +338,6 @@ class AttendanceService:
         Marks "late_message" only when something was sent, and "late_message_skipped" when nobody
         was late, so the page can tell the two apart. An automatic send gives up when the message
         was marked meanwhile (the admin's "Send now" and the scheduler racing)."""
-        if not leave_api.base_ready(self.cfg, self.store, self.now(), day):
-            return False
         text = self.late_text(day)
         if text is None:
             self.store.mark_notice(day, "late_message_skipped", self.now())
@@ -712,8 +713,6 @@ class AttendanceService:
     def _announce(self, employee_id: str, ts: dt.datetime) -> None:
         """A camera arrival after the late time, or after the "not seen" list (admin changes are not posted)."""
         day = ts.date()
-        if not leave_api.base_ready(self.cfg, self.store, self.now(), day):
-            return
         if (not self.is_workday(day) or employee_id in self.store.leaves_on(day)
                 or employee_id in self.store.exempt_ids()):
             return
@@ -790,21 +789,18 @@ class AttendanceService:
         return found
 
     def _extra_lines(self, rep: DayReport) -> list[str]:
-        lines = []
-        stale = leave_api.warning(self.cfg, self.store, self.now())
+        lines = []  # Base and camera problems go to the system space (problems_text)
+        stale = None if self.cfg.base_api_key else leave_api.warning(self.cfg, self.store, self.now())
         if stale:
             lines.append(stale)
         if rep.on_leave:
             lines.append("🏖 On leave: " + ", ".join(f"{self.chat_name(e, n)} ({k})" for e, n, k in rep.on_leave))
         if rep.no_photos:
             lines.append("⚠️ No reference photos, cannot be recognised: " + ", ".join(n for _, n in rep.no_photos))
-        if rep.outages:
-            spans = ", ".join(f"{a:%H:%M}–{b:%H:%M}" for a, b in rep.outages)
-            lines.append(f"⚠️ Camera/system was down: {spans}. Arrivals during this time may be missing.")
         return lines
 
     def problems_text(self, rep: DayReport) -> str | None:
-        """What went wrong during the camera hours, for when the summary is not posted; None if nothing."""
+        """What went wrong during the camera hours (for the system space); None if nothing."""
         lines = []
         stale = leave_api.warning(self.cfg, self.store, self.now())
         if stale:
@@ -893,13 +889,13 @@ class AttendanceService:
         if self.is_workday(day):
             w = self.window(day)
             self._track_health(now, w, camera_ok, camera_state)
-            base_ready = leave_api.base_ready(self.cfg, self.store, now)
-            if not base_ready:
+            # Missing Base data only raises a warning (once in Chat, always in the banner); it never holds back a message.
+            if not leave_api.base_ready(self.cfg, self.store, now):
                 if not self.store.notice_sent(day, 'base_deferred'):
-                    self._send(leave_api.warning(self.cfg, self.store, now), day)
+                    self._send_system(leave_api.warning(self.cfg, self.store, now), day)
                     self.store.mark_notice(day, 'base_deferred', now)
 
-            if (base_ready and self.cfg.google_chat.late_time_list and now >= w.late_from
+            if (self.cfg.google_chat.late_time_list and now >= w.late_from
                     and not self.store.notice_sent(day, "deadline")
                     and not self.store.notice_sent(day, "deadline_skipped")):
                 rep = self.report(day)
@@ -914,18 +910,19 @@ class AttendanceService:
 
             lm = self.cfg.late_message
             send_at = dt.datetime.combine(day, parse_clock(lm.send_at), tzinfo=self.tz) if lm.send_at else w.end
-            if (base_ready and lm.enabled and lm.auto_send and now >= send_at
+            if (lm.enabled and lm.auto_send and now >= send_at
                     and not self.store.notice_sent(day, "late_message")
                     and not self.store.notice_sent(day, "late_message_skipped")):
                 self.send_late_message(day, auto=True)
 
-            if base_ready and now >= w.end and not self.store.notice_sent(day, "summary"):
+            if now >= w.end and not self.store.notice_sent(day, "summary"):
                 rep = self.report(day)
-                # Without the summary, its warnings (the camera or computer was down, leave data
-                # is stale) still go out: they are problems to fix, not attendance news.
-                text = self.summary_text(rep) if self.cfg.google_chat.daily_summary else self.problems_text(rep)
-                if text:
-                    self._send(text, day)
+                if self.cfg.google_chat.daily_summary:
+                    self._send(self.summary_text(rep), day)
+                # The camera or computer was down, leave data is stale: problems to fix, not attendance news.
+                problems = self.problems_text(rep)
+                if problems:
+                    self._send_system(problems, day)
                 self.store.mark_notice(day, "summary", now)
 
         if self.store.get("cleanup_day") != day.isoformat():
@@ -1001,14 +998,14 @@ class AttendanceService:
                 self._camera_seen_day = day
             self._bad_since = None
             if self.store.get(CAMERA_ALERT_KEY):
-                self._send(f"✅ The camera is working again ({now:%H:%M}).", day)
+                self._send_system(f"✅ The camera is working again ({now:%H:%M}).", day)
                 self.store.put(CAMERA_ALERT_KEY, "")
             return
         # Wait a while in this run of the program too, so a restart or a short hiccup is not reported.
         self._bad_since = self._bad_since or now
         if now - self._bad_since >= CAMERA_ALERT_AFTER and not self.store.get(CAMERA_ALERT_KEY):
             reason = f" ({camera_state})" if camera_state else ""
-            self._send(f"⚠️ *The camera is not working* since {ref:%H:%M}{reason}. Arrivals are not being recorded. "
+            self._send_system(f"⚠️ *The camera is not working* since {ref:%H:%M}{reason}. Arrivals are not being recorded. "
                        f"Check the camera's power and network, and its address in Settings: {self._link('/live')}", day)
             self.store.put(CAMERA_ALERT_KEY, now.isoformat())
 

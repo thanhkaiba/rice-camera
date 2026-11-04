@@ -42,9 +42,12 @@ def _http_post(url: str, payload: dict) -> None:
 
 class GoogleChat:
     def __init__(self, webhook_url: str | Callable[[], str], store: Store,
-                 post: Callable[[str, dict], None] = _http_post):
-        """`webhook_url` may be a function so a URL changed in the settings is used right away."""
+                 post: Callable[[str, dict], None] = _http_post,
+                 system_url: str | Callable[[], str] = ""):
+        """`webhook_url` may be a function so a URL changed in the settings is used right away.
+        `system_url` is the space for system news (messages sent with `system=True`); empty: `webhook_url`."""
         self._url = webhook_url if callable(webhook_url) else (lambda: webhook_url)
+        self._system_url = system_url if callable(system_url) else (lambda: system_url)
         self.store = store
         self._post = post
         self._flushing = threading.Lock()  # one delivery pass at a time
@@ -72,17 +75,23 @@ class GoogleChat:
         return (self._url() or "").strip()
 
     @property
+    def system_webhook_url(self) -> str:
+        return (self._system_url() or "").strip() or self.webhook_url
+
+    @property
     def api_ready(self) -> bool:
         return self.api is not None and self.api.ready
 
     def send(self, text: str, thread_key: str | None, now: dt.datetime, cards: list[dict] | None = None,
-             api: dict | None = None) -> None:
+             api: dict | None = None, system: bool = False) -> None:
         """`cards` are Google Chat cardsV2 shown under the text, e.g. a picture. `api`: {"text", "image"
         (under the data folder)} to post through the Chat API instead, when it is signed in."""
         log.info("Google Chat: %s", text.replace("\n", " | "))
-        if not self.webhook_url and not (api and self.api_ready):
+        if not (self.system_webhook_url if system else self.webhook_url) and not (api and self.api_ready):
             return
         payload: dict = {"text": text}
+        if system:
+            payload["system"] = True
         if cards:
             payload["cardsV2"] = cards
         if thread_key:
@@ -129,7 +138,7 @@ class GoogleChat:
 
     def flush(self, now: dt.datetime) -> None:
         """Deliver queued messages in order; stop at the first failure and retry on the next call."""
-        if not self.webhook_url and not self.api_ready:
+        if not self.webhook_url and not self.system_webhook_url and not self.api_ready:
             return
         with self._flushing:
             for item_id, payload, created_at in self.store.outbox():
@@ -149,11 +158,11 @@ class GoogleChat:
                     if done:
                         continue
                 payload = {k: v for k, v in payload.items() if k != "api"}
-                if not self.webhook_url:
+                url = self.system_webhook_url if payload.pop("system", False) else self.webhook_url
+                if not url:
                     log.error("Dropping a Google Chat message: no webhook to post it with: %s", payload)
                     self.store.outbox_done(item_id)
                     continue
-                url = self.webhook_url
                 if "thread" in payload:
                     url += ("&" if "?" in url else "?") + THREAD_OPTION
                 try:

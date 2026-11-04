@@ -13,7 +13,7 @@ from ..store import Store
 
 KEY = "settings"
 BASELINE = "_file_settings"  # attribute on the Config: the values from config.yaml, before overrides
-SECRET = {"password", "viewer_password", "token", "webhook_url", "base_api_key"}  # never shown, only "set"/"empty"
+SECRET = {"password", "viewer_password", "token", "webhook_url", "system_webhook_url", "base_api_key"}  # never shown, only "set"/"empty"
 
 # section ("" = top level) -> editable fields
 EDITABLE: dict[str, list[str]] = {
@@ -24,7 +24,7 @@ EDITABLE: dict[str, list[str]] = {
                     "min_sharpness", "max_yaw", "max_pitch", "auto_pose", "unknown_min_frames",
                     "learn_corrections", "learn_per_group", "group_days", "seen_again_score", "suggest_score",
                     "same_face_score", "blurry_score"],
-    "google_chat": ["webhook_url", "mention_people", "notify_late_arrivals", "late_time_list", "daily_summary",
+    "google_chat": ["webhook_url", "system_webhook_url", "mention_people", "notify_late_arrivals", "late_time_list", "daily_summary",
                     "unknown_batch_minutes", "names"],
     "leave_api": ["url", "token", "refresh_minutes"],
     "late_message": ["enabled", "intro", "item", "auto_send", "send_at", "photo", "occasions"],

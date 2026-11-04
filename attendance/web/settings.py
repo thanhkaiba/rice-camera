@@ -325,11 +325,15 @@ def register(app: Flask, core: "App") -> None:
     @app.post("/settings/test-chat")
     def test_chat():
         # Test the address typed in the form, so it can be checked before saving.
-        url = (request.form.get("google_chat.webhook_url") or cfg.google_chat.webhook_url).strip()
+        system = request.args.get("system") == "1"
+        if system:
+            url = (request.form.get("google_chat.system_webhook_url") or cfg.google_chat.system_webhook_url).strip()
+        else:
+            url = (request.form.get("google_chat.webhook_url") or cfg.google_chat.webhook_url).strip()
         if not url:
             return failed("Enter a Google Chat webhook URL first.", "settings_page")
         try:
-            core.chat.send_now("✅ The attendance system can post to this space.", url)
+            core.chat.send_now("✅ The attendance system can post to this " + ("system space." if system else "space."), url)
         except Exception as exc:
             return failed(f"Sending failed: {exc}", "settings_page")
         return done("Test message sent; check Google Chat.", "settings_page")
