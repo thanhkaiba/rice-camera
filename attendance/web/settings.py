@@ -6,7 +6,7 @@ import sys
 import time
 from typing import TYPE_CHECKING
 
-from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_from_directory, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file, send_from_directory, url_for
 
 from .. import __version__
 from ..cli import updater
@@ -132,7 +132,7 @@ def register(app: Flask, core: "App") -> None:
         return render_template("settings.html", s=settings.current(cfg), cfg=cfg, leave=leave_status(core),
                                overrides=settings.overrides(cfg, store),
                                late_background=latephoto.background_path(core.data_dir).exists(),
-                               late_backgrounds=latephoto.own_pictures(core.data_dir), occasion_list=occasions.OCCASIONS,
+                               gallery=background_gallery(), occasion_list=occasions.OCCASIONS,
                                occasion_names={o.key: o.name for o in occasions.OCCASIONS},
                                google=core.chat.api.status(),
                                occasion=occasions.occasion_on(service.now().date()),
@@ -140,6 +140,19 @@ def register(app: Flask, core: "App") -> None:
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
                                update=updater.read_status(core.data_dir), backup=core.backup.status(),
                                versions=versions(), base_kinds=base_timeoff.KINDS)
+
+    def background_gallery() -> dict:
+        """The pictures to choose from on the Settings page, which one is selected, and today's."""
+        lm = cfg.late_message
+        pictures = latephoto.backgrounds(core.data_dir)
+        keys = {b.key for b in pictures}
+        selected = lm.background if lm.background in keys else ("single" if "single" in keys else "")
+        today = latephoto.day_background(core.data_dir, service.now().date(), lm.occasions, lm.background)
+        stamp = {b.key: b.path.stat().st_mtime_ns for b in pictures}
+        groups = [("own", "Your pictures"), ("painting", "Paintings"), ("holiday", "Holiday pictures")]
+        return dict(selected=selected, today=next((b.key for b in pictures if b.path == today), ""), stamp=stamp,
+                    groups=[(title, [b for b in pictures if b.group == group]) for group, title in groups
+                            if any(b.group == group for b in pictures)])
 
     def versions() -> dict:
         """Versions on this computer, for going back to the previous one or forward again."""
@@ -200,23 +213,29 @@ def register(app: Flask, core: "App") -> None:
         if remove:
             if remove in ("single", "1"):
                 single.unlink(missing_ok=True)
+                removed = "single"
             else:
                 try:
                     latephoto.own_picture_path(core.data_dir, remove).unlink()
                 except (ValueError, OSError):
-                    return failed("That picture is not there any more.", "settings_page")
+                    return failed("That picture is not there any more.", "settings_page", _anchor="notify")
+                removed = f"own/{remove}"
+            if cfg.late_message.background == removed:
+                settings.save(cfg, store, {"late_message": {"background": ""}})
             store.log(service.now(), current_user(cfg), "late message background", f"removed {remove}")
-            return done("Picture removed; the next late picture is made without it.", "settings_page")
+            return done("Picture removed; the next late picture is made without it.", "settings_page", _anchor="notify")
         uploads = [f for f in request.files.getlist("background") if f.filename]
         if not uploads:
-            return failed("Choose a picture.", "settings_page")
+            return failed("Choose a picture.", "settings_page", _anchor="notify")
         use = request.form.get("for", "single")
         if use not in ("single", "rotation") and use not in occasions.BY_KEY:
-            return failed("Choose what the pictures are for.", "settings_page")
+            return failed("Choose what the pictures are for.", "settings_page", _anchor="notify")
         try:
             images = [encode_jpeg(decode_image(f.read())) for f in uploads]
         except ValueError as exc:
-            return failed(f"Not saved: {exc}", "settings_page")
+            return failed(f"Not saved: {exc}", "settings_page", _anchor="notify")
+        if cfg.late_message.background:  # new pictures are meant to be used: a picture picked earlier would hide them
+            settings.save(cfg, store, {"late_message": {"background": ""}})
         if use == "single":
             single.parent.mkdir(parents=True, exist_ok=True)
             single.write_bytes(images[0])
@@ -226,7 +245,29 @@ def register(app: Flask, core: "App") -> None:
         store.log(service.now(), current_user(cfg), "late message background", f"{use}: " + ", ".join(kept))
         what = ("Background saved; the next picture uses it." if use == "single" else
                 f"{len(kept)} picture(s) saved for " + ("the days in turn." if use == "rotation" else f"{occasions.BY_KEY[use].name}."))
-        return done(what, "settings_page")
+        return done(what, "settings_page", _anchor="notify")
+
+    @app.post("/settings/late-background/choose")
+    def choose_late_background():
+        """Pick the picture behind the cards from the list; an empty choice goes back to automatic."""
+        key = request.form.get("choice", "")
+        if key and latephoto.chosen_background(core.data_dir, key) is None:
+            return failed("That picture is not there any more.", "settings_page", _anchor="notify")
+        settings.save(cfg, store, {"late_message": {"background": key}})
+        store.log(service.now(), current_user(cfg), "late message background", f"chose {key or 'automatic'}")
+        return done("Background chosen; the next late picture uses it." if key else
+                    "Background back to automatic.", "settings_page", _anchor="notify")
+
+    @app.get("/settings/late-background/preview/<path:key>")
+    def late_background_preview(key: str):
+        """A background from the list: a small preview, cropped as the picture crops it, or `full`."""
+        path = latephoto.chosen_background(core.data_dir, key)
+        if path is None:
+            abort(404)
+        if request.args.get("full"):
+            return send_file(path, max_age=0)
+        thumbnail = encode_jpeg(latephoto.load_background(path, *latephoto.THUMBNAIL))
+        return Response(thumbnail, mimetype="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
     @app.get("/settings/late-backgrounds/<path:rel>")
     def late_own_background(rel: str):
@@ -251,6 +292,16 @@ def register(app: Flask, core: "App") -> None:
         store.log(service.now(), current_user(cfg), "check for updates", "")
         return done("Checking for a new version. If there is one, it is installed and the program restarts "
                     "by itself in a minute or two.", "settings_page")
+
+    @app.post("/settings/force-update")
+    def force_update():
+        if not getattr(sys, "frozen", False):
+            return failed("Only the installed program can be updated.", "settings_page", _anchor="admin")
+        (core.data_dir / updater.FORCE_FILE).touch()  # picked up by the launcher within half a minute
+        store.log(service.now(), current_user(cfg), "force update", __version__)
+        return done("Force update started: the newest release is downloaded and the program restarts into it in "
+                    "a minute or two, with the camera stopped meanwhile. Reload this page to see the result.",
+                    "settings_page", _anchor="admin")
 
     @app.post("/settings/go-back")
     def go_back():
@@ -336,7 +387,9 @@ def register(app: Flask, core: "App") -> None:
         if not url:
             return failed("Enter a Google Chat webhook URL first.", "settings_page")
         try:
-            core.chat.send_now("✅ The attendance system can post to this " + ("system space." if system else "space."), url)
+            core.chat.send_now("✅ The attendance system can post to this space: "
+                               + ("monitoring (power, camera, Base and backup problems)." if system else
+                                  "notifications (late message, reminders, the day's totals)."), url)
         except Exception as exc:
             return failed(f"Sending failed: {exc}", "settings_page")
         return done("Test message sent; check Google Chat.", "settings_page")

@@ -299,7 +299,8 @@ class AttendanceService:
             latephoto.remove(data_dir, day)
             return None
         try:
-            return latephoto.write(data_dir, day, items, f"Late on {day:%A %d %b %Y}", self.cfg.late_message.occasions)
+            return latephoto.write(data_dir, day, items, f"Late on {day:%A %d %b %Y}", self.cfg.late_message.occasions,
+                                   self.cfg.late_message.background)
         except Exception:
             log.exception("Could not make the picture of the late people")
             return None

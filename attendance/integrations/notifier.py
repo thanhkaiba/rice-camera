@@ -127,10 +127,10 @@ class GoogleChat:
                 self.store.outbox_failed(item_id)
                 return False
             log.error("Google Chat API cannot post (%s); posting with the webhook instead", exc)
-            if self.webhook_url:
+            if self.system_webhook_url:  # a problem to fix: the monitoring space, the message itself below
                 fix = ("Sign in again under Settings → Google Chat." if exc.sign_in else
                        "Check Settings → Google Chat and the Chat app in Google Cloud, then press Test.")
-                self._post(self.webhook_url, {"text": f"⚠️ The late message could not be posted with its picture: {exc}. {fix}"})
+                self._post(self.system_webhook_url, {"text": f"⚠️ The late message could not be posted with its picture: {exc}. {fix}"})
             return None
         log.info("Posted with the Google Chat API: %s", name)
         self.store.outbox_done(item_id)

@@ -67,15 +67,16 @@
 
   <section class="card tab" id="notify">
     <h2 class="row">{{ icon('chat') }}Google Chat</h2>
+    <p class="hint" style="margin-top:0">Two spaces, so people read about attendance and whoever looks after this computer reads about problems. Each one is a webhook of its own space; Test posts to the address typed here, before saving.</p>
     <div class="form-row">
-      <label class="field grow">Webhook URL<input name="google_chat.webhook_url" value="{{ s.google_chat.webhook_url }}" placeholder="https://chat.googleapis.com/v1/spaces/…">
-        <span class="hint">Space name → Apps &amp; integrations → Webhooks → Add</span>{{ src('google_chat.webhook_url') }}</label>
-      <button formaction="{{ url_for('test_chat') }}" title="Send a test message to the space">{{ icon('send') }}Test</button>
+      <label class="field grow">Notifications space<input name="google_chat.webhook_url" value="{{ s.google_chat.webhook_url }}" placeholder="https://chat.googleapis.com/v1/spaces/…">
+        <span class="hint">Late message and its picture, reminders to approve Base requests, late arrivals, the day's totals. Space name → Apps &amp; integrations → Webhooks → Add</span>{{ src('google_chat.webhook_url') }}</label>
+      <button formaction="{{ url_for('test_chat') }}" title="Send a test message to the notifications space">{{ icon('send') }}Test</button>
     </div>
-    <div class="form-row">
-      <label class="field grow">System webhook URL<input name="google_chat.system_webhook_url" value="{{ s.google_chat.system_webhook_url }}" placeholder="https://chat.googleapis.com/v1/spaces/… (empty: the webhook above)">
-        <span class="hint">A separate space for system news only: power unplugged or back, camera down, Base errors. Empty: they go to the space above.</span>{{ src('google_chat.system_webhook_url') }}</label>
-      <button formaction="{{ url_for('test_chat') }}?system=1" title="Send a test message to the system space">{{ icon('send') }}Test</button>
+    <div class="form-row" style="margin-top:12px">
+      <label class="field grow">Monitoring space<input name="google_chat.system_webhook_url" value="{{ s.google_chat.system_webhook_url }}" placeholder="https://chat.googleapis.com/v1/spaces/… (empty: the notifications space)">
+        <span class="hint">Power and battery, camera down or back, crashes and restarts, Base or leave sync errors, backup failures, Chat sign-in problems. {% if s.google_chat.system_webhook_url %}Sent to its own space.{% else %}<strong>Not set: these go to the notifications space.</strong>{% endif %}</span>{{ src('google_chat.system_webhook_url') }}</label>
+      <button formaction="{{ url_for('test_chat') }}?system=1" title="Send a test message to the monitoring space">{{ icon('send') }}Test</button>
     </div>
     <div class="stack">
       {{ check('google_chat', 'mention_people', '@mention people in alerts') }}
@@ -137,10 +138,38 @@
     <p class="hint" style="margin:4px 0 0">{% if occasion %}Now: <strong>{{ occasion.name }}</strong> background. {% endif %}Next: {% for o, d in upcoming %}{{ o.name }} {{ d.strftime('%d/%m') }}{{ ', ' if not loop.last }}{% endfor %}.
       Your own pictures for one: upload them below with "Around …" chosen (they land in the data folder, <code>late/backgrounds/&lt;name&gt;/</code>).</p>
     <p class="hint" style="margin:4px 0 0">Google Chat shows the picture only when the address of this page (Access tab) is https and reachable from the internet, e.g. with Tailscale Funnel; otherwise the message links to it.</p>
+    <h3 class="row" style="margin-top:18px">{{ icon('image') }}Background of the picture</h3>
+    <p class="hint" style="margin:4px 0 10px">Click a picture to use it every day, holidays too. Automatic changes it each day and uses holiday pictures around holidays.
+      {% if gallery.selected == 'single' %}Your picture is used every day, holidays too: remove it to go back to automatic.{% endif %}</p>
+    <div class="bg-grid">
+      <div class="bg-card {{ 'selected' if not gallery.selected }}" id="bg-automatic">
+        <button class="bg-pick" form="late-bg-choose" name="choice" value="" {{ 'disabled' if gallery.selected == 'single' }} title="A different picture each day, holiday pictures around holidays">
+          {% if gallery.today and not gallery.selected %}<img src="{{ url_for('late_background_preview', key=gallery.today, v=gallery.stamp[gallery.today]) }}" alt="" loading="lazy">{% else %}<span class="bg-auto">{{ icon('sparkles') }}</span>{% endif %}
+          <span class="bg-name">Automatic{% if not gallery.selected %} <span class="badge ok plain">Selected</span>{% endif %}</span>
+        </button>
+      </div>
+    </div>
+    {% for title, pictures in gallery.groups %}
+    <h4 class="bg-group">{{ title }} <span class="hint">{{ pictures|length }}</span></h4>
+    <div class="bg-grid">
+      {% for b in pictures %}
+      <div class="bg-card {{ 'selected' if gallery.selected == b.key }}">
+        <button class="bg-pick" form="late-bg-choose" name="choice" value="{{ b.key }}" title="Use this picture">
+          <img src="{{ url_for('late_background_preview', key=b.key, v=gallery.stamp[b.key]) }}" alt="{{ b.label }}" loading="lazy">
+          <span class="bg-name">{{ b.label }}{% if gallery.selected == b.key %} <span class="badge ok plain">Selected</span>{% elif not gallery.selected and gallery.today == b.key %} <span class="badge info plain">Today</span>{% endif %}</span>
+        </button>
+        <div class="bg-foot">
+          <a href="{{ url_for('late_background_preview', key=b.key, full=1) }}" target="_blank">View</a>
+          {% if b.group == 'own' %}<button class="link" form="late-bg" name="remove" value="{{ 'single' if b.key == 'single' else b.key[4:] }}" title="Remove this picture">Remove</button>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
     <div class="form-row" style="margin-top:14px">
-      <label class="field grow">Background pictures
+      <label class="field grow">Add your own pictures
         <input type="file" name="background" accept="image/*" multiple form="late-bg">
-        <span class="hint">{% if late_background or late_backgrounds %}Your pictures are listed below.{% else %}Empty = old paintings, a different one each day, and holiday pictures around holidays.{% endif %} Landscape, about 1280×720, is best; several at once are fine.</span></label>
+        <span class="hint">Landscape, about 1280×720, is best; several at once are fine. Adding any goes back to using them instead of a picture clicked above.</span></label>
       <label class="field">Use them
         <select name="for" form="late-bg">
           <option value="single">Every day (the first picture only)</option>
@@ -149,14 +178,6 @@
         </select></label>
       <button class="btn" form="late-bg" title="Save the chosen pictures">{{ icon('upload') }}Use</button>
     </div>
-    {% if late_background or late_backgrounds %}
-    <ul class="hint" style="margin:6px 0 0; padding-left:18px">
-      {% if late_background %}<li>Your picture is used every day, holidays too: <a href="{{ url_for('late_background_jpg') }}" target="_blank">view</a>
-        <button class="btn ghost" form="late-bg" name="remove" value="single" title="Back to the pictures of each day">{{ icon('trash') }}Remove</button></li>{% endif %}
-      {% for group, rel in late_backgrounds %}<li>{{ 'In turn' if not group else 'Around ' + (occasion_names.get(group) or group) }}: <a href="{{ url_for('late_own_background', rel=rel) }}" target="_blank">{{ rel.rsplit('/', 1)[-1] }}</a>
-        <button class="btn ghost" form="late-bg" name="remove" value="{{ rel }}" title="Remove this picture">{{ icon('trash') }}Remove</button></li>{% endfor %}
-    </ul>
-    {% endif %}
   </section>
 
   <section class="card tab" id="camera">
@@ -253,7 +274,11 @@
     <div class="form-row" style="align-items:center">
       {{ check('updates', 'enabled', 'Install new versions automatically', 'Checked every few hours · installed outside camera hours') }}
       <button class="btn-sm" formaction="{{ url_for('update_now') }}" formnovalidate>{{ icon('refresh') }}Check now</button>
+      <button class="btn-sm danger" formaction="{{ url_for('force_update') }}" formnovalidate
+              title="Install the newest release now: also during camera hours, also this same version, also one you went back from"
+              onclick="return confirm('Install the newest release now? The program restarts straight away, also during camera hours, and the camera stops for a minute or two.')">{{ icon('download') }}Force update</button>
     </div>
+    <p class="hint" style="margin:6px 0 0">Check now installs only a newer version. Force update also reinstalls the newest release when this computer already has that number, and undoes going back.</p>
     {% if update.rolled_back %}<p class="hint"><b>{{ update.rolled_back }}.</b> That version is not installed again; the next newer release is.</p>{% endif %}
     {% if versions.targets or versions.pinned %}
     <div class="form-row" style="align-items:center; margin-top:12px">
@@ -368,6 +393,7 @@
   </div>
 </form>
 <form method="post" action="{{ url_for('late_background') }}" enctype="multipart/form-data" id="late-bg" hidden></form>
+<form method="post" action="{{ url_for('choose_late_background') }}" id="late-bg-choose" hidden></form>
 <form method="post" action="{{ url_for('google_client') }}" enctype="multipart/form-data" id="google-client" hidden></form>
 <form method="post" action="{{ url_for('google_connect') }}" id="google-connect" hidden></form>
 <form method="post" action="{{ url_for('google_paste') }}" id="google-paste" hidden></form>

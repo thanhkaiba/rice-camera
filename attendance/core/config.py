@@ -216,6 +216,9 @@ class LateMessageConfig:
     photo: bool = True
     # Around holidays (Tet, Mid-Autumn, Christmas, Halloween, ...) the picture takes that holiday's background.
     occasions: bool = True
+    # The one picture behind the cards, chosen on the Settings page (see latephoto.backgrounds);
+    # empty: automatic, a different one each day and holiday pictures around holidays.
+    background: str = ""
 
 
 @dataclass

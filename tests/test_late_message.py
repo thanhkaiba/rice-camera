@@ -1,6 +1,7 @@
 import datetime as dt
 import io
 
+import numpy as np
 import pytest
 
 from attendance import config
@@ -343,7 +344,7 @@ def test_background_picture_is_uploaded_and_removed_on_the_settings_page(core):
     app, _, _ = core
     c = client(app)
     page = c.get("/settings").get_data(as_text=True)
-    assert "Empty = old paintings" in page and 'form="late-bg"' in page
+    assert "Automatic changes it each day" in page and 'form="late-bg"' in page
     assert c.get("/settings/late-background.jpg").status_code == 404
     resp = c.post("/settings/late-background", data={"background": (io.BytesIO(b"not a picture"), "x.png")},
                   content_type="multipart/form-data", follow_redirects=True)
@@ -497,3 +498,86 @@ def test_reference_photo_stands_in_when_the_camera_did_not_see_the_person(core):
     card, _ = latephoto._card(people[0])
     inner = card[latephoto.BORDER:-latephoto.BORDER, latephoto.BORDER:-latephoto.BORDER]
     assert (inner[-1, 0] == 235).all() and (inner[60, inner.shape[1] // 2] == 30).all()  # light card, face in the upper part
+
+
+def test_background_list_previews_and_choice(core):
+    """Settings lists every background with a preview; the clicked one is used every day, holidays too."""
+    import cv2
+    from test_evidence import seen
+
+    from attendance.core import latephoto, settings
+
+    app, clock, _ = core
+    c = create_app(app).test_client()
+    clock.t = at(10, 40)
+    keys = {b.key: b for b in latephoto.backgrounds(app.data_dir)}
+    assert "painting/roses-bowl.jpg" in keys and "holiday/christmas-2.jpg" in keys
+    assert keys["holiday/christmas-2.jpg"].label == "Christmas 2" and keys["painting/roses-bowl.jpg"].label == "Roses bowl"
+    assert not any(k.endswith(".md") for k in keys)
+
+    page = c.get("/settings").get_data(as_text=True)
+    assert 'value="painting/roses-bowl.jpg"' in page and "Automatic" in page
+    thumb = c.get("/settings/late-background/preview/painting/roses-bowl.jpg")
+    assert thumb.mimetype == "image/jpeg"
+    picture = cv2.imdecode(np.frombuffer(thumb.data, np.uint8), cv2.IMREAD_COLOR)
+    assert picture.shape[:2] == (latephoto.THUMBNAIL[1], latephoto.THUMBNAIL[0])
+    assert c.get("/settings/late-background/preview/painting/roses-bowl.jpg?full=1").status_code == 200
+    for bad in ("painting/nope.jpg", "painting/../../attendance.db", "../attendance.db"):
+        assert c.get(f"/settings/late-background/preview/{bad}").status_code == 404
+
+    christmas = dt.date(2026, 12, 25)
+    resp = c.post("/settings/late-background/choose", data={"choice": "painting/roses-bowl.jpg"}, follow_redirects=True)
+    assert "Background chosen" in resp.get_data(as_text=True)
+    assert app.cfg.late_message.background == "painting/roses-bowl.jpg"
+    assert latephoto.day_background(app.data_dir, christmas, True, app.cfg.late_message.background) == keys["painting/roses-bowl.jpg"].path
+    seen(app, "B", at(10, 15))
+    rel = app.service.late_photo(DAY)
+    key = (app.data_dir / rel).with_suffix(".key").read_text()
+    c.post("/settings/late-background/choose", data={"choice": "painting/parrots.jpg"})
+    app.service.late_photo(DAY)
+    assert (app.data_dir / rel).with_suffix(".key").read_text() != key  # the picture is made again
+
+    # Survives a save of the Settings form (which does not post the field) and a new start.
+    assert "background" in settings.EDITABLE["late_message"]
+    c.post("/settings", data={"schedule.window_start": "08:00", "schedule.late_after": "10:00", "schedule.window_end": "11:00"})
+    assert app.cfg.late_message.background == "painting/parrots.jpg"
+
+    resp = c.post("/settings/late-background/choose", data={"choice": "../../attendance.db"}, follow_redirects=True)
+    assert "not there any more" in resp.get_data(as_text=True) and app.cfg.late_message.background == "painting/parrots.jpg"
+    assert latephoto.day_background(app.data_dir, DAY, True, "../../attendance.db").parent == latephoto.BUNDLED
+    c.post("/settings/late-background/choose", data={"choice": ""})
+    assert app.cfg.late_message.background == ""
+    assert latephoto.day_background(app.data_dir, DAY, True, "").parent == latephoto.BUNDLED
+
+
+def test_own_backgrounds_in_the_list_and_how_they_mix_with_a_choice(core):
+    import cv2
+
+    from attendance.core import latephoto
+
+    app, _, _ = core
+    c = create_app(app).test_client()
+    ok, jpg = cv2.imencode(".jpg", np.full((90, 160, 3), 50, np.uint8))
+
+    def pic(name="p.jpg"):
+        return (io.BytesIO(jpg.tobytes()), name)
+
+    c.post("/settings/late-background/choose", data={"choice": "painting/parrots.jpg"})
+    c.post("/settings/late-background", data={"for": "rotation", "background": [pic()]}, content_type="multipart/form-data")
+    assert app.cfg.late_message.background == ""  # new pictures are meant to be used
+    assert [b.key for b in latephoto.backgrounds(app.data_dir) if b.group == "own"] == ["own/own-1.jpg"]
+
+    c.post("/settings/late-background/choose", data={"choice": "own/own-1.jpg"})
+    assert app.cfg.late_message.background == "own/own-1.jpg"
+    page = c.get("/settings").get_data(as_text=True)
+    assert 'name="remove" value="own-1.jpg"' in page
+    c.post("/settings/late-background", data={"remove": "own-1.jpg"})
+    assert app.cfg.late_message.background == ""  # the removed one is no longer chosen
+
+    c.post("/settings/late-background", data={"for": "single", "background": [pic()]}, content_type="multipart/form-data")
+    page = c.get("/settings").get_data(as_text=True)
+    assert "Your picture is used every day" in page and 'value="" disabled' in page  # automatic needs it removed first
+    c.post("/settings/late-background/choose", data={"choice": "single"})
+    assert app.cfg.late_message.background == "single"
+    c.post("/settings/late-background", data={"remove": "single"})
+    assert app.cfg.late_message.background == "" and not latephoto.background_path(app.data_dir).exists()

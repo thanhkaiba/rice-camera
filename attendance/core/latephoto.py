@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 FOLDER = "late"  # under the data folder: late/<day>.jpg, late/background.jpg
 BACKGROUND_FILE = "background.jpg"
 BACKGROUNDS = "backgrounds"  # late/backgrounds/*.jpg|png: the admin's own pictures, one a day, in turn
+THUMBNAIL = (320, 180)  # a background's preview on the Settings page, cropped as the picture crops it
 BUNDLED = Path(__file__).resolve().parents[1] / "web" / "static" / "late"  # old public-domain pictures
 OCCASIONS = "occasions"  # BUNDLED/occasions/<key>*.jpg: a holiday's own pictures (see occasions.py)
 HEIGHT = 720  # the picture is at least this tall, taller when there are several rows
@@ -84,6 +85,52 @@ def own_pictures(data_dir: Path) -> list[tuple[str, str]]:
             rel = p.relative_to(root)
             out.append((rel.parts[0] if len(rel.parts) > 1 else "", rel.as_posix()))
     return out
+
+
+@dataclass(frozen=True)
+class Background:
+    key: str  # what late_message.background holds: single, own/<rel>, painting/<file>, holiday/<file>
+    label: str
+    group: str  # own, painting, holiday
+    path: Path
+
+
+def _picture_label(stem: str, names: dict[str, str]) -> str:
+    """christmas-2 -> Christmas 2 (the occasion's name when there is one), roses-bowl -> Roses bowl."""
+    base, _, number = stem.rpartition("-")
+    base, number = (base, number) if number.isdigit() else (stem, "")
+    name = names.get(base) or base.replace("_", " ").replace("-", " ").capitalize()
+    return f"{name} {number}" if number else name
+
+
+def backgrounds(data_dir: Path) -> list[Background]:
+    """Every picture the late picture can be drawn on: the admin's, then the bundled ones."""
+    from .occasions import BY_KEY
+
+    names = {key: o.name for key, o in BY_KEY.items()}
+    found = []
+    single = background_path(data_dir)
+    if single.exists():
+        found.append(Background("single", "Your every-day picture", "own", single))
+    root = data_dir / FOLDER / BACKGROUNDS
+    for group, rel in own_pictures(data_dir):
+        path = root / rel
+        label = f"Yours: {_picture_label(path.stem, names)}" if group else f"Yours {path.stem.rpartition('-')[2]}"
+        found.append(Background(f"own/{rel}", label, "own", path))
+
+    def bundled(folder: Path, group: str) -> list[Background]:
+        if not folder.is_dir():
+            return []
+        return [Background(f"{group}/{p.name}", _picture_label(p.stem, names), group, p) for p in sorted(folder.iterdir())
+                if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png")]
+
+    return found + bundled(BUNDLED, "painting") + bundled(BUNDLED / OCCASIONS, "holiday")
+
+
+def chosen_background(data_dir: Path, key: str) -> Path | None:
+    """The picture with this key, while it is there. Looked up in the list, so a key from a form or
+    an imported configuration can never point at another file."""
+    return next((b.path for b in backgrounds(data_dir) if b.key == key), None) if key else None
 
 
 def own_picture_path(data_dir: Path, rel: str) -> Path:
@@ -370,14 +417,18 @@ def draw_extras(canvas: np.ndarray, free: list[tuple[int, int, int, int]], seed:
             draw[str(kind)](canvas, int(rng.integers(x1, x2)), int(rng.integers(y1, y2)), rng)
 
 
-def day_background(data_dir: Path, day: dt.date, occasions: bool = True) -> Path | None:
-    """The picture behind the day's cards: the admin's single background if uploaded; else around a
+def day_background(data_dir: Path, day: dt.date, occasions: bool = True, chosen: str = "") -> Path | None:
+    """The picture behind the day's cards: the one `chosen` on the Settings page (a key from
+    backgrounds), every day, holidays too; else the admin's single background if uploaded; else around a
     holiday (occasions.py) its picture, the admin's own in late/backgrounds/<key>/ before the bundled
     ones; else one of the pictures in late/backgrounds (or the bundled old pictures: the Dong Ho
     mice's wedding and rooster, roses, cherry blossoms, parrots), a different one each day.
     None: draw a scene."""
     from .occasions import occasion_on
 
+    picked = chosen_background(data_dir, chosen)
+    if picked is not None:
+        return picked
     own = background_path(data_dir)
     if own.exists():
         return own
@@ -584,13 +635,14 @@ def fingerprint(people: list[Person], background: Path | None) -> str:
     return hashlib.sha256(repr(parts).encode()).hexdigest()
 
 
-def write(data_dir: Path, day: dt.date, people: list[Person], title: str, occasions: bool = True) -> str:
+def write(data_dir: Path, day: dt.date, people: list[Person], title: str, occasions: bool = True,
+          chosen: str = "") -> str:
     """Make (or refresh, when something changed) the day's picture; returns its path under data_dir.
-    `occasions`: holiday backgrounds around holidays."""
+    `occasions`: holiday backgrounds around holidays. `chosen`: see day_background."""
     rel = photo_path(day)
     path = data_dir / rel
     key = path.with_suffix(".key")
-    background = day_background(data_dir, day, occasions)
+    background = day_background(data_dir, day, occasions, chosen)
     fp = fingerprint(people, background)
     if path.exists() and key.exists() and key.read_text() == fp:
         return rel

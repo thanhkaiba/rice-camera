@@ -197,7 +197,7 @@ def test_camera_outage_is_reported(env):
     run_until(service, clock, at(9, 50), camera_ok=False)
     run_until(service, clock, at(11, 1))
     deadline = [m for m in sent if m.startswith("⏰")][0]
-    assert "was down" not in deadline  # camera problems go to the system space
+    assert "was down" not in deadline  # camera problems go to the monitoring space
     assert "was down: 09:30–09:50" in [m for m in sent if m.startswith("🛠")][0]
 
 

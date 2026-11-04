@@ -32,11 +32,13 @@ log = logging.getLogger(__name__)
 REPO = "thanhkaiba/rice-camera"  # renamed from simple-go-gin; GitHub redirects the old name
 STATUS_FILE = "update.json"     # in the data folder; shown on the Settings page
 REQUEST_FILE = "update.request"  # written by the Settings page: check now
+FORCE_FILE = "update.force"  # written by the Settings page: install the newest release now, whatever it takes
 ROLLBACK_FILE = "rollback.request"  # written by the Settings page: {"version": "1.2.0"}, or "" for the newest again
 RESTART_FILE = "restart.request"  # written after a configuration import: restart to apply it
 PIN_FILE = "pinned.json"  # in <home>/versions: the program chosen by going back; run instead of the newest
 BASE_FILE = "installed.json"  # in <home>/versions: version and path of the program the installer put in place
 KEEP_VERSIONS = 2
+OLD_SUFFIX = "-old.part"  # versions/<version>-old.part: a version replaced by a force update
 
 
 def parse(version: str) -> tuple[int, ...]:
@@ -192,13 +194,28 @@ def unpack(url: str, version: str, home: Path, digest: str | None = None) -> Pat
     if not exe_in(partial).exists():
         shutil.rmtree(partial, ignore_errors=True)
         raise RuntimeError(f"{url} does not contain {exe_in(Path('.'))}")
-    shutil.rmtree(target, ignore_errors=True)
-    partial.rename(target)
+    if target.exists():  # the same version again (force update), and the program may be running from it
+        # Moved aside, not deleted: a running program keeps its files, and where it cannot be moved
+        # (Windows) this fails with the installed version untouched.
+        old = versions / (version + OLD_SUFFIX)
+        shutil.rmtree(old, ignore_errors=True)
+        try:
+            target.rename(old)
+        except OSError:
+            shutil.rmtree(partial, ignore_errors=True)
+            raise
+        partial.rename(target)
+        if target not in Path(sys.executable).parents:  # else remove_old clears it at the next start
+            shutil.rmtree(old, ignore_errors=True)
+    else:
+        partial.rename(target)
     return exe_in(target)
 
 
 def remove_old(home: Path, running: Path) -> None:
     keep = pinned(home)
+    for leftover in (home / "versions").glob("*" + OLD_SUFFIX):
+        shutil.rmtree(leftover, ignore_errors=True)
     for version, exe in installed(home)[KEEP_VERSIONS:]:
         if exe != running and exe != keep:
             shutil.rmtree(home / "versions" / version, ignore_errors=True)
@@ -284,14 +301,46 @@ class Updater:
     def requests(self) -> None:
         """Go back to an earlier version, forward to the newest again, or restart, as asked on the
         Settings page. Sets `ready` to the program to restart into."""
-        rollback, restart = self.data / ROLLBACK_FILE, self.data / RESTART_FILE
-        if rollback.exists():
+        rollback, restart, force = self.data / ROLLBACK_FILE, self.data / RESTART_FILE, self.data / FORCE_FILE
+        if force.exists():
+            force.unlink(missing_ok=True)
+            self.ready = self.force()
+        elif rollback.exists():
             wanted = _read_json(rollback).get("version", "")
             rollback.unlink(missing_ok=True)
             self.ready = self.go_back(wanted) if wanted else self.go_forward()
         elif restart.exists():
             restart.unlink(missing_ok=True)
             self.ready = Path(sys.executable)
+
+    def force(self) -> Path | None:
+        """Install the newest release and restart into it now: also during camera hours, also the
+        version already running (to replace a damaged or locally built copy), also one gone back
+        from. Never an older one, which the launcher would hand straight back from."""
+        now = dt.datetime.now().isoformat(timespec="seconds")
+        try:
+            found = latest_release(self.repo)
+        except Exception as exc:
+            write_status(self.data, checked_at=now, state="", error=f"Could not check for updates: {exc}")
+            return None
+        if not found:
+            write_status(self.data, checked_at=now, state="", error="Force update: no release to install yet")
+            return None
+        version, url, digest = (*found, None)[:3]
+        if parse(version) < parse(__version__):
+            write_status(self.data, checked_at=now, latest=version, state="",
+                         error=f"Force update stopped: the newest release {version} is older than this version {__version__}")
+            return None
+        log.info("Force update to version %s", version)
+        write_status(self.data, checked_at=now, latest=version, error="", state=f"Force update: downloading version {version}")
+        try:
+            program = unpack(url, version, self.home, digest)
+        except Exception as exc:
+            write_status(self.data, error=f"Could not install version {version}: {exc}", state="")
+            return None
+        pin(self.home, None)
+        write_status(self.data, skip="", rolled_back="", error="", state=f"Force update: starting version {version}")
+        return program
 
     def go_back(self, version: str) -> Path | None:
         program = next((p for v, p in rollback_targets(self.home) if v == version), None)

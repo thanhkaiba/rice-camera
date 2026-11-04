@@ -261,3 +261,120 @@ def test_go_back_button_on_settings_page(core, monkeypatch):
     assert not (app.data_dir / updater.ROLLBACK_FILE).exists()
     c.post("/settings/go-back", data={"rollback.version": "0.1.0"})
     assert '"0.1.0"' in (app.data_dir / updater.ROLLBACK_FILE).read_text()
+
+
+def fake_release(tmp_path, monkeypatch, version):
+    archive = tmp_path / updater.asset_name()
+    make_package(archive)
+    monkeypatch.setattr(updater, "latest_release", lambda repo: (version, archive.as_uri()))
+
+
+def test_force_update_installs_a_newer_release_now_even_in_camera_hours(tmp_path, monkeypatch):
+    newer = f"{updater.parse(__version__)[0] + 1}.0.0"
+    fake_release(tmp_path, monkeypatch, newer)
+    cfg = write_config(tmp_path, 'schedule:\n  window_start: "00:00"\n  late_after: "00:01"\n  window_end: "23:59"\n'
+                                 "  work_days: [0, 1, 2, 3, 4, 5, 6]\n")
+    up = updater.Updater(tmp_path, cfg)
+    assert updater.camera_hours(updater.load_settings(cfg))
+    (up.data / updater.FORCE_FILE).touch()
+    up.requests()
+    assert up.ready == updater.exe_in(tmp_path / "versions" / newer) and up.ready.exists()
+    assert not (up.data / updater.FORCE_FILE).exists()
+    assert updater.read_status(up.data)["error"] == ""
+
+
+def test_force_update_replaces_the_running_version_and_clears_it_at_the_next_start(tmp_path, monkeypatch):
+    fake_release(tmp_path, monkeypatch, __version__)
+    running = updater.exe_in(tmp_path / "versions" / __version__)
+    running.parent.mkdir(parents=True)
+    running.write_bytes(b"old")
+    monkeypatch.setattr(sys, "executable", str(running))
+    up = updater.Updater(tmp_path, write_config(tmp_path))
+    (up.data / updater.FORCE_FILE).touch()
+    up.requests()
+    assert up.ready == running and running.read_bytes() == b"program"
+    old = tmp_path / "versions" / (__version__ + updater.OLD_SUFFIX)
+    assert old.exists() and [v for v, _ in updater.installed(tmp_path)] == [__version__]  # kept while it runs
+    updater.remove_old(tmp_path, running)
+    assert not old.exists() and running.exists()
+
+
+def test_force_update_of_a_version_not_running_leaves_nothing_behind(tmp_path, monkeypatch):
+    target = updater.exe_in(tmp_path / "versions" / "9.0.0")
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"old")
+    archive = tmp_path / updater.asset_name()
+    make_package(archive)
+    assert updater.unpack(archive.as_uri(), "9.0.0", tmp_path).read_bytes() == b"program"
+    assert not list((tmp_path / "versions").glob("*.part"))
+
+
+def test_force_update_when_the_version_cannot_be_moved_keeps_it_working(tmp_path, monkeypatch):
+    """Windows: a folder the program runs from cannot be renamed. The copy in use stays as it was."""
+    target = updater.exe_in(tmp_path / "versions" / "9.0.0")
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"old")
+    archive = tmp_path / updater.asset_name()
+    make_package(archive)
+    real = Path.rename
+
+    def refuse(self, to):
+        if self.name == "9.0.0":
+            raise PermissionError("in use")
+        return real(self, to)
+    monkeypatch.setattr(Path, "rename", refuse)
+    with pytest.raises(PermissionError):
+        updater.unpack(archive.as_uri(), "9.0.0", tmp_path)
+    assert target.read_bytes() == b"old" and not list((tmp_path / "versions").glob("*.part"))
+
+
+def test_force_update_undoes_going_back_but_never_installs_an_older_release(tmp_path, monkeypatch):
+    home, base, old, new = two_versions(tmp_path, monkeypatch)
+    up = updater.Updater(home, write_config(home))
+    (up.data / updater.ROLLBACK_FILE).write_text('{"version": "1.0.0"}')
+    up.requests()
+    assert updater.pinned(home) == old and updater.read_status(up.data)["skip"]
+
+    up.ready = None
+    fake_release(tmp_path, monkeypatch, "1.5.0")  # two_versions runs 2.0.0: an older release is refused
+    (up.data / updater.FORCE_FILE).touch()
+    up.requests()
+    status = updater.read_status(up.data)
+    assert up.ready is None and "older than this version" in status["error"]
+    assert updater.pinned(home) == old  # nothing changed
+
+    fake_release(tmp_path, monkeypatch, "3.0.0")
+    (up.data / updater.FORCE_FILE).touch()
+    up.requests()
+    status = updater.read_status(up.data)
+    assert up.ready == updater.exe_in(home / "versions" / "3.0.0")
+    assert updater.pinned(home) is None and not status["skip"] and not status["error"]
+
+
+def test_force_update_reports_a_failed_check_or_download(tmp_path, monkeypatch):
+    up = updater.Updater(tmp_path, write_config(tmp_path))
+
+    def offline(repo):
+        raise OSError("no internet")
+    monkeypatch.setattr(updater, "latest_release", offline)
+    assert up.force() is None and "no internet" in updater.read_status(up.data)["error"]
+    monkeypatch.setattr(updater, "latest_release", lambda repo: None)
+    assert up.force() is None and "no release" in updater.read_status(up.data)["error"]
+    monkeypatch.setattr(updater, "latest_release", lambda repo: ("9.0.0", (tmp_path / "gone.tar.gz").as_uri()))
+    assert up.force() is None and "Could not install version 9.0.0" in updater.read_status(up.data)["error"]
+
+
+def test_force_update_button_only_on_the_installed_program(core, monkeypatch):
+    from attendance.web import create_app
+
+    app, _, _ = core
+    c = create_app(app).test_client()
+    assert "Force update" not in c.get("/settings").get_data(as_text=True)
+    resp = c.post("/settings/force-update", follow_redirects=True)
+    assert "Only the installed program" in resp.get_data(as_text=True)
+    assert not (app.data_dir / updater.FORCE_FILE).exists()
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert "/settings/force-update" in c.get("/settings").get_data(as_text=True)
+    resp = c.post("/settings/force-update", follow_redirects=True)
+    assert "Force update started" in resp.get_data(as_text=True)
+    assert (app.data_dir / updater.FORCE_FILE).exists()
