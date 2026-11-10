@@ -31,7 +31,7 @@
       <input type="hidden" name="back" value="{{ url_for('setup_page', step='hours') }}">
       <label class="field">Camera address (RTSP)
         <input name="camera.url" value="{{ cfg.camera.url }}" placeholder="rtsp://admin:CODE@192.168.1.64:554/Streaming/Channels/101"
-               required data-camera-check="auto" autocomplete="off">
+               required {% if not office %}data-camera-check="auto" {% endif %}autocomplete="off">
       </label>
       <details class="help">
         <summary>{{ icon('help') }} Where do I find it?</summary>
@@ -139,7 +139,7 @@
           {% endif %}
         </div>
       {% endcall %}
-      {% call item(s.area, true) %}<a class="small" href="{{ url_for('live_page') }}">Draw it on the Camera page</a>{% endcall %}
+      {% call item(s.area, true) %}{% if office %}<span class="hint">Draw it on the Camera page of the office computer.</span>{% else %}<a class="small" href="{{ url_for('live_page') }}">Draw it on the Camera page</a>{% endif %}{% endcall %}
       {% call item(s.mentions, true) %}<span class="hint">Google Chat user IDs on the People page.</span>{% endcall %}
       {% call item(s.hr, true) %}<a class="small" href="{{ url_for('settings_page') }}#hr">Settings → HR system</a>{% endcall %}
     </div>

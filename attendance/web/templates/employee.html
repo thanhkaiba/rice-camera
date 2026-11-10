@@ -32,7 +32,7 @@
   <div>
     <div class="card">
       <div class="card-head"><h2 class="row">{{ icon('image') }}Reference photos</h2>
-        <a class="btn btn-sm" href="{{ url_for('live_page') }}" title="Take a photo with the door camera: open the camera page and use Capture faces">{{ icon('camera') }}From camera</a></div>
+        {% if not office %}<a class="btn btn-sm" href="{{ url_for('live_page') }}" title="Take a photo with the door camera: open the camera page and use Capture faces">{{ icon('camera') }}From camera</a>{% endif %}</div>
       <form method="post" action="{{ url_for('upload_photos', employee_id=person.id) }}" enctype="multipart/form-data" id="upload">
         <label id="drop" class="dropzone">
           <input type="file" name="photos" id="photos" accept="image/*" multiple required hidden>

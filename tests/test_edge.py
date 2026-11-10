@@ -325,3 +325,28 @@ def test_config_file_keeps_only_what_the_server_can_use(site, tmp_path):
     assert saved == {"timezone": "Asia/Ho_Chi_Minh", "recognition": {"det_size": 640}}
     assert c.put("/api/edge/import/config", data="nonsense_key: 1\n", headers=admin()).status_code == 400
     assert c.put("/api/edge/import/config", data=text, headers=AUTH).status_code == 401
+
+
+def test_the_server_points_to_the_office_for_anything_about_the_camera(site):
+    _, _, c = site
+    home = c.get("/report", headers=admin()).get_data(as_text=True)
+    assert 'href="/live"' not in home
+    page = c.get("/live", headers=admin())
+    assert page.status_code == 200 and "http://192.168.10.243:8000/live" in page.get_data(as_text=True)
+    settings_page = c.get("/settings", headers=admin()).get_data(as_text=True)
+    assert "192.168.10.x" in settings_page and "http://192.168.10.243:8000/settings#camera" in settings_page
+    assert 'data-camera-check="auto"' not in settings_page
+
+
+def test_the_office_mac_keeps_its_camera_page(tmp_path):
+    from attendance.core.config import Config
+    from attendance.core.pipeline import App
+    from attendance.web import create_app
+
+    cfg = Config()
+    cfg.base_dir = tmp_path
+    c = create_app(App(cfg, now=lambda: at(10, 30))).test_client()
+    assert 'href="/live"' in c.get("/report").get_data(as_text=True)
+    assert "only available on the office computer" not in c.get("/live").get_data(as_text=True)
+    settings_page = c.get("/settings").get_data(as_text=True)
+    assert 'data-camera-check="auto"' in settings_page and "can only be checked from the office" not in settings_page

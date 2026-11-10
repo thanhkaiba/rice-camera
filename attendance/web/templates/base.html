@@ -27,7 +27,7 @@
     {% endif %}
     {% if role != 'viewer' %}<a href="{{ url_for('employees') }}" class="{{ 'on' if nav in ('employees', 'employee', 'calendar_page') }}">{{ icon('employees', 'i') }}People</a>{% endif %}
     <a href="{{ url_for('report') }}" class="{{ 'on' if reports }}">{{ icon('report', 'i') }}Reports</a>
-    {% if role != 'viewer' %}<a href="{{ url_for('live_page') }}" class="{{ 'on' if nav == 'live_page' }}">{{ icon('live', 'i') }}Camera</a>{% endif %}
+    {% if role != 'viewer' and not office %}<a href="{{ url_for('live_page') }}" class="{{ 'on' if nav == 'live_page' }}">{{ icon('live', 'i') }}Camera</a>{% endif %}
     {% if role != 'viewer' %}<a href="{{ url_for('status_page') }}" class="{{ 'on' if nav == 'status_page' }}">{{ icon('activity', 'i') }}Status</a>{% endif %}
   </nav>
   <div class="topbar-actions">

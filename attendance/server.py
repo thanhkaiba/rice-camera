@@ -6,6 +6,7 @@
     CHECKIN_ADMIN_USER        admin user name (optional)
     CHECKIN_PUBLIC_URL        https address of the site (optional)
     CHECKIN_SHADOW            1 (default): receive and show only, post nothing to Chat, allow no edits; 0: live
+    CHECKIN_OFFICE_URL        address of the admin page on the office Mac, shown where only that computer can help (optional)
 
 Serve `attendance.server:application` with exactly one worker process and several threads.
 """
@@ -19,8 +20,9 @@ import re
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from flask import abort, request
+from flask import abort, render_template_string, request
 
 from .core import config as config_module
 from .core.config import Config
@@ -31,8 +33,12 @@ from .web import edge_api, edge_import
 log = logging.getLogger(__name__)
 
 HEARTBEAT_STALE_S = 180.0
+OFFICE_URL = "http://192.168.10.243:8000"
 MIN_PASSWORD = 12
 TICK_S = 5.0
+OFFICE_ONLY = """{% extends "base.html" %}{% block body %}<div class="card"><h2>Camera</h2>
+<p>The live camera is only available on the office computer. Open <a href="{{ office.url }}/live">{{ office.url }}/live</a>
+from a computer with an address in {{ office.network }}, the same network as the camera.</p></div>{% endblock %}"""
 
 
 def _required(name: str) -> str:
@@ -82,8 +88,20 @@ def _mute(app: App) -> None:
     app.camera_sync.sync = lambda: None  # late arrivals reported there become fines
 
 
+def _camera_is_at_the_office(application, office_url: str) -> None:
+    """The camera is on the office network, out of this server's reach: its pages point to the Mac instead."""
+    office_url = office_url.rstrip("/")
+    host = urlsplit(office_url).hostname or ""
+    application.jinja_env.globals["office"] = {"url": office_url, "network": host.rpartition(".")[0] + ".x"}
+
+    def live_page():
+        return render_template_string(OFFICE_ONLY)
+
+    application.view_functions["live_page"] = live_page
+
+
 def build(home: Path, admin_password: str, token_sha256: str, *, admin_user: str = "", public_url: str = "",
-          shadow: bool = True, now=None):
+          shadow: bool = True, now=None, office_url: str = OFFICE_URL):
     if len(admin_password) < MIN_PASSWORD:
         raise RuntimeError(f"CHECKIN_ADMIN_PASSWORD must have at least {MIN_PASSWORD} characters")
     if not re.fullmatch(r"[0-9a-f]{64}", token_sha256):
@@ -105,6 +123,7 @@ def build(home: Path, admin_password: str, token_sha256: str, *, admin_user: str
     if shadow:
         _mute(core)
     application = create_app(core)
+    _camera_is_at_the_office(application, office_url)
     PUBLIC.update(edge_api.ENDPOINTS)
     edge_api.register(application, core, token_sha256)
     if shadow:
@@ -126,7 +145,8 @@ def main():
     shadow = os.environ.get("CHECKIN_SHADOW", "1").strip() != "0"
     application, core = build(home, _required("CHECKIN_ADMIN_PASSWORD"), _required("CHECKIN_EDGE_TOKEN_SHA256"),
                               admin_user=os.environ.get("CHECKIN_ADMIN_USER", "").strip(),
-                              public_url=os.environ.get("CHECKIN_PUBLIC_URL", "").strip(), shadow=shadow)
+                              public_url=os.environ.get("CHECKIN_PUBLIC_URL", "").strip(), shadow=shadow,
+                              office_url=os.environ.get("CHECKIN_OFFICE_URL", "").strip() or OFFICE_URL)
     lock = _only_process(home)
     if lock is None:
         log.error("Another worker already runs the scheduled work; run exactly one worker")
