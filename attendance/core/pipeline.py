@@ -20,6 +20,7 @@ from .machine import MachineWatch
 from .placement import Placement
 from ..vision.faces import FaceLibrary
 from ..vision.gallery import Gallery
+from ..integrations.camera_api import CameraSync
 from ..integrations.leave_api import LeaveSync
 from ..vision.live import FrameHealth, LiveStatus
 from ..vision.posecal import PoseCalibration
@@ -61,6 +62,7 @@ class App:
         self.chat.api = ChatApi(self.store, lambda: space_of(cfg.google_chat.webhook_url))
         self.chat.data_dir = cfg.path(cfg.data_dir)
         self.service = AttendanceService(cfg, self.store, self.chat, self.gallery, now=now)
+        self.camera_sync = CameraSync(cfg, self.store, self.service)
         self.recognizer_lock = threading.Lock()
         self._recognizer = None
         self.library = FaceLibrary(cfg, self.store, self.gallery, self.recognizer, self.recognizer_lock,
@@ -168,6 +170,10 @@ def _leave_sync_loop(app: App) -> None:
                 app.leave_sync.sync()
         except Exception:
             log.exception("Leave data update crashed")
+        try:
+            app.camera_sync.sync()
+        except Exception as exc:
+            log.error("Camera API sync failed (%s)", type(exc).__name__)
         time.sleep(30)
 
 

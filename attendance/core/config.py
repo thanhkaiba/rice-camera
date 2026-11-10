@@ -8,6 +8,7 @@ import string
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -201,8 +202,9 @@ class PendingReminderConfig:
 
 @dataclass
 class LateMessageConfig:
-    """One Google Chat message a day listing who came late, with an @mention for each person."""
+    """One daily Google Chat message mentioning late arrivals and people not seen."""
     enabled: bool = True
+    include_not_seen: bool = True
     intro: str = "Morning, coming late today:"
     # Placeholders: {mention}, {name}, {time}, {minutes}, {registered} (", registered 9:00-09:20" when
     # the person had a "coming late" permission on Base and still came after it, ", request pending 9:00-09:20"
@@ -219,6 +221,12 @@ class LateMessageConfig:
     # The one picture behind the cards, chosen on the Settings page (see latephoto.backgrounds);
     # empty: automatic, a different one each day and holiday pictures around holidays.
     background: str = ""
+
+
+@dataclass
+class CameraApiConfig:
+    url: str = ""  # Apps Script web app /exec URL; empty disables reporting
+    key: str = field(default="", repr=False)  # CAMERA_SECRET, sent as secret in the JSON body
 
 
 @dataclass
@@ -299,6 +307,7 @@ class Config:
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     google_chat: GoogleChatConfig = field(default_factory=GoogleChatConfig)
     leave_api: LeaveApiConfig = field(default_factory=LeaveApiConfig)
+    camera_api: CameraApiConfig = field(default_factory=CameraApiConfig)
     late_message: LateMessageConfig = field(default_factory=LateMessageConfig)
     pending_reminder: PendingReminderConfig = field(default_factory=PendingReminderConfig)
     web: WebConfig = field(default_factory=WebConfig)
@@ -412,6 +421,11 @@ class Config:
             raise ValueError('configure Base Timeoff or the generic leave_api, not both')
         if self.google_chat.unknown_batch_minutes < 0:
             raise ValueError("unknown_batch_minutes must not be negative")
+        self.camera_api.url = self.camera_api.url.strip()
+        self.camera_api.key = self.camera_api.key.strip()
+        url = urlsplit(self.camera_api.url)
+        if self.camera_api.url and (url.scheme != "https" or not url.hostname or url.username or url.password or url.fragment):
+            raise ValueError("camera_api.url must be an HTTPS server URL without credentials or fragment")
         self.tz  # raises on an unknown time zone
 
 

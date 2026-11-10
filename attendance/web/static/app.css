@@ -440,7 +440,7 @@ details.help p { margin: 8px 0 0; }
 .no-frame { color: #94a3b8; text-align: center; padding: 30px; display: grid; gap: 6px; justify-items: center; }
 .no-frame .ico { width: 36px; height: 36px; opacity: .5; animation: breathe 2.4s ease-in-out infinite; }
 .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 1.6s infinite; }
-.preview-box { background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.preview-box { white-space: pre-line; background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
 .late-photo { display: block; max-width: 100%; max-height: 320px; margin: 10px 0 4px; border-radius: 10px; border: 1px solid var(--line); }
 .legend { display: grid; gap: 6px; }
 .legend > div { display: flex; gap: 9px; align-items: center; color: var(--text-2); }

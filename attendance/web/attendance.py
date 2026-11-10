@@ -171,7 +171,7 @@ def register(app: Flask, core: "App") -> None:
             return failed("Turn on the late message in Settings first.", "index", day=day)
         if service.send_late_message(d, current_user(cfg)):
             return done("Late message posted to Google Chat.", "index", day=day)
-        return done("Nobody was late, so no message was sent.", "index", day=day)
+        return done("Nobody was late or not seen, so no message was sent.", "index", day=day)
 
     @app.post("/day/<day>/remind-approvers")
     def send_pending_reminder(day: str):

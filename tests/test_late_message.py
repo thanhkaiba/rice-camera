@@ -22,7 +22,7 @@ def test_message_mentions_each_late_person(core):
     clock.t = at(10, 40)
     late(app, "A", 9, 0)  # on time: not listed
     late(app, "B", 10, 15)
-    assert app.service.late_text(DAY) == "Morning, coming late today: <users/111222333> (10:15)"
+    assert app.service.late_text(DAY) == "Morning, coming late today: <users/111222333> (10:15)\nNot seen: @Carol"
     late(app, "C", 10, 32)
     assert app.service.late_text(DAY) == \
         "Morning, coming late today: <users/111222333> (10:15), and @Carol (10:32)"  # Carol has no Chat ID
@@ -47,13 +47,14 @@ def test_sent_once_at_the_set_time_as_its_own_message(core):
     assert app.store.notice_time(DAY, "late_message") is not None
 
 
-def test_nobody_late_or_on_leave_sends_nothing(core):
+def test_on_leave_arrival_is_excluded_but_not_seen_are_sent(core):
     app, clock, sent = core
     app.store.replace_external(DAY, DAY, [], [("B", DAY, DAY, "leave", "")])
     clock.t = at(10, 30)
     late(app, "B", 10, 20)  # on leave but came in late: not listed
     run_until(app.service, clock, at(11, 30))
     assert not any(m.startswith("Morning") for m in sent)
+    assert sent.count("Not seen: @Alice, @Carol") == 1
 
 
 def test_disabled_or_manual_only(core):
@@ -113,7 +114,7 @@ def test_chat_ids_from_csv_and_employee_page(core):
     page = c.get("/").get_data(as_text=True)
     assert "Morning, coming late today: @Bob (10:15)" in page
     page = c.post(f"/day/{DAY}/late-message", follow_redirects=True).get_data(as_text=True)
-    assert "Late message posted" in page and urls[-1] == "Morning, coming late today: <users/456> (10:15)"
+    assert "Late message posted" in page and urls[-1] == "Morning, coming late today: <users/456> (10:15)\nNot seen: <users/123>, @Carol, @Dan"
 
 
 def test_send_time_must_be_after_the_late_time(tmp_path):
@@ -137,21 +138,22 @@ def test_message_about_another_day_starts_with_its_date(core):
     clock.t = at(10, 40)
     late(app, "B", 10, 15)
     clock.t = at(9, 0, day=D)  # the next day
-    assert app.service.late_text(DAY) == "Wednesday 14 Oct: Morning, coming late today: @Bob (10:15)"
+    assert app.service.late_text(DAY) == "Wednesday 14 Oct: Morning, coming late today: @Bob (10:15)\nNot seen: @Alice, @Carol"
     assert app.service.send_late_message(DAY, user="hr")
     assert sent[-1].startswith("Wednesday 14 Oct: ")
 
 
-def test_nobody_late_is_remembered_but_not_shown_as_sent(core):
+def test_nobody_late_or_not_seen_is_remembered_but_not_shown_as_sent(core):
     app, clock, sent = core
-    late(app, "A", 9, 0)
+    for emp in "ABC":
+        late(app, emp, 9, 0)
     run_until(app.service, clock, at(11, 30))
     assert app.store.notice_time(DAY, "late_message") is None
     assert app.store.notice_time(DAY, "late_message_skipped") is not None
     flask_app = create_app(app)
     flask_app.testing = True
     page = flask_app.test_client().get("/").get_data(as_text=True)
-    assert "Nobody was late at 11:00, so nothing was sent" in page and "Sent at" not in page
+    assert "Nobody was late or not seen at 11:00, so nothing was sent" in page and "Sent at" not in page
     # The admin later finds someone the camera missed and can still send the message by hand.
     app.service.set_arrival(DAY, "B", dt.time(10, 20))
     assert app.service.send_late_message(DAY, user="hr") and sent[-1].startswith("Morning")
@@ -235,12 +237,12 @@ def test_picture_of_the_late_people(core):
     assert app.service.send_late_message(DAY, user="hr")
     p = payloads[-1]
     assert "cardsV2" not in p
-    assert p["text"].startswith("Morning, coming late today: @Bob (10:15)\n📷 <http://pc:8000/late-photo/2026-10-14/")
+    assert p["text"].startswith("Morning, coming late today: @Bob (10:15)\nNot seen: @Carol\n📷 <http://pc:8000/late-photo/2026-10-14/")
     # An https address: the picture is shown in the message, under the text.
     app.cfg.web.public_url = "https://office.example.ts.net"
     assert app.service.send_late_message(DAY, user="hr")
     p = payloads[-1]
-    assert p["text"] == "Morning, coming late today: @Bob (10:15)"
+    assert p["text"] == "Morning, coming late today: @Bob (10:15)\nNot seen: @Carol"
     image = p["cardsV2"][0]["card"]["sections"][0]["widgets"][0]["image"]
     assert image["imageUrl"].startswith(f"https://office.example.ts.net/late-photo/{DAY}/")
     # Switched off: text only, and no picture is made.
@@ -395,12 +397,12 @@ def test_people_can_be_called_by_their_email_name(core):
     clock.t = at(10, 40)
     late(app, "B", 10, 15)
     late(app, "C", 10, 32)
-    assert app.service.late_text(DAY) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)"  # the default
+    assert app.service.late_text(DAY) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)\nNot seen: @Alice"  # the default
     app.cfg.google_chat.names = "name"
-    assert app.service.late_text(DAY) == "Morning, coming late today: @Lương Thế Hùng (10:15), and @Carol (10:32)"
+    assert app.service.late_text(DAY) == "Morning, coming late today: @Lương Thế Hùng (10:15), and @Carol (10:32)\nNot seen: @Alice"
     app.cfg.google_chat.names = "email"
-    assert app.service.late_text(DAY) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)"
-    assert app.service.late_text(DAY, preview=True) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)"
+    assert app.service.late_text(DAY) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)\nNot seen: @Alice"
+    assert app.service.late_text(DAY, preview=True) == "Morning, coming late today: @Enzo (10:15), and @Carol (10:32)\nNot seen: @Alice"
     app.cfg.google_chat.mention_people = False
     assert app.service.who("B") == "*Enzo*"
 
@@ -581,3 +583,82 @@ def test_own_backgrounds_in_the_list_and_how_they_mix_with_a_choice(core):
     assert app.cfg.late_message.background == "single"
     c.post("/settings/late-background", data={"remove": "single"})
     assert app.cfg.late_message.background == "" and not latephoto.background_path(app.data_dir).exists()
+
+
+def test_auto_message_includes_late_and_not_seen_once(core):
+    app, clock, sent = core
+    app.cfg.google_chat.notify_late_arrivals = False
+    app.cfg.google_chat.late_time_list = False
+    app.cfg.google_chat.daily_summary = False
+    late(app, 'A', 9, 0)
+    late(app, 'B', 10, 15)
+    run_until(app.service, clock, at(11, 30))
+    messages = [text for text in sent if text.startswith('Morning')]
+    assert messages == ['Morning, coming late today: @Bob (10:15)\nNot seen: @Carol']
+    run_until(app.service, clock, at(12, 0))
+    assert len([text for text in sent if text.startswith('Morning')]) == 1
+
+
+def test_not_seen_only_message_mentions_people_without_attaching_picture(core):
+    app, clock, sent = core
+    app.store.update_employee('B', 'Bob', True, '123456')
+    late(app, 'A', 9, 0)
+    app.store.replace_external(DAY, DAY, [], [('C', DAY, DAY, 'leave', '')])
+    clock.t = at(11, 0)
+    assert app.service.late_text(DAY) == 'Not seen: <users/123456>'
+    assert app.service.late_text(DAY, preview=True) == 'Not seen: @Bob'
+    assert app.service.send_late_message(DAY, auto=True)
+    assert sent[-1] == 'Not seen: <users/123456>'
+    assert app.service.late_photo(DAY) is None
+    assert app.store.notice_sent(DAY, 'late_message')
+    assert not app.store.notice_sent(DAY, 'late_message_skipped')
+
+
+def test_not_seen_message_excludes_exempt_and_nonworking_days(core):
+    app, clock, _ = core
+    app.store.update_employee('B', 'Bob', True, exempt=True)
+    app.store.replace_external(DAY, DAY, [], [('C', DAY, DAY, 'leave', '')])
+    clock.t = at(11, 0)
+    assert app.service.late_text(DAY) == 'Not seen: @Alice'
+    saturday = dt.date(2026, 10, 17)
+    assert app.service.late_text(saturday) is None
+
+
+def test_not_seen_preview_reports_missing_chat_ids_and_audits_delivery(core):
+    app, clock, _ = core
+    late(app, 'A', 9, 0)
+    late(app, 'B', 10, 15)
+    clock.t = at(11, 0)
+    from attendance.web import late_message_status
+    status = late_message_status(app, DAY)
+    assert status['preview'].endswith('Not seen: @Carol')
+    assert 'Carol' in status['missing_chat']
+    app.service.send_late_message(DAY)
+    assert any(action == 'send late message' and 'Carol' in details
+               for _, _, action, details in app.store.audit())
+
+
+def test_notifications_can_turn_not_seen_off_and_restore_default(core):
+    from attendance.core import settings
+    from attendance.web import late_message_status
+
+    app, clock, _ = core
+    late(app, 'A', 9, 0)
+    late(app, 'B', 10, 15)
+    app.store.update_employee('B', 'Bob', True, '123456')
+    clock.t = at(10, 40)
+    client = create_app(app).test_client()
+    page = client.get('/settings').get_data(as_text=True)
+    assert 'name="late_message.include_not_seen"' in page
+    client.post('/settings', data={'late_message.enabled': 'on', 'late_message.auto_send': 'on',
+                                   'schedule.work_days': ['0', '1', '2', '3', '4']})
+    assert app.service.late_text(DAY) == 'Morning, coming late today: <users/123456> (10:15)'
+    assert not late_message_status(app, DAY)['missing_chat']
+    assert settings.overrides(app.cfg, app.store)['late_message.include_not_seen'] == 'on'
+    assert app.service.send_late_message(DAY)
+    assert not any(action == 'send late message' and 'Carol' in details
+                   for _, _, action, details in app.store.audit())
+    app.service.set_arrival(DAY, 'B', dt.time(9, 0))
+    assert app.service.late_text(DAY) is None  # No late arrivals; Not seen switched off.
+    client.post('/settings/reset', data={'reset': 'late_message.include_not_seen'})
+    assert app.service.late_text(DAY) == 'Not seen: @Carol'
