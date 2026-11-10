@@ -121,8 +121,9 @@
 
     <hr>
     <h2 class="row">{{ icon('send') }}Daily late message</h2>
-    <p class="hint" style="margin-top:0">E.g. "Morning, coming late today: @Jennie Luu (10:15)". Mentions need each person's Chat ID (People page).</p>
-    <div class="stack">{{ check('late_message', 'enabled', 'Post the daily late message') }}</div>
+    <p class="hint" style="margin-top:0">Lists late arrivals with their times and expected people without an arrival on a separate "Not seen" line. Leave and exemptions are excluded. Mentions need each person's Chat ID (People page).</p>
+    <div class="stack">{{ check('late_message', 'enabled', 'Post the daily late message') }}
+      {{ check('late_message', 'include_not_seen', 'Include not seen employees', 'Off: only late arrivals are listed. Applies to automatic messages, preview and Send.') }}</div>
     <div class="form-row">
       <label class="field grow">Intro<input name="late_message.intro" value="{{ s.late_message.intro }}">{{ src('late_message.intro') }}</label>
       <label class="field grow">Per person<input name="late_message.item" value="{{ s.late_message.item }}">
@@ -331,6 +332,19 @@
         {% else %}Not connected{% endif %}</span>
       {% if leave.enabled %}<button formaction="{{ url_for('leave_sync') }}">{{ icon('refresh') }}Load now</button>{% endif %}
     </div>
+    <h3 style="margin:22px 0 8px">Camera API · Late fines</h3>
+    <p class="hint">Reports late arrivals after camera hours, using the same attendance and Base leave rules as Today.
+      Creates fines on the server. Retries the last 7 days every 30 seconds; weekends are excluded.
+      Empty URL disables reporting. Each field can override config.yaml separately.</p>
+    <div class="form-row">
+      {{ field('camera_api', 'url', 'Server URL', 'Apps Script web app URL ending in /exec', type='url', cls='grow') }}
+      <label class="field">Camera key<input name="camera_api.key" type="password" autocomplete="off"
+        placeholder="{{ 'saved · leave empty to keep' if s.camera_api.key else 'none' }}">{{ src('camera_api.key') }}</label>
+      <button formaction="{{ url_for('test_camera_api') }}" formnovalidate>Test connection</button>
+    </div>
+    {% if camera_api_status %}<p class="hint">{{ camera_api_status.at }} ·
+      {{ 'OK' if camera_api_status.ok else 'Needs attention' }} · {{ camera_api_status.message }}</p>{% endif %}
+    <p class="hint">Rejected events are listed in Audit. Correct their data to retry. Successful fines cannot be undone here; cancel them on the server.</p>
     <h3 style="margin:22px 0 8px">Remind approvers</h3>
     <p class="hint" style="margin:0 0 8px">Once a day, Google Chat names the people who still have to approve Base requests (needs the Base token above).</p>
     <div class="stack">

@@ -23,7 +23,7 @@ def test_entire_configured_minute_is_on_time(core, seconds, is_late, source):
     report = app.service.report(DAY)
     assert [a.employee_id for a in report.late] == (["A"] if is_late else [])
     assert [a.employee_id for a in report.on_time] == ([] if is_late else ["A"])
-    assert bool(app.service.late_text(DAY)) == is_late
+    assert ("@Alice" in app.service.late_text(DAY)) == is_late
     # Only the camera's arrivals are posted as they happen; one the admin enters is not.
     assert bool([m for m in sent if m.startswith("🟠")]) == (is_late and source == "camera")
     if is_late:

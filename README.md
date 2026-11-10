@@ -48,9 +48,29 @@ Several cameras (a second door) can be watched at once: list the extra addresses
 - **Camera:** live picture with labelled faces; draw the **detection area** over the walkway. **Enrol at the door:** pick a person and turn the screen towards them; the picture walks them through five steps in big letters (look at the camera, come close, turn to one side, the other side, mask on), ticks each one off as the camera sees it, and says when there is enough. The clearest different views seen in those 90 seconds become their reference photos (up to 8); a step can be skipped, and the time extended. The camera's own pictures beat ID photos as references, because they show the face as this camera sees it. Only one person may be in view, and their arrival is not recorded meanwhile.
 - **Settings:** hours, notifications, camera, access, HR system, recognition. Light/dark follows the system; the moon/sun button switches.
 
+The automatic Google Chat late message includes both late arrivals (with arrival times) and a
+separate **Not seen** list, excluding leave and exempt employees. Configure **Settings → Notifications
+→ Daily late message → Send automatically at**; an empty time uses the end of camera hours.
+Turn **Include not seen employees** off to list only late arrivals. The Today preview and Send button
+use the same option. Only late arrivals appear in the attached picture.
+
 ## HR system
 
 `GET <url>?from=…&to=…` with a bearer token, returning holidays, make-up work days and leave as JSON; refreshed every 15 minutes. Format and options: [docs/hr-api.md](docs/hr-api.md). Other formats: change `parse()` in `attendance/integrations/leave_api.py`.
+
+To report late arrivals to the fine server, set `camera_api.url` (HTTPS web app `/exec` URL) and
+`camera_api.key` (`CAMERA_SECRET`) in `config.yaml`. Settings → HR system → **Camera API · Late fines**
+can override either value independently, apply changes immediately, and reset each value with **Use config.yaml**.
+A blank key in the form keeps the current key; a blank URL disables delivery. **Test connection** uses
+`camera.ping`, which creates no fine. Protocol: [docs/CAMERA-API.md](docs/CAMERA-API.md).
+
+Delivery runs in the background after camera hours, in batches of at most 200. Enabling it also sends
+unsent late arrivals from the previous 7 days; older arrivals and weekends are excluded. Reports use
+the Today attendance rules, including exemptions and Base permissions, and wait when configured HR
+data is unavailable. Network/server failures retry every 30 seconds and survive restarts. Successful,
+duplicate and skipped events are remembered; rejected events appear in Audit and retry only after
+local event data changes. Settings shows delivery status. Local attendance corrections do not cancel
+fines already created: an administrator must cancel those on the server.
 
 ## Accuracy and licence
 

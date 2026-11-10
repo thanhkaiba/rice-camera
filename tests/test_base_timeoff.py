@@ -436,10 +436,10 @@ def test_late_after_a_coming_late_permission_shows_the_registered_interval(core,
     rep = app.service.report(DAY)
     assert [(a.employee_id, a.registered) for a in rep.late] == [('B', '9:00-09:30'), ('C', '')]
     assert app.service.late_text(DAY, preview=True) == \
-        'Morning, coming late today: @Bob (10:15, registered 9:00-09:30), and @Carol (10:32)'
+        'Morning, coming late today: @Bob (10:15, registered 9:00-09:30), and @Carol (10:32)\nNot seen: @Alice'
     app.cfg.late_message.item = '{mention} {minutes} min{registered}'
     assert app.service.late_text(DAY, preview=True) == \
-        'Morning, coming late today: @Bob 15 min, registered 9:00-09:30, and @Carol 32 min'  # late time 10:00
+        'Morning, coming late today: @Bob 15 min, registered 9:00-09:30, and @Carol 32 min\nNot seen: @Alice'  # late time 10:00
 
     people = [latephoto.Person('Bob', '10:15', 45, None, '9:00-09:30'), latephoto.Person('Carol', '10:32', 32, None)]
     assert people[0].lines() == ['Registered 9:00-09:30', 'Arrived 10:15 (+45 min)']
@@ -465,7 +465,7 @@ def test_late_with_a_pending_coming_late_request_says_pending(core, monkeypatch)
     app.service.on_identified('B', at(10, 15), .8, None)
     rep = app.service.report(DAY)
     assert [(a.employee_id, a.registered, a.pending) for a in rep.late] == [('B', '9:00-09:30', True)]
-    assert app.service.late_text(DAY, preview=True) == 'Morning, coming late today: @Bob (10:15, request pending 9:00-09:30)'
+    assert app.service.late_text(DAY, preview=True) == 'Morning, coming late today: @Bob (10:15, request pending 9:00-09:30)\nNot seen: @Alice, @Carol'
     person = latephoto.Person('Bob', '10:15', 15, None, '9:00-09:30', pending=True)
     assert person.lines() == ['Request pending 9:00-09:30', 'Arrived 10:15 (+15 min)']
     assert latephoto.fingerprint([person], None) != latephoto.fingerprint(

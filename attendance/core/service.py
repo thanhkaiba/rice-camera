@@ -254,12 +254,21 @@ class AttendanceService:
         on_leave = self.store.leaves_on(day)
         return [a for a in self.report(day).late if a.employee_id not in on_leave]
 
+    def not_seen_people(self, day: dt.date) -> list[tuple[str, str]]:
+        """People included in the message when Not seen notifications are enabled."""
+        if not self.cfg.late_message.include_not_seen:
+            return []
+        report = self.report(day)
+        return report.not_seen if report.workday else []
+
     def late_text(self, day: dt.date, preview: bool = False) -> str | None:
         """'Morning, coming late today: @A (10:15), and @B (10:32)'. With preview=True names are
         shown as @Name instead of Google Chat mention codes. A message about another day than
-        today starts with that day, so "today" in the wording cannot mislead."""
+        today starts with that day. Expected people without an arrival appear on a separate
+        Not seen line."""
         people = self.late_people(day)
-        if not people:
+        missing = self.not_seen_people(day)
+        if not people and not missing:
             return None
         lm, w = self.cfg.late_message, self.window(day)
         items = [lm.item.format(mention=f"@{self.chat_name(a.employee_id, a.name)}" if preview
@@ -268,9 +277,15 @@ class AttendanceService:
                                 registered=f", {'request pending' if a.pending else 'registered'} {a.registered}"
                                 if a.registered else "")
                  for a in people]
-        joined = items[0] if len(items) == 1 else ", ".join(items[:-1]) + ", and " + items[-1]
+        lines = []
+        if items:
+            joined = items[0] if len(items) == 1 else ", ".join(items[:-1]) + ", and " + items[-1]
+            lines.append(f"{lm.intro} {joined}")
+        if missing:
+            lines.append("Not seen: " + ", ".join(f"@{self.chat_name(emp, name)}" if preview else self.mention(emp)
+                                                  for emp, name in missing))
         prefix = "" if day == self.now().date() else f"{day:%A %d %b}: "
-        return f"{prefix}{lm.intro} {joined}"
+        return prefix + "\n".join(lines)
 
     def late_photo(self, day: dt.date) -> str | None:
         """One picture of the day's late people (the whole person as the camera saw them, or their
@@ -340,8 +355,8 @@ class AttendanceService:
         fetch it (an https address), otherwise as a link.
 
         Marks "late_message" only when something was sent, and "late_message_skipped" when nobody
-        was late, so the page can tell the two apart. An automatic send gives up when the message
-        was marked meanwhile (the admin's "Send now" and the scheduler racing)."""
+        was late or missing, so the page can tell the two apart. An automatic send gives up when
+        the message was marked meanwhile (the admin's "Send now" and the scheduler racing)."""
         text = self.late_text(day)
         if text is None:
             self.store.mark_notice(day, "late_message_skipped", self.now())
@@ -359,7 +374,8 @@ class AttendanceService:
         elif url:
             text += f"\n📷 <{url}|Picture of the late people>"
         self.chat.send(text, None, self.now(), cards, api=api)
-        self.store.log(self.now(), user, "send late message", ", ".join(a.name for a in self.late_people(day)))
+        names = [a.name for a in self.late_people(day)] + [name for _, name in self.not_seen_people(day)]
+        self.store.log(self.now(), user, "send late message", ", ".join(names))
         return True
 
     # reminder to approve the pending Base requests ----------------------------------

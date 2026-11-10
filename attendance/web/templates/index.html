@@ -118,11 +118,11 @@
       {% if not late_msg.photo_public %}<p class="hint" style="margin:4px 0 0"><span class="warn-ico">{{ icon('alert') }}</span> The message will only link to this picture: Google Chat can show it only from an https address reachable from the internet (Settings → Access).</p>{% endif %}
     {% endif %}
   {% else %}
-    <p class="muted">Nobody late{{ ' so far' if rep.day == today }} 🎉</p>
+    <p class="muted">Nobody late or not seen{{ ' so far' if rep.day == today }} 🎉</p>
   {% endif %}
   <p class="hint" style="margin:0">
     {% if late_msg.sent %}{{ icon('check') }} Sent at {{ late_msg.sent.strftime('%H:%M') }}.
-    {% elif late_msg.skipped %}{{ icon('info') }} Nobody was late at {{ late_msg.skipped.strftime('%H:%M') }}, so nothing was sent.
+    {% elif late_msg.skipped %}{{ icon('info') }} Nobody was late or not seen at {{ late_msg.skipped.strftime('%H:%M') }}, so nothing was sent.
     {% elif late_msg.auto %}{{ icon('clock') }} Auto-send at {{ late_msg.send_at }} · fix wrong arrivals above before then.
     {% else %}{{ icon('send') }} Sent only by the button.{% endif %}
     {% if rep.day != today %}· starts with its date{% endif %}

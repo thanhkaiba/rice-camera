@@ -11,7 +11,7 @@ from flask import Flask, Response, abort, jsonify, redirect, render_template, re
 from .. import __version__
 from ..cli import updater
 from ..core import latephoto, occasions, settings, transfer
-from ..integrations import base_timeoff, chat_api
+from ..integrations import base_timeoff, camera_api, chat_api
 from ..vision.faces import decode_image, encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
 
@@ -134,7 +134,7 @@ def register(app: Flask, core: "App") -> None:
                                late_background=latephoto.background_path(core.data_dir).exists(),
                                gallery=background_gallery(), occasion_list=occasions.OCCASIONS,
                                occasion_names={o.key: o.name for o in occasions.OCCASIONS},
-                               google=core.chat.api.status(),
+                               google=core.chat.api.status(), camera_api_status=core.camera_sync.status(),
                                occasion=occasions.occasion_on(service.now().date()),
                                upcoming=occasions.upcoming(service.now().date()),
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
@@ -171,7 +171,7 @@ def register(app: Flask, core: "App") -> None:
             for name in names:
                 key = f"{section}.{name}" if section else name
                 value = current[section][name]
-                if name in ("password", "token", "viewer_password", "base_api_key"):
+                if name in ("password", "token", "viewer_password", "base_api_key", "key"):
                     if form.get(key):
                         changes.setdefault(section, {})[name] = form[key]
                 elif key == "pending_reminder.kinds":
@@ -393,6 +393,16 @@ def register(app: Flask, core: "App") -> None:
         except Exception as exc:
             return failed(f"Sending failed: {exc}", "settings_page")
         return done("Test message sent; check Google Chat.", "settings_page")
+
+    @app.post("/settings/test-camera-api")
+    def test_camera_api():
+        url = request.form.get("camera_api.url", cfg.camera_api.url).strip()
+        key = request.form.get("camera_api.key", "").strip() or cfg.camera_api.key
+        try:
+            camera_api.ping(url, key)
+        except ValueError as exc:
+            return failed(str(exc), "settings_page")
+        return done("Camera API connected. No fines created by this test.", "settings_page")
 
     # Google Chat API (the late message with its picture) -----------------------------------
 

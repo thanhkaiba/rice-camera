@@ -91,8 +91,8 @@ def late_message_status(core: "App", day: dt.date) -> dict:
         return {"enabled": False}
     sent = store.notice_time(day, "late_message")
     skipped = store.notice_time(day, "late_message_skipped")
-    no_id = [a.name for a in service.late_people(day)
-             if not getattr(store.employee(a.employee_id), "chat_user", "")]
+    people = [(a.employee_id, a.name) for a in service.late_people(day)] + service.not_seen_people(day)
+    no_id = [name for employee_id, name in people if not getattr(store.employee(employee_id), "chat_user", "")]
     # The picture is made (a slow step) for today and for days whose message went out, not for
     # every past day someone browses to.
     photo = service.late_photo_url(day) if day == service.now().date() or sent else None
