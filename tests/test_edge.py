@@ -350,3 +350,108 @@ def test_the_office_mac_keeps_its_camera_page(tmp_path):
     assert "only available on the office computer" not in c.get("/live").get_data(as_text=True)
     settings_page = c.get("/settings").get_data(as_text=True)
     assert 'data-camera-check="auto"' in settings_page and "can only be checked from the office" not in settings_page
+
+
+# What admins do on the Mac reaches the server -------------------------------------------------------
+
+def mirror_to(site, tmp_path):
+    application, core, c = site
+    mac = Store(tmp_path / "mac2.db")
+    with mac._db:
+        mac._db.execute("INSERT INTO employees (id,email,name) VALUES ('A','alice@example.com','Alice'),('C','c@example.com','Cara')")
+    def send(method, path, body, content_type):
+        answer = c.open(path, method=method, data=body, content_type=content_type, headers=AUTH)
+        return answer.status_code, answer.data
+    (tmp_path / "macdata").mkdir(exist_ok=True)
+    return core, mac, EdgeClient(SimpleNamespace(server_url="x", token="t"), mac, tmp_path / "macdata", send=send, sleep=lambda s: None)
+
+
+def sighting(mac, sid, employee, ts, source="camera", image=None):
+    with mac._db:
+        mac._db.execute("INSERT INTO sightings (id,day,employee_id,ts,source,image) VALUES (?,?,?,?,?,?)",
+                        (sid, str(DAY), employee, ts.isoformat(), source, image))
+
+
+def rows(core, sql):
+    return [tuple(r) for r in core.store._all(sql)]
+
+
+def test_admin_work_on_the_mac_reaches_the_server_and_only_once_the_queue_is_empty(site, tmp_path):
+    core, mac, edge = mirror_to(site, tmp_path)
+    edge.identified("A", at(9, 0), 0.8, None, None, None)
+    sighting(mac, 7, "C", at(9, 5), "admin")
+    edge.sync_state()
+    assert rows(core, "SELECT id FROM sightings WHERE id = 7") == []  # the camera event goes first
+    assert edge.deliver_batch() == 1
+    edge.sync_state()
+    assert rows(core, "SELECT id, employee_id, source FROM sightings WHERE id = 7") == [(7, "C", "admin")]
+    assert sorted(core.store.employees()) == ["A", "C"]
+
+
+def test_a_correction_replaces_the_day_and_nothing_is_sent_when_nothing_changed(site, tmp_path):
+    core, mac, edge = mirror_to(site, tmp_path)
+    sighting(mac, 1, "A", at(9, 0), "admin")
+    edge.sync_state()
+    with mac._db:
+        mac._db.execute("UPDATE sightings SET employee_id = 'C' WHERE id = 1")
+    edge.sync_state()
+    assert rows(core, "SELECT employee_id FROM sightings") == [("C",)]
+    calls = []
+    original = edge._send
+    edge._send = lambda *a: (calls.append(a), original(*a))[1]
+    edge.sync_state()
+    assert calls == []
+
+
+def test_learned_faces_follow_and_deleted_ones_go(site, tmp_path):
+    core, mac, edge = mirror_to(site, tmp_path)
+    vector = np.ones(4, dtype=np.float32).tobytes()
+    with mac._db:
+        mac._db.execute("INSERT INTO embeddings (id,model,employee_id,vector,source,created_at) VALUES (1,'m','A',?,'x','t'),(2,'m','A',?,'x','t')", (vector, vector))
+    edge.sync_state()
+    assert rows(core, "SELECT id, vector FROM embeddings") == [(1, vector), (2, vector)]
+    with mac._db:
+        mac._db.execute("DELETE FROM embeddings WHERE id = 1")
+    edge.sync_state()
+    assert rows(core, "SELECT id FROM embeddings") == [(2,)]
+
+
+def test_the_server_asks_for_photos_it_does_not_have(site, tmp_path):
+    core, mac, edge = mirror_to(site, tmp_path)
+    (tmp_path / "macdata" / "crops" / str(DAY)).mkdir(parents=True)
+    (tmp_path / "macdata" / IMAGE).write_bytes(JPEG)
+    sighting(mac, 1, "A", at(9, 0), "admin", IMAGE)
+    edge.sync_state()
+    assert (core.data_dir / IMAGE).read_bytes() == JPEG
+
+
+def test_shadow_notes_camera_arrivals_only_one_side_saw(site, tmp_path):
+    application, core, c = site
+    _, mac, edge = mirror_to(site, tmp_path)
+    assert edge.identified("A", at(9, 0), 0.8, None, None, None) is None
+    edge.deliver_batch()
+    sighting(mac, 50, "A", at(9, 30))
+    edge.sync_state()
+    report = c.get("/api/edge/import/shadow", headers=admin()).get_json()[str(DAY)]
+    assert len(report["only_server"]) == 1 and len(report["only_mac"]) == 1 and report["mac_camera"] == 1
+
+
+def test_a_bad_state_update_changes_nothing(site):
+    _, core, c = site
+    good = c.post("/api/edge/state", json={"days": [str(DAY)], "tables": {"sightings": [
+        {"day": "1999-01-01", "employee_id": "A", "ts": "x", "source": "camera"}]}}, headers=AUTH)
+    assert good.status_code == 400 and rows(core, "SELECT * FROM sightings") == []
+    assert c.post("/api/edge/state", json={"days": []}).status_code == 401
+
+
+def test_a_live_server_takes_no_state_from_the_mac(tmp_path):
+    application, _ = server.build(tmp_path, PASSWORD, HASH, shadow=False, now=lambda: at(10, 30))
+    assert application.test_client().post("/api/edge/state", json={"days": []}, headers=AUTH).status_code == 404
+
+
+def test_the_shadow_site_has_no_stream_settings_and_says_it_only_mirrors(site):
+    _, _, c = site
+    settings_page = c.get("/settings", headers=admin()).get_data(as_text=True)
+    assert 'name="camera.url"' not in settings_page and 'name="camera.more"' not in settings_page
+    assert "192.168.10.x" in settings_page
+    assert "only mirrors the office computer" in c.get("/report", headers=admin()).get_data(as_text=True)

@@ -29,6 +29,7 @@
     <p class="subtitle">Paste the RTSP address; a picture from the camera appears below when it works.</p>
     <form method="post" action="{{ url_for('setup_save') }}" class="wstack">
       <input type="hidden" name="back" value="{{ url_for('setup_page', step='hours') }}">
+      {% if office %}<p class="hint">The camera address is set on the office computer: {{ office.url }}, from {{ office.network }}.</p>{% else %}
       <label class="field">Camera address (RTSP)
         <input name="camera.url" value="{{ cfg.camera.url }}" placeholder="rtsp://admin:CODE@192.168.1.64:554/Streaming/Channels/101"
                required {% if not office %}data-camera-check="auto" {% endif %}autocomplete="off">
@@ -39,6 +40,7 @@
           IP from the EZVIZ app (device settings → network) or the router. Give the camera a fixed IP.</p>
         <p><b>Phone test</b> (Android "IP Webcam"): <code>rtsp://PHONE-IP:8080/h264_pcm.sdp</code></p>
       </details>
+      {% endif %}
       <div class="wactions">
         <span></span>
         <button class="primary">Continue {{ icon('chevron-right') }}</button>

@@ -1,9 +1,29 @@
 """What the office Mac still has to deliver to the server, and which deliveries the server has already applied."""
 from __future__ import annotations
 
+import base64
 import datetime as dt
+import hashlib
 import json
 import sqlite3
+
+# What the Mac keeps in step with the server until the cutover: every row of a day, by day.
+DAY_TABLES = {  # columns whose change means the day must be sent again
+    "unknowns": "id, status, employee_id, group_id, ignored_day, image, source",
+    "sightings": "id, employee_id, ts, source, status, image",
+    "checkins": "employee_id, first_seen, source, image",
+    "day_notes": "employee_id, note",
+    "outages": "start, end",
+}
+BLOB = "$b"
+
+
+def _plain(row: sqlite3.Row) -> dict:
+    return {key: {BLOB: base64.b64encode(row[key]).decode()} if isinstance(row[key], bytes) else row[key] for key in row.keys()}
+
+
+def _stored(value):
+    return base64.b64decode(value[BLOB]) if isinstance(value, dict) else value
 
 
 class EdgeStoreMixin:
@@ -25,7 +45,62 @@ class EdgeStoreMixin:
     def edge_backlog(self) -> int:
         return self._all("SELECT COUNT(*) AS n FROM edge_outbox")[0]["n"]
 
+    def edge_day_hashes(self, since: str) -> dict[str, str]:
+        digests: dict[str, "hashlib._Hash"] = {}
+        for table, columns in DAY_TABLES.items():
+            for row in self._all(f"SELECT day, {columns} FROM {table} WHERE day >= ? ORDER BY day, rowid", (since,)):
+                digests.setdefault(row["day"], hashlib.md5()).update(repr((table, *tuple(row)[1:])).encode())
+        return {day: digest.hexdigest() for day, digest in digests.items()}
+
+    def edge_day_rows(self, days: list[str]) -> dict[str, list[dict]]:
+        marks = ",".join("?" * len(days))
+        return {table: [_plain(r) for r in self._all(f"SELECT * FROM {table} WHERE day IN ({marks})", tuple(days))]
+                for table in DAY_TABLES}
+
+    def edge_employee_rows(self) -> list[dict]:
+        return [_plain(r) for r in self._all("SELECT * FROM employees ORDER BY id")]
+
+    def edge_embedding_ids(self) -> list[int]:
+        return [r["id"] for r in self._all("SELECT id FROM embeddings ORDER BY id")]
+
+    def edge_embedding_rows(self, after: int, limit: int) -> list[dict]:
+        return [_plain(r) for r in self._all("SELECT * FROM embeddings WHERE id > ? ORDER BY id LIMIT ?", (after, limit))]
+
     # On the server -------------------------------------------------------------
+    def _edge_write(self, table: str, row: dict) -> None:
+        columns = {r["name"] for r in self._db.execute(f"PRAGMA table_info({table})")}
+        kept = [c for c in row if c in columns]
+        marks = ",".join("?" * len(kept))
+        self._db.execute(f"INSERT OR REPLACE INTO {table} ({','.join(kept)}) VALUES ({marks})", [_stored(row[c]) for c in kept])
+
+    def edge_camera_times(self, day: str) -> set[str]:
+        return {r["ts"] for r in self._all("SELECT ts FROM sightings WHERE day = ? AND source = 'camera'", (day,))}
+
+    def edge_replace_state(self, days: list[str], tables: dict, employees: list | None, embedding_ids: list | None,
+                           embeddings: list) -> None:
+        """The Mac's rows replace the server's for those days, all or nothing."""
+        allowed = set(days)
+        marks = ",".join("?" * len(days))
+        with self._lock, self._db:
+            for table in DAY_TABLES:
+                self._db.execute(f"DELETE FROM {table} WHERE day IN ({marks})", tuple(days))
+                for row in tables.get(table, []):
+                    if row["day"] not in allowed:
+                        raise ValueError("a row is outside the days sent")
+                    self._edge_write(table, row)
+            if employees is not None:
+                self._db.execute(f"DELETE FROM employees WHERE id NOT IN ({','.join('?' * len(employees))})",
+                                 [row["id"] for row in employees])
+                for row in employees:
+                    self._edge_write("employees", row)
+            if embedding_ids is not None:
+                keep = set(embedding_ids)
+                for (rowid,) in self._db.execute("SELECT id FROM embeddings").fetchall():
+                    if rowid not in keep:
+                        self._db.execute("DELETE FROM embeddings WHERE id = ?", (rowid,))
+            for row in embeddings:
+                self._edge_write("embeddings", row)
+
     def edge_applied(self, event_id: str) -> bool:
         return bool(self._all("SELECT 1 FROM edge_events WHERE id = ?", (event_id,)))
 

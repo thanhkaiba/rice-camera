@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import threading
 import uuid
 from functools import wraps
@@ -22,10 +23,12 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-ENDPOINTS = {"edge_events", "edge_photo", "edge_heartbeat", "healthz"}
+ENDPOINTS = {"edge_events", "edge_photo", "edge_heartbeat", "edge_state", "healthz"}
+SHADOW_DIFF_KEY = "shadow_diff"
+MAX_DIFF_LISTED = 50
 HEARTBEAT_KEY = "edge_heartbeat"
 MAX_EVENTS = 200
-PHOTO_PATH = re.compile(r"crops/\d{4}-\d{2}-\d{2}/[A-Za-z0-9_\-]+\.jpg")
+PHOTO_PATH = re.compile(r"crops/\d{4}-\d{2}-\d{2}/[A-Za-z0-9_\-]+\.jpg|faces/[0-9a-f]{32}/\d{14}_[0-9a-f]{6}\.jpg")
 
 
 def _vector(value: str | None) -> np.ndarray | None:
@@ -59,7 +62,22 @@ def heartbeat(store) -> dict | None:
     return json.loads(raw) if raw else None
 
 
-def register(app: Flask, core: "App", token_sha256: str) -> None:
+def _instants(times) -> set[float]:
+    return {dt.datetime.fromisoformat(t).timestamp() for t in times}
+
+
+def _note_differences(store, day: str, ours: set[str], theirs: set[str]) -> None:
+    """Shadow check: camera arrivals one side has and the other does not, kept until someone looks."""
+    only_server, only_mac = _instants(ours) - _instants(theirs), _instants(theirs) - _instants(ours)
+    report = json.loads(store.get(SHADOW_DIFF_KEY) or "{}")
+    entry = report.setdefault(day, {"only_server": [], "only_mac": []})
+    entry["mac_camera"] = len(theirs)
+    for name, found in (("only_server", only_server), ("only_mac", only_mac)):
+        entry[name] = sorted({*entry[name], *found})[:MAX_DIFF_LISTED]
+    store.put(SHADOW_DIFF_KEY, json.dumps(report))
+
+
+def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -> None:
     store, service = core.store, core.service
     ingest = threading.Lock()  # events are applied one at a time, in the order they arrived
 
@@ -132,6 +150,33 @@ def register(app: Flask, core: "App", token_sha256: str) -> None:
                                              "version": str(beat.get("version", ""))[:40],
                                              "backlog": int(beat.get("backlog") or 0)}))
         return jsonify(ok=True)
+
+    @app.post("/api/edge/state")
+    @from_the_mac
+    def edge_state():
+        if not shadow:  # once the server is live it is the one that decides
+            abort(404)
+        state = request.get_json(silent=True)
+        if not isinstance(state, dict) or not isinstance(state.get("days"), list):
+            abort(400, "expected a state update")
+        days, tables = state["days"], state.get("tables") or {}
+        embeddings = state.get("embeddings") or []
+        with ingest:
+            try:
+                for day in days:
+                    ours = store.edge_camera_times(day)
+                    theirs = {r["ts"] for r in tables.get("sightings", []) if r["day"] == day and r["source"] == "camera"}
+                    _note_differences(store, day, ours, theirs)
+                store.edge_replace_state(days, tables, state.get("employees"), state.get("embedding_ids"), embeddings)
+            except (KeyError, TypeError, ValueError, sqlite3.Error) as exc:
+                log.warning("Refused a state update: %s", exc)
+                abort(400, "bad state update")
+        if state.get("employees") is not None or state.get("embedding_ids") is not None or embeddings:
+            core.library.reload()
+        wanted = [r.get("image") for table in ("unknowns", "sightings", "checkins") for r in tables.get(table, [])]
+        wanted += [r.get("image") for r in embeddings]
+        missing = sorted({rel for rel in wanted if rel and PHOTO_PATH.fullmatch(rel) and not (core.data_dir / rel).exists()})
+        return jsonify(missing=missing)
 
     @app.get("/healthz")
     def healthz():

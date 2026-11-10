@@ -81,7 +81,7 @@ def test_delete_removes_only_the_selected_review_group_without_learning_or_atten
     c = client(app)
     controls = ReviewControls(c.get("/unknowns").get_data(as_text=True))
     delete = [f for f in controls.forms if not f["in_dialog"] and f.get("action") == f"/unknowns/{latest}/delete"]
-    assert len(delete) == 1 and delete[0].get("data-confirm")
+    assert len(delete) == 1  # no "are you sure": the page offers Undo for a few seconds instead
     assert delete[0]["method"] == "post"
 
     response = c.post(delete[0]["action"], data=delete[0]["fields"], follow_redirects=True)

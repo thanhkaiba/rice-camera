@@ -568,3 +568,8 @@ button.bg-pick:disabled { cursor: not-allowed; opacity: .6; }
 .bg-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 8px 4px; font-size: .84em; font-weight: 500; }
 .bg-foot { display: flex; gap: 10px; padding: 0 8px 7px; font-size: .78em; }
 .bg-foot button.link { font-size: inherit; }
+
+.undo-bar { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
+.undo-bar[hidden] { display: none; }
+.readonly form[method="post"] button { display: none !important; }
+.viewer .name-btn, .viewer .open-btn, .viewer #name-selected, .viewer #delete-selected { display: none !important; }

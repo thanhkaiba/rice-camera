@@ -8,7 +8,7 @@
   </div>
   <div class="actions">
     {% if groups %}<span class="badge bad" id="count-total" title="{{ groups|length }} to review">{{ groups|length }}</span>{% endif %}
-    {% set ready = groups|selectattr('guess')|list|length %}
+    {% set ready = groups|selectattr('sure')|list|length %}
     {% if ready %}<span class="badge ok" id="count-ready" title="Shown first: these only need Confirm">{{ ready }} ready to confirm</span>{% endif %}
     {% if groups %}
     <button type="button" id="focus-toggle" title="Show one face at a time, with large buttons (handy on a phone)">{{ icon('eye') }}<span>One at a time</span></button>
@@ -21,7 +21,7 @@
   </div>
 </div>
 {% if groups %}
-<p class="hint keys" id="keys">Keys: <kbd>←</kbd> <kbd>→</kbd> move · <kbd>Enter</kbd> confirm the suggestion · <kbd>1</kbd>–<kbd>3</kbd> pick a name · <kbd>O</kbd> open · <kbd>S</kbd> skip · <kbd>D</kbd> delete · <kbd>X</kbd> select</p>
+<p class="hint keys" id="keys">Keys: <kbd>←</kbd> <kbd>→</kbd> move · <kbd>Enter</kbd> confirm the suggestion · <kbd>1</kbd>–<kbd>3</kbd> pick a name · <kbd>O</kbd> open · <kbd>U</kbd> undo · <kbd>S</kbd> skip · <kbd>D</kbd> delete · <kbd>X</kbd> select</p>
 <div class="alert info related-bar" id="related" hidden>
   <span class="ico">{{ icon('sparkles') }}</span>
   <span class="msg"><strong id="related-count"></strong> more card(s) from that day look like <strong id="related-name"></strong>. Check them before confirming: the arrival time of each card is recorded for this person.</span>
@@ -58,7 +58,7 @@
        data-id="{{ g.id }}" data-count="{{ g.members|length }}" data-when="{{ when }}"
        data-seed="{{ 1 if g.source == 'seed' else 0 }}" data-collect="{{ 1 if g.source == 'collect' else 0 }}"
        data-source-id="{{ g.expected_id or '' }}" data-source-name="{{ g.expected_name or '' }}"
-       data-guess="{{ g.guess or '' }}" data-guess-name="{{ guess_label }}"
+       data-guess="{{ g.guess or '' }}" data-sure="{{ 1 if g.sure else '' }}" data-guess-name="{{ guess_label }}"
        data-score="{{ '%.2f'|format(g.guess_score) if guess else '' }}"
        data-body="{{ url_for('media', path=g.body) if g.body else '' }}"
        data-photos='{{ g.photo_urls|tojson|forceescape }}'
@@ -77,7 +77,7 @@
       {% if g.source == 'seed' %}<span class="badge info" title="No attendance will be recorded when this sample is labelled">Seed sample</span>{% endif %}
       {% if g.source == 'collect' %}<span class="badge info" title="A clear face seen outside the camera hours that nobody was recognised as. Naming it teaches the face; no attendance is recorded">Outside camera hours</span>{% endif %}
       <div class="small muted tnum">{{ local(last.ts).strftime('%a %d %b %H:%M') }}</div>
-      {% if guess %}<div class="small">Looks like <strong>{{ guess_label }}</strong> <span class="muted" title="Similarity score, not a probability of identity">(similarity {{ '%.2f'|format(g.guess_score) }})</span>{{ arrived(g, g.guess) }}</div>
+      {% if guess %}<div class="small">{% if g.guess_score >= 0.5 %}<span class="badge ok">High</span>{% elif g.sure %}<span class="badge info">Medium</span>{% else %}<span class="badge bad" title="Often wrong at this score: check the photo before confirming">Low</span>{% endif %} Looks like <strong>{{ guess_label }}</strong> <span class="muted" title="Similarity score, not a probability of identity">(similarity {{ '%.2f'|format(g.guess_score) }})</span>{{ arrived(g, g.guess) }}</div>
       {% if g.maybe %}<div class="small muted">or {% for pid, score in g.maybe %}{{ employee_labels.get(pid, '') }} <span class="tnum">{{ '%.2f'|format(score) }}</span>{{ arrived(g, pid) }}{{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}
       {% elif g.maybe %}<div class="small">Maybe {% for pid, score in g.maybe %}<strong>{{ employee_labels.get(pid, '') }}</strong> <span class="muted tnum" title="Similarity score, not a probability of identity">{{ '%.2f'|format(score) }}</span>{{ arrived(g, pid) }}{{ ' · ' if not loop.last }}{% endfor %} <span class="muted">· not sure, check the photo</span></div>
       {% else %}<div class="small muted">No clear suggestion · choose a person manually</div>{% endif %}
@@ -87,10 +87,10 @@
       {% if g.members|length == 1 %}
       <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
         <input type="hidden" name="employee_id" value="{{ g.guess }}">
-        <button class="primary btn-sm btn-block name-btn" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Learn the face; no attendance is recorded' if g.source == 'collect' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ guess_label }}</button>
+        <button class="{{ 'primary ' if g.sure }}btn-sm btn-block name-btn" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Learn the face; no attendance is recorded' if g.source == 'collect' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ guess_label }}</button>
       </form>
       {% else %}
-      <button type="button" class="primary btn-sm btn-block name-btn" onclick="openReview(this.closest('.face-card'), '{{ g.guess }}')">{{ icon('check') }}Confirm: {{ guess_label }} · select photos</button>
+      <button type="button" class="{{ 'primary ' if g.sure }}btn-sm btn-block name-btn" onclick="openReview(this.closest('.face-card'), '{{ g.guess }}')">{{ icon('check') }}Confirm: {{ guess_label }} · select photos</button>
       {% endif %}
       {% endif %}
       {% for pid, score in g.maybe %}
@@ -107,13 +107,14 @@
       <form method="post" action="{{ url_for('ignore', unknown_id=g.id) }}" class="focus-only skip-form">
         <button class="btn-sm btn-block" title="Hidden for the rest of today; shown again if seen another day">{{ icon('user-x') }}Skip · not an employee</button>
       </form>
-      <form method="post" action="{{ url_for('delete_unknown', unknown_id=g.id) }}" class="delete-form" data-confirm="Remove all {{ g.members|length }} photo(s) on this card from review?">
+      <form method="post" action="{{ url_for('delete_unknown', unknown_id=g.id) }}" class="delete-form">
         <button class="danger btn-sm btn-block" title="Remove blurry or unusable photos from review">{{ icon('trash') }}Delete from review</button>
       </form>
     </div>
   </div>
   {% endfor %}
 </div>
+<div class="undo-bar" id="undo-bar" hidden><span id="undo-text"></span><button type="button" id="undo-now">{{ icon('undo') }}Undo</button></div>
 <div class="focus-bar" id="focus-bar" hidden>
   <button type="button" id="focus-prev" aria-label="Previous face">{{ icon('chevron-left') }}Back</button>
   <span class="tnum muted" id="focus-pos" aria-live="polite"></span>
@@ -402,6 +403,53 @@
     toast('ok', data.message);
     if (data.related && data.related.cards.length) showRelated(data.related); else hideRelated();
   }
+  // Naming or deleting one card waits a few seconds before it is sent, so a slip can be taken back.
+  const UNDO_MS = 5000, waiting = [], undoBar = document.getElementById('undo-bar');
+  function drawUndo() {
+    const last = waiting[waiting.length - 1];
+    undoBar.hidden = !last;
+    if (last) document.getElementById('undo-text').textContent = last.label;
+  }
+  function putBack(item) {
+    item.card.style.display = '';
+    cards.splice(Math.min(item.at, cards.length), 0, item.card);
+    pos = cards.indexOf(item.card);
+    show(); updateCounts();
+  }
+  async function sendLater(item) {
+    waiting.splice(waiting.indexOf(item), 1);
+    drawUndo();
+    const data = await post(item.action, item.body);
+    if (!data) return;
+    if (!data.ok) { putBack(item); toast('error', data.message); return; }
+    removeCards([item.card]);
+    toast('ok', data.message);
+    if (data.related && data.related.cards.length) showRelated(data.related);
+  }
+  function defer(card, action, body, label) {
+    const box = card.querySelector('.review-select');
+    if (box) box.checked = false;
+    const at = cards.indexOf(card);
+    cards.splice(at, 1);
+    card.style.display = 'none';
+    updateSelection(); updateCounts(); show();
+    const item = { card, at, action, body, label };
+    item.timer = setTimeout(() => sendLater(item), UNDO_MS);
+    waiting.push(item);
+    drawUndo();
+  }
+  function undoLast() {
+    const item = waiting.pop();
+    if (!item) return;
+    clearTimeout(item.timer);
+    putBack(item);
+    drawUndo();
+  }
+  document.getElementById('undo-now')?.addEventListener('click', undoLast);
+  window.addEventListener('pagehide', () => waiting.splice(0).forEach(item => {
+    clearTimeout(item.timer);
+    fetch(item.action, { method: 'POST', body: item.body, headers: HEADERS, keepalive: true });
+  }));
   document.addEventListener('submit', async e => {
     const form = e.target;
     const ours = form.closest('#review-grid, #review, #bulk-name-dialog') || form.id === 'bulk-delete';
@@ -418,6 +466,12 @@
       if (form.id === 'bulk-name') affected.forEach(card => body.append('unknown_id', card.dataset.id));
     }
     const btn = e.submitter || form.querySelector('button:not([type="button"])');
+    const removing = form.classList.contains('delete-form');
+    if (form.closest('.face-card') && (removing || form.querySelector('[name="employee_id"]'))) {
+      if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+      defer(form.closest('.face-card'), form.action, body, removing ? 'Removed from review' : (btn ? btn.textContent.trim() : 'Confirmed'));
+      return;
+    }
     const data = await post(form.action, body);
     if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
     handled(data, affected, partial);
@@ -461,7 +515,7 @@
   function updateCounts() {
     const total = document.getElementById('count-total');
     if (total) { total.textContent = cards.length; total.title = cards.length + ' to review'; total.hidden = !cards.length; }
-    const ready = document.getElementById('count-ready'), n = cards.filter(c => c.dataset.guess).length;
+    const ready = document.getElementById('count-ready'), n = cards.filter(c => c.dataset.sure).length;
     if (ready) { ready.textContent = n + ' ready to confirm'; ready.hidden = !n; }
   }
   function removeCards(list) {
@@ -521,7 +575,12 @@
     const key = e.key.toLowerCase();
     if (key === 'arrowleft') { go(-1); e.preventDefault(); }
     else if (key === 'arrowright') { go(1); e.preventDefault(); }
-    else if (key === 'enter') { (card.querySelector('.name-btn') || card.querySelector('.open-btn')).click(); e.preventDefault(); }
+    else if (key === 'enter') {
+      if (card.dataset.guess && !card.dataset.sure) toast('warn', 'Low similarity: check the photo, then press 1 or click the name.');
+      else (card.querySelector('.name-btn') || card.querySelector('.open-btn')).click();
+      e.preventDefault();
+    }
+    else if (key === 'u') undoLast();
     else if ('123'.includes(key) && key) { card.querySelectorAll('.name-btn')[Number(key) - 1]?.click(); }
     else if (key === 'o' || key === ' ') { openReview(card); e.preventDefault(); }
     else if (key === 's') card.querySelector('.skip-form')?.requestSubmit();

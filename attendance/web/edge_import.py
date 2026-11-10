@@ -35,6 +35,7 @@ COUNTED = ("employees", "embeddings", "checkins", "sightings", "unknowns", "audi
 # Saved settings that only mean something on the Mac, or that the server takes from its environment.
 MAC_ONLY = {"camera": ("url", "more"), "web": ("password",), "backup": ("folder",)}
 MAC_ONLY_FILE = ("data_dir", "employees_file", "camera", "web", "updates", "edge")  # in config.yaml
+REPORTS = {"import_shadow"}
 ENDPOINTS = {"import_mac_config", "import_manifest", "import_photo", "import_database", "import_status"}
 
 
@@ -146,6 +147,10 @@ def register(app: Flask, core: "App") -> None:
         log.info("Database received from the office Mac: %s; restarting to use it", counts)
         restart_worker()
         return jsonify(counts)
+
+    @app.get("/api/edge/import/shadow")
+    def import_shadow():
+        return jsonify(json.loads(core.store.get("shadow_diff") or "{}"))
 
     @app.get("/api/edge/import/status")
     def import_status():

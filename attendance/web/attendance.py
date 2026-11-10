@@ -44,6 +44,8 @@ def wants_json() -> bool:
     """The Review page sends its forms in the background and shows the answer in place."""
     return request.headers.get("X-Requested-With") == "fetch"
 
+SURE_SCORE = 0.40  # on Review, below this a suggestion was right less than 3 times in 4: Enter will not confirm it
+
 
 def register(app: Flask, core: "App") -> None:
     cfg, store, service = core.cfg, core.store, core.service
@@ -213,6 +215,7 @@ def register(app: Flask, core: "App") -> None:
                            "body": next((body_photo(u.image) for u in reversed(members) if u.image
                                          and (core.data_dir / body_photo(u.image)).exists()), None),
                            "guess": best[0] if best else None, "guess_score": best[1] if best else None,
+                           "sure": bool(best and best[1] >= SURE_SCORE),
                            "maybe": maybe, "blurry": blurry, "in_at": arrived(camera_day) if camera_day else {}})
         # Cards that only need "Confirm" first, then those with likely people, then the rest; the
         # most similar first within each, newest first among equals. Camera faces before seed samples;

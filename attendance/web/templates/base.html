@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ asset_version }}">
 <style>:root[data-theme="dark"] .only-light, :root:not([data-theme="dark"]) .only-dark { display: none; }</style>
 </head>
-<body {% if role == 'viewer' %}class="viewer" {% endif %}data-camera-check-url="{{ url_for('camera_check') }}" data-models-url="{{ url_for('models_json') }}">
+<body class="{{ 'viewer' if role == 'viewer' or (shadow_site and nav != 'settings_page') }}{{ ' readonly' if shadow_site }}" data-camera-check-url="{{ url_for('camera_check') }}" data-models-url="{{ url_for('models_json') }}">
 {% set reports = nav in ('report', 'accuracy', 'audit') %}
 <header class="topbar"><div class="topbar-inner">
   <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark"></span>Attendance</a>
@@ -71,6 +71,7 @@
     <a href="{{ url_for('audit') }}" class="{{ 'on' if nav == 'audit' }}" title="Change log">{{ icon('log') }}<span class="lbl">Change log</span></a>
   </nav>
   {% endif %}
+  {% if shadow_site and nav != 'personal_page' %}<div class="alert info"><span class="ico">{{ icon('eye') }}</span><span>This site only mirrors the office computer for now. Make changes at {{ office.url }}, from the office network.</span></div>{% endif %}
   {% block body %}{% endblock %}
 </main>
 <script>

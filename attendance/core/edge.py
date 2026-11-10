@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import hashlib
 import json
 import logging
 import threading
@@ -22,6 +23,11 @@ log = logging.getLogger(__name__)
 
 BATCH = 50
 HEARTBEAT_S = 30.0
+STATE_S = 60.0
+STATE_DAYS = 30  # how far back a correction on the Mac still reaches the server
+STATE_KEY = "edge_state_sent"
+MAX_STATE_DAYS = 7  # per request, so a slow line can finish one within the timeout
+MAX_STATE_EMBEDDINGS = 300
 IDLE_S = 3.0
 MAX_BACKOFF_S = 300.0
 TIMEOUT_S = 30.0
@@ -73,7 +79,9 @@ class EdgeClient:
             return exc.code, exc.read()
 
     def _photos(self, event: dict) -> None:
-        image = event.get("image")
+        self._upload(event.get("image"))
+
+    def _upload(self, image: str | None) -> None:
         if not image:
             return
         for rel in (image, body_photo(image), scene_photo(image)):
@@ -108,6 +116,38 @@ class EdgeClient:
         self.store.edge_delivered(done)
         return len(done)
 
+    def sync_state(self) -> None:
+        """What admins did on the Mac (named a face, corrected an arrival, edited someone) reaches the server as
+        the resulting rows. Waits for the event queue, so every camera event is applied first."""
+        if self.store.edge_backlog():
+            return
+        sent = json.loads(self.store.get(STATE_KEY) or "{}")
+        since = (dt.date.today() - dt.timedelta(days=STATE_DAYS)).isoformat()
+        hashes = self.store.edge_day_hashes(since)
+        days = sorted((d for d, h in hashes.items() if sent.get("days", {}).get(d) != h), reverse=True)[:MAX_STATE_DAYS]
+        employees = self.store.edge_employee_rows()
+        people = hashlib.md5(json.dumps(employees, sort_keys=True).encode()).hexdigest()
+        ids = self.store.edge_embedding_ids()
+        gallery = hashlib.md5(json.dumps(ids).encode()).hexdigest()
+        new = self.store.edge_embedding_rows(sent.get("after", 0), MAX_STATE_EMBEDDINGS)
+        if not days and people == sent.get("people") and gallery == sent.get("gallery") and not new:
+            return
+        status, body = self._send("POST", "/api/edge/state", json.dumps({
+            "days": days, "tables": self.store.edge_day_rows(days) if days else {},
+            "employees": employees if people != sent.get("people") else None,
+            "embedding_ids": ids if gallery != sent.get("gallery") else None, "embeddings": new}).encode(), "application/json")
+        if status in PERMANENT:
+            log.warning("The server refused the state update (HTTP %s)", status)
+            return
+        if status != 200:
+            raise ConnectionError(f"state answered HTTP {status}")
+        for image in json.loads(body).get("missing", []):
+            self._upload(image)
+        sent.setdefault("days", {}).update({d: hashes[d] for d in days})
+        sent["days"] = {d: h for d, h in sent["days"].items() if d >= since}
+        sent.update(people=people, gallery=gallery, after=new[-1]["id"] if new else sent.get("after", 0))
+        self.store.put(STATE_KEY, json.dumps(sent))
+
     def heartbeat(self) -> None:
         body = json.dumps({**self.status(), "backlog": self.store.edge_backlog()}).encode()
         status, _ = self._send("POST", "/api/edge/heartbeat", body, "application/json")
@@ -115,13 +155,16 @@ class EdgeClient:
             raise ConnectionError(f"heartbeat answered HTTP {status}")
 
     def _loop(self) -> None:
-        backoff, last_beat = IDLE_S, 0.0
+        backoff, last_beat, last_state = IDLE_S, 0.0, 0.0
         while True:
             try:
                 if time.monotonic() - last_beat >= HEARTBEAT_S:
                     self.heartbeat()
                     last_beat = time.monotonic()
                 sent = self.deliver_batch()
+                if not sent and time.monotonic() - last_state >= STATE_S:
+                    self.sync_state()
+                    last_state = time.monotonic()
                 backoff = IDLE_S
                 self._sleep(0 if sent else IDLE_S)
             except Exception as exc:

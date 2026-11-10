@@ -183,6 +183,9 @@
 
   <section class="card tab" id="camera">
     <h2 class="row">{{ icon('camera') }}Camera</h2>
+    {% if office %}<div class="cam-status warn" style="margin-top:14px"><span>The camera can only be checked from the office network, on a computer with an address in <strong>{{ office.network }}</strong>, the same network as the camera. This server cannot reach it.</span>
+      <a class="btn btn-sm" href="{{ office.url }}/settings#camera" target="_blank" rel="noopener">{{ icon('camera') }}Check camera at {{ office.url }}</a></div>
+    {% else %}
     <div class="form-row">
       <label class="field grow">RTSP address
         <input name="camera.url" value="{{ s.camera.url }}" placeholder="rtsp://admin:CODE@192.168.1.64:554/Streaming/Channels/101"{% if not office %} data-camera-check="auto"{% endif %}>
@@ -190,8 +193,6 @@
       {{ field('camera', 'process_fps', 'Frames / second', 'Lower on a slow computer', type='number', step='0.5') }}
       {{ field('camera', 'decode_threads', 'Decoder threads', 'CPU cores reading the video · 0 = all', type='number', step='1') }}
     </div>
-    {% if office %}<div class="cam-status warn" style="margin-top:14px"><span>The camera can only be checked from the office network, on a computer with an address in <strong>{{ office.network }}</strong>, the same network as the camera. This server cannot reach it.</span>
-      <a class="btn btn-sm" href="{{ office.url }}/settings#camera" target="_blank" rel="noopener">{{ icon('camera') }}Check camera at {{ office.url }}</a></div>{% endif %}
     <div class="form-row" style="margin-top:14px">
       <label class="field grow">More cameras
         <textarea name="camera.more" rows="2" placeholder="rtsp://… one address per line" spellcheck="false">{{ s.camera.more }}</textarea>
@@ -201,6 +202,7 @@
       {{ field('camera', 'area', 'Detection area', ('Draw it on the Camera page of the office computer' if office else 'Draw it on the Camera page') ~ ' · empty = whole picture · first camera only', cls='grow') }}
     </div>
     <div class="stack">{{ check('camera', 'enhance_low_light', 'Brighten dark frames') }}</div>
+    {% endif %}
     <hr>
     <h2 class="row">{{ icon('image') }}Collect reference photos</h2>
     <p class="hint">Outside the camera hours the camera keeps watching, more slowly, and keeps very clear faces of people it recognises without doubt as their reference photos: one per walk past, a few a day, until they have enough good ones. A clear face it does not recognise goes to Review, where naming it teaches the face. Arrivals are not recorded then.</p>
