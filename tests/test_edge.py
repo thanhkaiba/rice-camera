@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import yaml
 
 from attendance import server
 from attendance.core.edge import EdgeClient
@@ -305,3 +306,22 @@ def test_shadow_never_posts_even_what_is_already_queued(tmp_path, monkeypatch):
     core.service.alert("anything")
     core.chat.kick(at(10, 30))
     assert posted == [] and len(core.store.outbox()) == 1
+
+
+def test_shadow_never_reports_late_arrivals_to_the_camera_api(tmp_path, monkeypatch):
+    posted = []
+    monkeypatch.setattr("attendance.integrations.camera_api.post", lambda *a: posted.append(a))
+    _, core = server.build(tmp_path, PASSWORD, HASH, now=lambda: at(18, 0))
+    core.cfg.camera_api.url, core.cfg.camera_api.key = "https://api.example/x", "key"
+    core.camera_sync.sync()
+    assert posted == []
+
+
+def test_config_file_keeps_only_what_the_server_can_use(site, tmp_path):
+    _, core, c = site
+    text = "timezone: Asia/Ho_Chi_Minh\ndata_dir: /Mac/data\nweb:\n  port: 8000\nrecognition:\n  det_size: 640\ncamera:\n  url: rtsp://x\n"
+    assert c.put("/api/edge/import/config", data=text, headers=admin()).status_code == 200
+    saved = yaml.safe_load((tmp_path / "config.yaml").read_text())
+    assert saved == {"timezone": "Asia/Ho_Chi_Minh", "recognition": {"det_size": 640}}
+    assert c.put("/api/edge/import/config", data="nonsense_key: 1\n", headers=admin()).status_code == 400
+    assert c.put("/api/edge/import/config", data=text, headers=AUTH).status_code == 401

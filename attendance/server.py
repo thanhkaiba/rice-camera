@@ -79,6 +79,7 @@ def _mute(app: App) -> None:
 
     app.chat.send = muted
     app.chat.kick = lambda now: None  # nor does anything already queued go out
+    app.camera_sync.sync = lambda: None  # late arrivals reported there become fines
 
 
 def build(home: Path, admin_password: str, token_sha256: str, *, admin_user: str = "", public_url: str = "",

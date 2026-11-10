@@ -17,7 +17,10 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
 from flask import Flask, abort, jsonify, request
+
+from ..core import config as config_module
 
 if TYPE_CHECKING:
     from ..core.pipeline import App
@@ -31,7 +34,8 @@ PHOTO_PATH = re.compile(r"(?:crops|faces|late|review-seed)(?:/[A-Za-z0-9_\-]+)*/
 COUNTED = ("employees", "embeddings", "checkins", "sightings", "unknowns", "audit", "notices")
 # Saved settings that only mean something on the Mac, or that the server takes from its environment.
 MAC_ONLY = {"camera": ("url", "more"), "web": ("password",), "backup": ("folder",)}
-ENDPOINTS = {"import_manifest", "import_photo", "import_database", "import_status"}
+MAC_ONLY_FILE = ("data_dir", "employees_file", "camera", "web", "updates", "edge")  # in config.yaml
+ENDPOINTS = {"import_mac_config", "import_manifest", "import_photo", "import_database", "import_status"}
 
 
 def _counts(db: sqlite3.Connection) -> dict[str, int]:
@@ -91,6 +95,24 @@ def restart_worker() -> None:
 
 def register(app: Flask, core: "App") -> None:
     data_dir = core.data_dir
+
+    @app.put("/api/edge/import/config")
+    def import_mac_config():
+        """Takes effect with the restart that follows the database."""
+        try:
+            wanted = yaml.safe_load(request.get_data()) or {}
+            if not isinstance(wanted, dict):
+                raise ValueError("not a list of settings")
+            for key in MAC_ONLY_FILE:
+                wanted.pop(key, None)
+            config_module._build(config_module.Config, wanted).validate()
+        except (yaml.YAMLError, TypeError, ValueError) as exc:
+            abort(400, f"config.yaml cannot be used: {exc}")
+        target = core.cfg.base_dir / "config.yaml"
+        partial = target.with_name(f".{uuid.uuid4().hex}.part")
+        partial.write_text(yaml.safe_dump(wanted, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        os.replace(partial, target)
+        return jsonify(sorted(wanted))
 
     @app.get("/api/edge/import/manifest")
     def import_manifest():

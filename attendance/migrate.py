@@ -2,6 +2,8 @@
 
     python -m attendance.migrate --data <folder with attendance.db> --url https://... --password-file <file>
 
+config.yaml is taken from the folder above --data; what only makes sense on the Mac is dropped by the server.
+
 Without --send it only says what it would copy. Photos go first and only what the server does not have yet,
 so it can be run again after a failure; the database goes last. Do this before the Mac starts mirroring events:
 an event the server applies during the copy would be replaced along with the old database.
@@ -132,6 +134,9 @@ def run(data_dir: Path, site: Site, send: bool) -> int:
     if not send:
         print("Nothing was sent. Add --send to copy.")
         return 0
+    config = data_dir.parent / "config.yaml"
+    if config.exists():
+        print("Sending config.yaml:", json.loads(site.call("PUT", "/api/edge/import/config", config.read_bytes())), flush=True)
     send_photos(site, photos, todo)
     left = missing(site, photos)
     if left:
