@@ -3,6 +3,7 @@ import base64
 import datetime as dt
 import gzip
 import hashlib
+import io
 import json
 from types import SimpleNamespace
 
@@ -334,7 +335,7 @@ def test_the_server_points_to_the_office_for_anything_about_the_camera(site):
     page = c.get("/live", headers=admin())
     assert page.status_code == 200 and "http://192.168.10.243:8000/live" in page.get_data(as_text=True)
     settings_page = c.get("/settings", headers=admin()).get_data(as_text=True)
-    assert "192.168.10.x" in settings_page and "http://192.168.10.243:8000/settings#camera" in settings_page
+    assert "192.168.10.x" in settings_page and "http://192.168.10.243:8000/live" in settings_page
     assert 'data-camera-check="auto"' not in settings_page
 
 
@@ -455,3 +456,130 @@ def test_the_shadow_site_has_no_stream_settings_and_says_it_only_mirrors(site):
     assert 'name="camera.url"' not in settings_page and 'name="camera.more"' not in settings_page
     assert "192.168.10.x" in settings_page
     assert "only mirrors the office computer" in c.get("/report", headers=admin()).get_data(as_text=True)
+
+
+# The server in charge ---------------------------------------------------------------------------------
+
+@pytest.fixture
+def live(tmp_path):
+    seed = Store(tmp_path / "data" / "attendance.db")
+    with seed._db:
+        seed._db.executemany("INSERT INTO employees (id,email,name) VALUES (?,?,?)", [("A", "a@example.com", "Alice")])
+        seed._db.execute("INSERT INTO embeddings (id,model,employee_id,vector,source,created_at) VALUES (5,'m','A',?,'x','t')",
+                         (np.ones(4, dtype=np.float32).tobytes(),))
+    seed.close()
+    application, core = server.build(tmp_path, PASSWORD, HASH, shadow=False, now=lambda: at(10, 30))
+    return application, core, application.test_client()
+
+
+def follower(live, tmp_path):
+    _, _, c = live
+    mac = Store(tmp_path / "mac3.db")
+    def send(method, path, body, content_type):
+        answer = c.open(path, method=method, data=body, content_type=content_type, headers=AUTH)
+        return answer.status_code, answer.data
+    (tmp_path / "macdata").mkdir(exist_ok=True)
+    return mac, EdgeClient(SimpleNamespace(server_url="x", token="t"), mac, tmp_path / "macdata", send=send, sleep=lambda s: None)
+
+
+def test_the_mac_learns_the_server_is_in_charge_and_remembers(live, tmp_path):
+    mac, edge = follower(live, tmp_path)
+    assert not edge.following
+    edge.heartbeat()
+    assert edge.following
+    assert EdgeClient(SimpleNamespace(server_url="x", token="t"), mac, tmp_path / "macdata").following
+
+
+def test_people_faces_and_settings_come_from_the_server(live, tmp_path):
+    _, core, _ = live
+    mac, edge = follower(live, tmp_path)
+    configs, reloads = [], []
+    edge.on_config, edge.on_gallery = configs.append, lambda: reloads.append(1)
+    with mac._db:
+        mac._db.execute("INSERT INTO embeddings (id,model,employee_id,vector,source,created_at) VALUES (9,'m','Z',x'00','x','t')")
+    edge.follow()
+    assert [e for e in mac.employees()] == ["A"]
+    assert [tuple(r) for r in mac._all("SELECT id, employee_id FROM embeddings")] == [(5, "A")]
+    assert "area" not in configs[0]["camera"] and "url" in configs[0]["camera"] and reloads == [1]
+    edge.follow()  # nothing new: nothing is applied again
+    assert len(configs) == 1 and reloads == [1]
+    core.cfg.recognition.accept_score = 0.61
+    edge.follow()
+    assert configs[1]["recognition"]["accept_score"] == 0.61
+
+
+def test_a_photo_uploaded_on_the_server_is_read_by_the_mac(live, tmp_path):
+    _, core, c = live
+    mac, edge = follower(live, tmp_path)
+    edge.heartbeat()
+    jpeg = __import__("cv2").imencode(".jpg", np.zeros((20, 20, 3), dtype=np.uint8))[1].tobytes()
+    answer = c.post("/employees/A/photos", data={"photos": (io.BytesIO(jpeg), "a.jpg")}, headers=admin(), content_type="multipart/form-data")
+    assert answer.status_code == 302
+    calls = []
+    def add_photo(employee_id, data, source):
+        calls.append((employee_id, data))
+        return SimpleNamespace(ok=False, message="No face found", warnings=[])
+    edge.add_photo = add_photo
+    edge.follow()
+    assert calls == [("A", jpeg)] and core.store.edge_jobs() == []
+    assert not list((core.data_dir / "uploads").iterdir())
+    assert "No face found" in c.get("/audit", headers=admin()).get_data(as_text=True)
+    edge.follow()
+    assert len(calls) == 1
+
+
+def test_references_and_alerts_made_on_the_mac_reach_the_server(live, tmp_path):
+    _, core, c = live
+    mac, edge = follower(live, tmp_path)
+    edge.reference("A", np.ones(4, dtype=np.float32), "enrol", at(9, 0), None, True, 0.5, "m")
+    edge.alert("power is off")
+    assert edge.deliver_batch() == 2
+    assert [r["source"] for r in core.store._all("SELECT source FROM embeddings ORDER BY id")] == ["x", "enrol"]
+
+
+def test_the_live_server_can_edit_the_stream_and_the_area_stays_at_the_office(live):
+    _, _, c = live
+    page = c.get("/settings", headers=admin()).get_data(as_text=True)
+    assert 'name="camera.url"' in page and 'name="camera.area"' not in page and "only mirrors" not in page
+
+
+def test_the_shadow_server_receives_the_address_it_will_hand_back(site, tmp_path):
+    core, mac, edge = mirror_to(site, tmp_path)
+    edge.camera_address = lambda: {"url": "rtsp://cam/1", "more": ""}
+    edge.sync_state()
+    assert core.cfg.camera.url == "rtsp://cam/1"
+
+
+def test_a_mac_following_the_server_only_shows_the_camera(tmp_path):
+    from attendance.core.config import Config
+    from attendance.core.pipeline import App
+    from attendance.web import create_app
+
+    cfg = Config()
+    cfg.base_dir = tmp_path
+    cfg.edge.server_url, cfg.edge.token = "https://server.example", "t"
+    core = App(cfg, now=lambda: at(10, 30))
+    core.edge.following = True
+    c = create_app(core).test_client()
+    assert c.get("/").headers["Location"].endswith("/live")
+    assert c.get("/report?day=1").headers["Location"] == "https://server.example/report?day=1"
+    assert c.post("/settings", data={}).status_code == 403
+    assert c.get("/live").status_code == 200
+    page = c.get("/live").get_data(as_text=True)
+    assert 'href="/report"' not in page and 'href="/live"' in page
+    core.service.chat.send("hello", None, at(10, 30))
+    assert core.store.outbox() == []
+    core.service.alert("power")
+    assert json.loads(core.store.edge_pending(5)[0]["payload"])["kind"] == "alert"
+
+
+def test_a_mac_never_loses_its_camera_to_an_empty_server_address(tmp_path):
+    from attendance.core.config import Config
+    from attendance.core.pipeline import App
+
+    cfg = Config()
+    cfg.base_dir = tmp_path
+    cfg.camera.url = "rtsp://cam/1"
+    core = App(cfg, now=lambda: at(10, 30))
+    core._config_from_server({"camera": {"url": "", "more": "", "process_fps": 7.0}})
+    assert cfg.camera.url == "rtsp://cam/1" and cfg.camera.process_fps == 7.0

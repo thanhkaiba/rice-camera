@@ -16,14 +16,21 @@ from functools import wraps
 from typing import TYPE_CHECKING
 
 import numpy as np
-from flask import Flask, Response, abort, jsonify, request
+from flask import Flask, Response, abort, jsonify, request, send_from_directory
 
 if TYPE_CHECKING:
     from ..core.pipeline import App
 
+from ..core import settings
+
 log = logging.getLogger(__name__)
 
-ENDPOINTS = {"edge_events", "edge_photo", "edge_heartbeat", "edge_state", "healthz"}
+ENDPOINTS = {"edge_events", "edge_photo", "edge_heartbeat", "edge_state", "edge_sync", "edge_sync_embeddings",
+             "edge_file", "edge_job_result", "healthz"}
+UPLOAD_PATH = re.compile(r"uploads/[0-9a-f]{32}")
+MAX_JOB_EMBEDDINGS = 500
+# What the Mac needs to run the camera. The detection area is drawn on the Mac and stays there.
+MAC_SECTIONS = ("schedule", "camera", "tracking", "recognition", "collect")
 SHADOW_DIFF_KEY = "shadow_diff"
 MAX_DIFF_LISTED = 50
 HEARTBEAT_KEY = "edge_heartbeat"
@@ -94,12 +101,24 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
     def apply(event: dict) -> None:
         ts, image = _when(event["ts"]), _image(event.get("image"))
         vector = _vector(event.get("vector"))
-        if event["kind"] == "identified":
+        if event["kind"] == "unknown" and event.get("source") == "collect":
+            store.add_unknown(ts.date(), ts, image, core.cfg.recognition.model_id(), vector, event.get("guess_id"),
+                              event.get("guess_score"), source="collect", quality=event.get("quality"))
+        elif event["kind"] == "identified":
             service.on_identified(str(event["employee_id"]), ts, float(event["score"]), image, vector, event.get("sha256"))
         elif event["kind"] == "unknown":
             service.on_unknown(ts, image, vector, event.get("guess_id"), event.get("guess_score"), event.get("sha256"),
                                event.get("quality"), track=_pair(event.get("track")), follows=_pair(event.get("follows")),
                                frames=event.get("frames"), votes=event.get("votes"))
+        elif event["kind"] == "reference":
+            employee = str(event["employee_id"])
+            if store.employee(employee) is None:
+                raise ValueError("no such person")
+            store.add_embedding(str(event["model"]), employee, _vector(event["vector"]), str(event["source"]), ts, image,
+                                event.get("quality_ok"), event.get("quality"))
+            core.library.reload()
+        elif event["kind"] == "alert":
+            service.alert(str(event["text"])[:1000])
         else:
             raise ValueError("unknown kind")
 
@@ -149,6 +168,60 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
                                              "camera_state": str(beat.get("camera_state", ""))[:200],
                                              "version": str(beat.get("version", ""))[:40],
                                              "backlog": int(beat.get("backlog") or 0)}))
+        return jsonify(ok=True, mode="shadow" if shadow else "live")
+
+    def mac_config() -> dict:
+        current = settings.current(core.cfg)
+        config = {section: dict(current[section]) for section in MAC_SECTIONS}
+        config["camera"].pop("area", None)
+        return config
+
+    @app.get("/api/edge/sync")
+    @from_the_mac
+    def edge_sync():
+        if shadow:
+            return jsonify(mode="shadow")
+        config = mac_config()
+        config_version = hashlib.md5(json.dumps(config, sort_keys=True).encode()).hexdigest()
+        gallery = store.edge_gallery_version()
+        answer = {"mode": "live", "gallery": gallery, "config_version": config_version, "jobs": store.edge_jobs()}
+        if request.args.get("gallery") != gallery:
+            answer.update(employees=store.edge_employee_rows(), embedding_keys=store.edge_embedding_keys())
+        if request.args.get("config") != config_version:
+            answer["config"] = config
+        return jsonify(answer)
+
+    @app.post("/api/edge/sync/embeddings")
+    @from_the_mac
+    def edge_sync_embeddings():
+        ids = (request.get_json(silent=True) or {}).get("ids")
+        if not isinstance(ids, list) or not ids or len(ids) > MAX_JOB_EMBEDDINGS or not all(isinstance(i, int) for i in ids):
+            abort(400, "expected a list of ids")
+        return jsonify(store.edge_embeddings_by_id(ids))
+
+    @app.get("/api/edge/files/<path:rel>")
+    @from_the_mac
+    def edge_file(rel: str):
+        if not UPLOAD_PATH.fullmatch(rel):
+            abort(400, "bad path")
+        return send_from_directory(core.data_dir, rel, mimetype="application/octet-stream")
+
+    @app.post("/api/edge/jobs/<int:job_id>/result")
+    @from_the_mac
+    def edge_job_result(job_id: int):
+        result = request.get_json(silent=True) or {}
+        payload = store.edge_job_take(job_id)
+        if payload is None:
+            return jsonify(ok=True)  # the answer to a job already closed
+        if UPLOAD_PATH.fullmatch(payload.get("image", "")):
+            (core.data_dir / payload["image"]).unlink(missing_ok=True)
+        person = store.employee(payload.get("employee_id", ""))
+        who = person.email if person else payload.get("employee_id", "")
+        name = payload.get("filename", "photo")
+        text = f"{who}: {name} added" if result.get("ok") else f"{who}: {name} not added: {result.get('message', '')}"
+        for warning in result.get("warnings", []):
+            text += f" ({warning})"
+        store.log(service.now(), "office computer", "uploaded photo", text[:500])
         return jsonify(ok=True)
 
     @app.post("/api/edge/state")
@@ -168,6 +241,8 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
                     theirs = {r["ts"] for r in tables.get("sightings", []) if r["day"] == day and r["source"] == "camera"}
                     _note_differences(store, day, ours, theirs)
                 store.edge_replace_state(days, tables, state.get("employees"), state.get("embedding_ids"), embeddings)
+                if state.get("camera"):  # the address the server hands back to the Mac once it is in charge
+                    settings.save(core.cfg, store, {"camera": {k: state["camera"][k] for k in ("url", "more")}})
             except (KeyError, TypeError, ValueError, sqlite3.Error) as exc:
                 log.warning("Refused a state update: %s", exc)
                 abort(400, "bad state update")

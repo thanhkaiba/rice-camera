@@ -26,6 +26,13 @@ CREATE TABLE IF NOT EXISTS edge_outbox (
     payload TEXT NOT NULL,
     photos_sent INTEGER NOT NULL DEFAULT 0
 );
+-- Server: work only the office Mac can do (reading a face from an uploaded photo).
+CREATE TABLE IF NOT EXISTS edge_jobs (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS edge_events (
     id TEXT PRIMARY KEY,
     received_at TEXT NOT NULL

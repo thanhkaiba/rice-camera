@@ -1,6 +1,8 @@
 """Routes for managing employees, CSV import, reference photo uploads, and @mention tests."""
 from __future__ import annotations
 
+import uuid
+
 import datetime as dt
 import json
 from typing import TYPE_CHECKING
@@ -213,6 +215,25 @@ def register(app: Flask, core: "App") -> None:
         files = [f for f in request.files.getlist("photos") if f.filename]
         if not files:
             return failed("Choose one or more photos.", "employee", employee_id=employee_id)
+        if core.photos_read_elsewhere:
+            sent = 0
+            folder = core.data_dir / "uploads"
+            folder.mkdir(parents=True, exist_ok=True)
+            for f in files:
+                data = f.read()
+                try:
+                    decode_image(data)
+                except ValueError as exc:
+                    flash(f"{f.filename}: {exc}", "error")
+                    continue
+                rel = f"uploads/{uuid.uuid4().hex}"
+                (core.data_dir / rel).write_bytes(data)
+                store.edge_job_add("add_photo", {"employee_id": employee_id, "image": rel, "filename": f.filename}, service.now())
+                sent += 1
+            if sent:
+                flash(f"{sent} photo(s) sent to the office computer, which reads the face. They appear here in a minute; "
+                      "the Change log says if one could not be used.", "ok")
+            return redirect(url_for("employee", employee_id=employee_id))
         try:
             core.recognizer()
         except Exception as exc:

@@ -82,6 +82,27 @@ class App:
         self.machine = MachineWatch(cfg, self.store, self.service.alert, self.service.now)
         self.edge = EdgeClient(cfg.edge, self.store, self.data_dir, status=self._edge_status)
         self.service.edge = self.edge if self.edge.enabled else None
+        self.library.edge = self.service.edge
+        self.edge.on_gallery = self.library.reload
+        self.edge.on_config = self._config_from_server
+        self.edge.add_photo = self._photo_from_server
+        self.edge.camera_address = lambda: {"url": cfg.camera.url, "more": cfg.camera.more}
+        self.photos_read_elsewhere = False  # the server: no face models there, the Mac reads uploaded photos
+        send, kick = self.chat.send, self.chat.kick
+        self.chat.send = lambda *a, **k: None if self.edge.following else send(*a, **k)
+        self.chat.kick = lambda now: None if self.edge.following else kick(now)
+
+    def _config_from_server(self, config: dict) -> None:
+        config = {section: dict(fields) for section, fields in config.items()}
+        if not config.get("camera", {}).get("url"):  # never stop the camera because the server has no address
+            for name in ("url", "more"):
+                config.get("camera", {}).pop(name, None)
+        settings.save(self.cfg, self.store, config)
+
+    def _photo_from_server(self, employee_id: str, data: bytes, source: str):
+        from ..vision.faces import decode_image
+
+        return self.library.add_photo(employee_id, decode_image(data), source=source)
 
     def _edge_status(self) -> dict:
         from .. import __version__
@@ -132,6 +153,8 @@ def report_collected(app: App, face, frame, ts: dt.datetime, candidates) -> None
     image = save_crop(app, decision, ts)
     app.store.add_unknown(ts.date(), ts, image, app.cfg.recognition.model_id(), face.embedding, guess_id,
                           guess_score, source="collect", quality=face.quality)
+    if app.edge.following:
+        app.edge.unknown(ts, image, face.embedding, guess_id, guess_score, None, face.quality, source="collect")
 
 
 def render_scene(frame, bbox, label: str, max_width: int = 1280) -> bytes:
@@ -166,6 +189,9 @@ def _leave_sync_loop(app: App) -> None:
     """Refresh holidays and leave from the HR system in the background (network calls can be slow)."""
     while True:
         try:
+            if app.edge.following:  # the server keeps the leave data and reports late arrivals
+                time.sleep(30)
+                continue
             if app.leave_sync.due():
                 app.leave_sync.sync()
         except Exception:

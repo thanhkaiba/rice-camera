@@ -66,7 +66,49 @@ class EdgeStoreMixin:
     def edge_embedding_rows(self, after: int, limit: int) -> list[dict]:
         return [_plain(r) for r in self._all("SELECT * FROM embeddings WHERE id > ? ORDER BY id LIMIT ?", (after, limit))]
 
+    def edge_embedding_keys(self) -> list[str]:
+        """One text per embedding that changes if the row is replaced, so two sides can be compared cheaply."""
+        return [f"{r['id']}:{r['employee_id']}:{r['model']}:{r['created_at']}" for r in
+                self._all("SELECT id, employee_id, model, created_at FROM embeddings ORDER BY id")]
+
+    def edge_gallery_version(self) -> str:
+        people = json.dumps(self.edge_employee_rows(), sort_keys=True)
+        return hashlib.md5((people + "|".join(self.edge_embedding_keys())).encode()).hexdigest()
+
+    def edge_embeddings_by_id(self, ids: list[int]) -> list[dict]:
+        marks = ",".join("?" * len(ids))
+        return [_plain(r) for r in self._all(f"SELECT * FROM embeddings WHERE id IN ({marks})", tuple(ids))]
+
+    def edge_follow_gallery(self, employees: list[dict], keys: list[str]) -> list[int]:
+        """The server's list wins: what it no longer has goes; returns the embeddings still to fetch."""
+        wanted, have = set(keys), set(self.edge_embedding_keys())
+        with self._lock, self._db:
+            self._db.execute(f"DELETE FROM employees WHERE id NOT IN ({','.join('?' * len(employees))})",
+                             [row["id"] for row in employees])
+            for row in employees:
+                self._edge_write("employees", row)
+            for key in have - wanted:
+                self._db.execute("DELETE FROM embeddings WHERE id = ?", (int(key.split(":", 1)[0]),))
+        return sorted(int(key.split(":", 1)[0]) for key in wanted - have)
+
+    def edge_store_embeddings(self, rows: list[dict]) -> None:
+        with self._lock, self._db:
+            for row in rows:
+                self._edge_write("embeddings", row)
+
     # On the server -------------------------------------------------------------
+    def edge_job_add(self, kind: str, payload: dict, now: dt.datetime) -> None:
+        self._exec("INSERT INTO edge_jobs (kind, payload, created_at) VALUES (?, ?, ?)", (kind, json.dumps(payload), now.isoformat()))
+
+    def edge_jobs(self, limit: int = 20) -> list[dict]:
+        return [{"id": r["id"], "kind": r["kind"], "payload": json.loads(r["payload"])}
+                for r in self._all("SELECT * FROM edge_jobs ORDER BY id LIMIT ?", (limit,))]
+
+    def edge_job_take(self, job_id: int) -> dict | None:
+        rows = self._all("SELECT payload FROM edge_jobs WHERE id = ?", (job_id,))
+        self._exec("DELETE FROM edge_jobs WHERE id = ?", (job_id,))
+        return json.loads(rows[0]["payload"]) if rows else None
+
     def _edge_write(self, table: str, row: dict) -> None:
         columns = {r["name"] for r in self._db.execute(f"PRAGMA table_info({table})")}
         kept = [c for c in row if c in columns]

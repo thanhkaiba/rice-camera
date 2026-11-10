@@ -95,6 +95,7 @@ class FaceLibrary:
         self.data_dir = cfg.path(cfg.data_dir)
         self.rate_in_background = False  # set by the running program: check new photos' quality in a thread
         self._rating = threading.Lock()
+        self.edge = None  # set by the app when a server is configured
 
     @property
     def model_id(self) -> str:
@@ -174,6 +175,8 @@ class FaceLibrary:
               quality_ok: bool | None = None, quality: float | None = None) -> None:
         image_rel = self._save(employee_id, jpeg) if jpeg else None
         self.store.add_embedding(model, employee_id, vector, source, self._now(), image_rel, quality_ok, quality)
+        if self.edge is not None and self.edge.following:
+            self.edge.reference(employee_id, vector, source, self._now(), image_rel, quality_ok, quality, model)
         if model == self.model_id:
             self.gallery.add(employee_id, vector)
         if image_rel and quality_ok is None:

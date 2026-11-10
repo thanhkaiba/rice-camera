@@ -33,6 +33,12 @@ MAX_BACKOFF_S = 300.0
 TIMEOUT_S = 30.0
 # Answers that will never change by trying again: the item is dropped so it cannot block the queue.
 PERMANENT = {400, 404, 413, 415, 422}
+FOLLOWING_KEY = "edge_following"  # set while the server is the one in charge
+FOLLOW_KEY = "edge_follow_versions"
+JOBS_KEY = "edge_jobs_done"
+FOLLOW_S = 30.0
+FETCH_EMBEDDINGS = 200
+JOBS_REMEMBERED = 50
 
 
 def _vector(vector) -> str | None:
@@ -44,6 +50,12 @@ class EdgeClient:
         self.cfg, self.store, self.data_dir, self.status = cfg, store, Path(data_dir), status
         self._send = send or self._urlopen
         self._sleep = sleep
+        self.following = store.get(FOLLOWING_KEY) == "1"
+        # Set by the app: what to do with what the server sends.
+        self.on_gallery = lambda: None
+        self.on_config = lambda config: None
+        self.add_photo = None
+        self.camera_address = lambda: {}
 
     @property
     def enabled(self) -> bool:
@@ -56,10 +68,18 @@ class EdgeClient:
                        "image": image, "vector": _vector(vector), "sha256": sha256})
 
     def unknown(self, ts: dt.datetime, image, vector, guess_id, guess_score, sha256, quality,
-                track=None, follows=None, frames=None, votes=None) -> None:
+                track=None, follows=None, frames=None, votes=None, source=None) -> None:
         self._enqueue({"kind": "unknown", "ts": ts.isoformat(), "image": image, "vector": _vector(vector),
                        "guess_id": guess_id, "guess_score": guess_score, "sha256": sha256, "quality": quality,
-                       "track": track, "follows": follows, "frames": frames, "votes": votes})
+                       "track": track, "follows": follows, "frames": frames, "votes": votes, "source": source})
+
+    def reference(self, employee_id: str, vector, source: str, ts: dt.datetime, image, quality_ok, quality, model: str) -> None:
+        """A reference photo made here (door enrolment, collection, a photo sent by the server)."""
+        self._enqueue({"kind": "reference", "ts": ts.isoformat(), "employee_id": employee_id, "image": image, "vector": _vector(vector),
+                       "source": source, "quality_ok": quality_ok, "quality": quality, "model": model})
+
+    def alert(self, text: str) -> None:
+        self._enqueue({"kind": "alert", "ts": dt.datetime.now(dt.timezone.utc).isoformat(), "text": text})
 
     def _enqueue(self, event: dict) -> None:
         try:
@@ -130,12 +150,15 @@ class EdgeClient:
         ids = self.store.edge_embedding_ids()
         gallery = hashlib.md5(json.dumps(ids).encode()).hexdigest()
         new = self.store.edge_embedding_rows(sent.get("after", 0), MAX_STATE_EMBEDDINGS)
-        if not days and people == sent.get("people") and gallery == sent.get("gallery") and not new:
+        camera = self.camera_address()
+        address = hashlib.md5(json.dumps(camera, sort_keys=True).encode()).hexdigest()
+        if not days and people == sent.get("people") and gallery == sent.get("gallery") and not new and address == sent.get("camera"):
             return
         status, body = self._send("POST", "/api/edge/state", json.dumps({
             "days": days, "tables": self.store.edge_day_rows(days) if days else {},
             "employees": employees if people != sent.get("people") else None,
-            "embedding_ids": ids if gallery != sent.get("gallery") else None, "embeddings": new}).encode(), "application/json")
+            "embedding_ids": ids if gallery != sent.get("gallery") else None, "embeddings": new,
+            "camera": camera if address != sent.get("camera") else None}).encode(), "application/json")
         if status in PERMANENT:
             log.warning("The server refused the state update (HTTP %s)", status)
             return
@@ -145,14 +168,66 @@ class EdgeClient:
             self._upload(image)
         sent.setdefault("days", {}).update({d: hashes[d] for d in days})
         sent["days"] = {d: h for d, h in sent["days"].items() if d >= since}
-        sent.update(people=people, gallery=gallery, after=new[-1]["id"] if new else sent.get("after", 0))
+        sent.update(people=people, gallery=gallery, camera=address, after=new[-1]["id"] if new else sent.get("after", 0))
         self.store.put(STATE_KEY, json.dumps(sent))
 
     def heartbeat(self) -> None:
         body = json.dumps({**self.status(), "backlog": self.store.edge_backlog()}).encode()
-        status, _ = self._send("POST", "/api/edge/heartbeat", body, "application/json")
+        status, answer = self._send("POST", "/api/edge/heartbeat", body, "application/json")
         if status != 200:
             raise ConnectionError(f"heartbeat answered HTTP {status}")
+        mode = json.loads(answer or b"{}").get("mode")
+        if mode and (mode == "live") != self.following:
+            self.following = mode == "live"
+            self.store.put(FOLLOWING_KEY, "1" if self.following else "0")
+            log.info("The server is %s", "in charge now; this computer only runs the camera" if self.following else "no longer in charge")
+
+    def follow(self) -> None:
+        """Bring the people, their faces and the settings from the server, then do any work it left for this computer."""
+        if self.store.edge_backlog():  # what this computer made must reach the server before its list replaces ours
+            return
+        versions = json.loads(self.store.get(FOLLOW_KEY) or "{}")
+        query = urllib.parse.urlencode({"gallery": versions.get("gallery", ""), "config": versions.get("config", "")})
+        status, body = self._send("GET", "/api/edge/sync?" + query, b"", "application/json")
+        if status != 200:
+            raise ConnectionError(f"sync answered HTTP {status}")
+        answer = json.loads(body)
+        if "embedding_keys" in answer:
+            missing = self.store.edge_follow_gallery(answer["employees"], answer["embedding_keys"])
+            for start in range(0, len(missing), FETCH_EMBEDDINGS):
+                status, rows = self._send("POST", "/api/edge/sync/embeddings",
+                                          json.dumps({"ids": missing[start:start + FETCH_EMBEDDINGS]}).encode(), "application/json")
+                if status != 200:
+                    raise ConnectionError(f"embeddings answered HTTP {status}")
+                self.store.edge_store_embeddings(json.loads(rows))
+            self.on_gallery()
+            versions["gallery"] = answer["gallery"]
+        if "config" in answer:
+            self.on_config(answer["config"])
+            versions["config"] = answer["config_version"]
+        self.store.put(FOLLOW_KEY, json.dumps(versions))
+        for job in answer.get("jobs", []):
+            self._do_job(job)
+
+    def _do_job(self, job: dict) -> None:
+        done = json.loads(self.store.get(JOBS_KEY) or "{}")
+        result = done.get(str(job["id"]))
+        if result is None:  # a result the server did not get is sent again, the photo is not added twice
+            payload = job["payload"]
+            status, data = self._send("GET", "/api/edge/files/" + urllib.parse.quote(payload["image"]), b"", "application/octet-stream")
+            if status != 200:
+                raise ConnectionError(f"file answered HTTP {status}")
+            try:
+                added = self.add_photo(payload["employee_id"], data, payload.get("source", "upload"))
+                result = {"ok": added.ok, "message": added.message, "warnings": list(added.warnings)}
+            except ValueError as exc:
+                result = {"ok": False, "message": str(exc), "warnings": []}
+            done[str(job["id"])] = result
+            kept = sorted(done, key=int)[-JOBS_REMEMBERED:]
+            self.store.put(JOBS_KEY, json.dumps({k: done[k] for k in kept}))
+        status, _ = self._send("POST", f"/api/edge/jobs/{job['id']}/result", json.dumps(result).encode(), "application/json")
+        if status != 200 and status not in PERMANENT:
+            raise ConnectionError(f"job result answered HTTP {status}")
 
     def _loop(self) -> None:
         backoff, last_beat, last_state = IDLE_S, 0.0, 0.0
@@ -162,8 +237,8 @@ class EdgeClient:
                     self.heartbeat()
                     last_beat = time.monotonic()
                 sent = self.deliver_batch()
-                if not sent and time.monotonic() - last_state >= STATE_S:
-                    self.sync_state()
+                if not sent and time.monotonic() - last_state >= (FOLLOW_S if self.following else STATE_S):
+                    (self.follow if self.following else self.sync_state)()
                     last_state = time.monotonic()
                 backoff = IDLE_S
                 self._sleep(0 if sent else IDLE_S)

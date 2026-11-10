@@ -23,6 +23,9 @@ WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 MAX_UPLOAD_MB = 50
 # Pages anyone may open without logging in: a person's own page (its link carries a signature) and
 # the stylesheet/script it needs. Everything else needs the admin login when a password is set.
+# What the office Mac still shows once the server is in charge: only what needs to be next to the camera.
+AT_THE_CAMERA = {"live_page", "live_jpg", "live_full_jpg", "live_json", "models_json", "camera_check", "set_area", "preview",
+                 "enrol_start", "capture", "capture_page", "capture_add", "status_page", "media", "static"}
 PUBLIC = {"personal_page", "personal_note", "static", "late_photo"}  # late_photo is guarded by its token
 # What the read-only login may open; it may never send a form.
 VIEWER_PAGES = {"index", "evidence_page", "evidence_zip", "unknowns", "report", "accuracy", "audit",
@@ -157,7 +160,7 @@ class QuietRoutineRequests(logging.Filter):
 
 
 def create_app(core: "App") -> "Flask":
-    from flask import Flask, Response, abort, request, send_from_directory
+    from flask import Flask, Response, abort, redirect, request, send_from_directory, url_for
 
     from ..core import health
     from ..core.service import SOURCES
@@ -188,6 +191,12 @@ def create_app(core: "App") -> "Flask":
                 return Response("Login required", 401, {"WWW-Authenticate": 'Basic realm="attendance"'})
             if who == "viewer" and (request.method != "GET" or request.endpoint not in VIEWER_PAGES):
                 abort(403, "This login can only look, not change anything.")
+        if core.edge.following and request.endpoint not in AT_THE_CAMERA:
+            if request.endpoint == "index":
+                return redirect(url_for("live_page"))
+            if request.method != "GET":
+                abort(403, "Administration has moved to the server.")
+            return redirect(cfg.edge.server_url.rstrip("/") + request.full_path)
         if request.method == "POST":
             # Reject form posts coming from other websites (cross-site request forgery).
             origin = request.headers.get("Origin") or request.headers.get("Referer")
@@ -202,7 +211,7 @@ def create_app(core: "App") -> "Flask":
                 "translocated": sys.platform == "darwin" and "/AppTranslocation/" in sys.executable,
                 "leave_label": lambda kind: LEAVE_KINDS.get(kind, kind), "WEEKDAYS": WEEKDAYS,
                 "employee_emails": store.employee_emails(), "config_warnings": health.config_warnings(cfg),
-                "role": "admin" if request.endpoint in PUBLIC else role(cfg)}
+                "role": "admin" if request.endpoint in PUBLIC else role(cfg), "following": core.edge.following}
 
     from . import attendance as attendance_routes
     from . import capture as capture_routes

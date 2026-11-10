@@ -183,9 +183,10 @@
 
   <section class="card tab" id="camera">
     <h2 class="row">{{ icon('camera') }}Camera</h2>
-    {% if office %}<div class="cam-status warn" style="margin-top:14px"><span>The camera can only be checked from the office network, on a computer with an address in <strong>{{ office.network }}</strong>, the same network as the camera. This server cannot reach it.</span>
-      <a class="btn btn-sm" href="{{ office.url }}/settings#camera" target="_blank" rel="noopener">{{ icon('camera') }}Check camera at {{ office.url }}</a></div>
-    {% else %}
+    {% if office %}<div class="cam-status warn" style="margin-top:14px"><span>The camera can only be checked from the office network, on a computer with an address in <strong>{{ office.network }}</strong>, the same network as the camera. This server cannot reach it.{% if not shadow_site %} Addresses saved here are sent to the office computer within a minute.{% endif %}</span>
+      <a class="btn btn-sm" href="{{ office.url }}/live" target="_blank" rel="noopener">{{ icon('camera') }}Check camera at {{ office.url }}</a></div>
+    {% endif %}
+    {% if not shadow_site %}
     <div class="form-row">
       <label class="field grow">RTSP address
         <input name="camera.url" value="{{ s.camera.url }}" placeholder="rtsp://admin:CODE@192.168.1.64:554/Streaming/Channels/101"{% if not office %} data-camera-check="auto"{% endif %}>
@@ -198,9 +199,11 @@
         <textarea name="camera.more" rows="2" placeholder="rtsp://… one address per line" spellcheck="false">{{ s.camera.more }}</textarea>
         <span class="hint">A second door, for example. Same settings as above; the detection area applies to the first camera only. Each camera costs as much CPU as the first.</span>{{ src('camera.more') }}</label>
     </div>
+    {% if not office %}
     <div class="form-row" style="margin-top:14px">
       {{ field('camera', 'area', 'Detection area', ('Draw it on the Camera page of the office computer' if office else 'Draw it on the Camera page') ~ ' · empty = whole picture · first camera only', cls='grow') }}
     </div>
+    {% endif %}
     <div class="stack">{{ check('camera', 'enhance_low_light', 'Brighten dark frames') }}</div>
     {% endif %}
     <hr>

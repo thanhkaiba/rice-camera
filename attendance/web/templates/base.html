@@ -21,19 +21,19 @@
 <header class="topbar"><div class="topbar-inner">
   <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark"></span>Attendance</a>
   <nav class="nav">
-    <a href="{{ url_for('index') }}" class="{{ 'on' if nav == 'index' }}">{{ icon('today', 'i') }}Today</a>
+    {% if not following %}<a href="{{ url_for('index') }}" class="{{ 'on' if nav == 'index' }}">{{ icon('today', 'i') }}Today</a>
     {% if pending or nav == 'unknowns' %}
     <a href="{{ url_for('unknowns') }}" class="{{ 'on' if nav == 'unknowns' }}">{{ icon('review', 'i') }}Review{% if pending %} <span class="count">{{ pending }}</span>{% endif %}</a>
     {% endif %}
     {% if role != 'viewer' %}<a href="{{ url_for('employees') }}" class="{{ 'on' if nav in ('employees', 'employee', 'calendar_page') }}">{{ icon('employees', 'i') }}People</a>{% endif %}
-    <a href="{{ url_for('report') }}" class="{{ 'on' if reports }}">{{ icon('report', 'i') }}Reports</a>
+    <a href="{{ url_for('report') }}" class="{{ 'on' if reports }}">{{ icon('report', 'i') }}Reports</a>{% endif %}
     {% if role != 'viewer' and not office %}<a href="{{ url_for('live_page') }}" class="{{ 'on' if nav == 'live_page' }}">{{ icon('live', 'i') }}Camera</a>{% endif %}
     {% if role != 'viewer' %}<a href="{{ url_for('status_page') }}" class="{{ 'on' if nav == 'status_page' }}">{{ icon('activity', 'i') }}Status</a>{% endif %}
   </nav>
   <div class="topbar-actions">
     {% if role == 'viewer' %}<span class="badge info" title="This login can look but not change anything">{{ icon('eye') }}Read-only</span>{% endif %}
     <button class="icon-link" id="theme-toggle" type="button" aria-label="Switch light/dark theme" title="Light / dark"><span class="only-light">{{ icon('moon') }}</span><span class="only-dark">{{ icon('sun') }}</span></button>
-    {% if role != 'viewer' %}<a href="{{ url_for('settings_page') }}" class="icon-link {{ 'on' if nav in ('settings_page', 'setup_page') }}"
+    {% if role != 'viewer' and not following %}<a href="{{ url_for('settings_page') }}" class="icon-link {{ 'on' if nav in ('settings_page', 'setup_page') }}"
        title="Settings{% if setup_open %} ({{ setup_open }} setup step{{ 's' if setup_open > 1 }} left){% endif %}" aria-label="Settings">
       {{ icon('settings') }}
       {% if setup_open %}<span class="dot setup-count"></span>{% endif %}

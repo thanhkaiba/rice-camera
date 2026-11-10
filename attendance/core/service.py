@@ -207,6 +207,9 @@ class AttendanceService:
 
     def alert(self, text: str) -> None:
         """System alert (power, camera, Base...), posted in today's thread of the system space."""
+        if getattr(self.edge, "following", False):
+            self.edge.alert(text)
+            return
         self._send_system(text, self.now().date())
 
     def _send_system(self, text: str, day: dt.date) -> None:
@@ -965,6 +968,11 @@ class AttendanceService:
         camera is not ok, for the alert."""
         now = self.now()
         day = now.date()
+        if getattr(self.edge, "following", False):  # the server sends the messages; only old photos are this computer's job
+            if self.store.get("cleanup_day") != day.isoformat():
+                self.cleanup(day)
+                self.store.put("cleanup_day", day.isoformat())
+            return
         if self.is_workday(day):
             w = self.window(day)
             self._track_health(now, w, camera_ok, camera_state)
