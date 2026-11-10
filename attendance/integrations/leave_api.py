@@ -168,7 +168,7 @@ class LeaveSync:
             status = {**status, 'at': now.isoformat(), 'ok': False, 'message': message}
             log.warning('%s; attendance is provisional', message)
         else:
-            missing = sum(p.active and not p.exempt and not p.base_username for p in self.store.all_employees())
+            missing = sum(p.active and not p.not_counted and not p.base_username for p in self.store.all_employees())
             status = {'at': now.isoformat(), 'ok': True, 'last_success': now.isoformat(),
                       'day': day.isoformat(), 'message': f'{len(snapshot)} Base users with morning permissions; '
                       f'{missing} tracked employees without Base username'}
@@ -217,7 +217,7 @@ def base_ready(cfg: Config, store: Store, now: dt.datetime, day: dt.date | None 
 
 
 def all_tracked_have_username(store: Store) -> bool:
-    return all(p.base_username for p in store.all_employees() if p.active and not p.exempt)
+    return all(p.base_username for p in store.all_employees() if p.active and not p.not_counted)
 
 
 def warning(cfg: Config, store: Store, now: dt.datetime) -> str | None:

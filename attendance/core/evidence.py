@@ -167,6 +167,8 @@ def build(service, day: dt.date, employee_id: str) -> Evidence:
         status = "On time"
     elif any(e == employee_id for e, _, _ in rep.on_leave):
         status = "On leave (" + next(k for e, _, k in rep.on_leave if e == employee_id) + ")"
+    elif any(e == employee_id for e, _, _ in rep.support):
+        status = "Support staff, never counted as late"
     elif any(e == employee_id for e, _, _ in rep.exempt):
         status = "Never counted as late"
     elif any(e == employee_id for e, _ in rep.not_seen):

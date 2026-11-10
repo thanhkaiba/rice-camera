@@ -12,7 +12,8 @@ from collections import Counter, defaultdict
 
 import numpy as np
 
-from .schema import CHAT_COLUMNS, Employee, Reference, _blob, _vec, normalize_chat_user, normalize_email
+from .schema import (CHAT_COLUMNS, ROLE_EMPLOYEE, ROLE_SUPPORT, Employee, Reference, _blob, _vec, normalize_chat_user,
+                     normalize_email, normalize_role)
 
 
 class EmployeeStoreMixin:
@@ -108,20 +109,20 @@ class EmployeeStoreMixin:
                 raise ValueError('employee email or Base username already exists') from None
         return len(rows)
 
-    def add_employee(self, email: str, name: str) -> str:
-        email, name = normalize_email(email), name.strip()
+    def add_employee(self, email: str, name: str, role: str = ROLE_EMPLOYEE) -> str:
+        email, name, role = normalize_email(email), name.strip(), normalize_role(role)
         if not name:
             raise ValueError("name is required")
         employee_id = uuid.uuid4().hex
         try:
-            self._exec("INSERT INTO employees (id, email, name, active) VALUES (?, ?, ?, 1)", (employee_id, email, name))
+            self._exec("INSERT INTO employees (id, email, name, active, role) VALUES (?, ?, ?, 1, ?)", (employee_id, email, name, role))
         except sqlite3.IntegrityError:
             raise ValueError(f"employee email {email} already exists") from None
         return employee_id
 
     def update_employee(self, employee_id: str, name: str, active: bool, chat_user: str | None = None,
                         exempt: bool | None = None, *, email: str | None = None,
-                        base_username: str | None = None) -> None:
+                        base_username: str | None = None, role: str | None = None) -> None:
         if not name.strip():
             raise ValueError("name is required")
         person = self.employee(employee_id)
@@ -130,10 +131,11 @@ class EmployeeStoreMixin:
         email = normalize_email(email if email is not None else person.email)
         chat_user = normalize_chat_user(chat_user) if chat_user is not None else person.chat_user
         username = self.normalize_base_username(base_username) if base_username is not None else person.base_username
+        role = normalize_role(role) if role is not None else person.role
         try:
-            self._exec("UPDATE employees SET email = ?, name = ?, active = ?, chat_user = ?, exempt = ?, base_username = ? WHERE id = ?",
+            self._exec("UPDATE employees SET email = ?, name = ?, active = ?, chat_user = ?, exempt = ?, base_username = ?, role = ? WHERE id = ?",
                        (email, name.strip(), int(active), chat_user,
-                        int(exempt if exempt is not None else person.exempt), username, employee_id))
+                        int(exempt if exempt is not None else person.exempt), username, role, employee_id))
         except sqlite3.IntegrityError:
             raise ValueError('employee email or Base username already exists') from None
 
@@ -145,8 +147,11 @@ class EmployeeStoreMixin:
         return {r["id"]: r["email"] or "" for r in self._all("SELECT id, email FROM employees")}
 
     def exempt_ids(self) -> set[str]:
-        """Employees whose arrivals are not counted as late or absent."""
-        return {r["id"] for r in self._all("SELECT id FROM employees WHERE exempt = 1")}
+        """People whose arrivals are not counted as late or absent, support staff included."""
+        return {r["id"] for r in self._all("SELECT id FROM employees WHERE exempt = 1 OR role = ?", (ROLE_SUPPORT,))}
+
+    def support_ids(self) -> set[str]:
+        return {r["id"] for r in self._all("SELECT id FROM employees WHERE role = ?", (ROLE_SUPPORT,))}
 
     def delete_employee(self, employee_id: str) -> list[str]:
         """Remove the employee and their face data; returns reference image paths to delete.
@@ -164,7 +169,7 @@ class EmployeeStoreMixin:
 
     @staticmethod
     def _employee(r) -> Employee:
-        return Employee(r["id"], r["name"], bool(r["active"]), r["chat_user"] or "", bool(r["exempt"]), r["email"] or "", r['base_username'] or '')
+        return Employee(r["id"], r["name"], bool(r["active"]), r["chat_user"] or "", bool(r["exempt"]), r["email"] or "", r['base_username'] or '', r["role"])
 
     def all_employees(self) -> list[Employee]:
         return [self._employee(r) for r in self._all("SELECT * FROM employees ORDER BY active DESC, name")]

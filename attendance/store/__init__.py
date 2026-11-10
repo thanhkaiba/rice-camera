@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 
 from .attendance import AttendanceStoreMixin
+from .edge import EdgeStoreMixin
 from .employees import EmployeeStoreMixin
 from .schema import (
     CHAT_COLUMNS,
@@ -32,7 +33,7 @@ from .schema import (
 from .system import SystemStoreMixin
 
 
-class Store(EmployeeStoreMixin, AttendanceStoreMixin, SystemStoreMixin):
+class Store(EmployeeStoreMixin, AttendanceStoreMixin, SystemStoreMixin, EdgeStoreMixin):
     def __init__(self, path: str | Path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), check_same_thread=False)

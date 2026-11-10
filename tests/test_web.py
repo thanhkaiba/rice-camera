@@ -349,3 +349,22 @@ def test_onboarding_walks_through_camera_hours_and_chat(tmp_path):
     assert "Webhook URL" in c.get("/setup").get_data(as_text=True)
     c.post("/setup/skip-chat")
     assert "Almost done" in c.get("/setup").get_data(as_text=True)
+
+
+def test_support_staff_role_from_the_people_pages(core):
+    app, clock, _ = core
+    c = client(app)
+    clock.t = at(10, 30)
+    assert 'value="support"' in c.get("/employees").get_data(as_text=True)
+    c.post("/employees/C", data={"name": "Carol", "active": "on", "role": "support"})
+    person = app.store.employee("C")
+    assert person.support and person.not_counted and not person.exempt
+    app.service.on_identified("C", at(10, 20), 0.8, None)
+    page = c.get(f"/?day={DAY}").get_data(as_text=True)
+    assert "Arrived · support staff" in page and 'data-filter="support"' in page and "Late 20 min" not in page
+    assert "Support staff" in c.get("/employees").get_data(as_text=True)
+    assert "role=support" in c.get("/audit").get_data(as_text=True)
+    c.post("/employees", data={"email": "cook@example.com", "name": "Cook", "role": "support"})
+    assert app.store.employee_by_email("cook@example.com").support
+    c.post("/employees/C", data={"name": "Carol", "active": "on"})  # a form without the field keeps the role
+    assert app.store.employee("C").support

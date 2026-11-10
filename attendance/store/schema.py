@@ -16,7 +16,19 @@ CREATE TABLE IF NOT EXISTS employees (
     name TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
     chat_user TEXT NOT NULL DEFAULT '',  -- Google Chat user ID, used to @mention the person
-    exempt INTEGER NOT NULL DEFAULT 0  -- arrivals are recorded but never counted as late or absent (e.g. the boss)
+    exempt INTEGER NOT NULL DEFAULT 0,  -- arrivals are recorded but never counted as late or absent (e.g. the boss)
+    role TEXT NOT NULL DEFAULT 'employee'  -- employee or support (cook, cleaner...: on site, but not on the attendance list)
+);
+-- Mac: camera events not yet confirmed by the server. Server: events already applied, so a resend is harmless.
+CREATE TABLE IF NOT EXISTS edge_outbox (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    photos_sent INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS edge_events (
+    id TEXT PRIMARY KEY,
+    received_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS embeddings (
     id INTEGER PRIMARY KEY,
@@ -132,6 +144,10 @@ LEAVE_KINDS = {"leave": "Leave", "business_trip": "Business trip", "remote": "Wo
                "sick": "Sick", "other": "Other"}
 
 
+ROLE_EMPLOYEE, ROLE_SUPPORT = "employee", "support"
+ROLES = {ROLE_EMPLOYEE: "Employee", ROLE_SUPPORT: "Support staff"}
+
+
 @dataclass
 class Employee:
     id: str
@@ -141,6 +157,16 @@ class Employee:
     exempt: bool = False  # not counted as late or absent
     email: str = ""
     base_username: str = ""
+    role: str = ROLE_EMPLOYEE
+
+    @property
+    def support(self) -> bool:
+        return self.role == ROLE_SUPPORT
+
+    @property
+    def not_counted(self) -> bool:
+        """Never late or absent: support staff always, anyone else when marked exempt."""
+        return self.exempt or self.support
 
 
 @dataclass
@@ -227,6 +253,12 @@ def normalize_email(value: str) -> str:
     return value
 
 
+def normalize_role(value: str) -> str:
+    if value not in ROLES:
+        raise ValueError(f"unknown role {value}")
+    return value
+
+
 def normalize_chat_user(value: str | None) -> str:
     """A Google Chat user ID is a number. Accept it pasted as "users/123…" or "<users/123…>" too;
     anything else would silently turn into a mention that does not work."""
@@ -259,7 +291,7 @@ def _blob(vector) -> bytes | None:
 def migrate(db: sqlite3.Connection) -> None:
     """Add columns introduced after a database was created."""
     added = {"embeddings": [("image", "TEXT"), ("quality_ok", "INTEGER"), ("quality_score", "REAL")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'"), ("quality", "REAL")],
-             "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT"), ("base_username", "TEXT NOT NULL DEFAULT ''")],
+             "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT"), ("base_username", "TEXT NOT NULL DEFAULT ''"), ("role", "TEXT NOT NULL DEFAULT 'employee'")],
              "sightings": [("camera_id", "TEXT"), ("model", "TEXT"), ("vector", "BLOB"), ("sha256", "TEXT")],
              "calendar": [("source", "TEXT NOT NULL DEFAULT 'hr'")], "leaves": [("source", "TEXT NOT NULL DEFAULT 'hr'")]}
     for table, columns in added.items():

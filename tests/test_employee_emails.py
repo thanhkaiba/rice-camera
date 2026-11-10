@@ -165,3 +165,15 @@ def test_today_distinguishes_duplicate_names_by_email(core):
     assert 'class="cell-sub">bob@example.com</div>' in page
     assert '>Alice (alice@example.com)</option>' in page
     assert '>Alice (bob@example.com)</option>' in page
+
+
+def test_existing_database_gets_the_employee_role(tmp_path):
+    path = tmp_path / "old.db"
+    Store(path)._db.close()
+    db = sqlite3.connect(path)
+    db.execute("ALTER TABLE employees DROP COLUMN role")
+    db.execute("INSERT INTO employees (id, email, name) VALUES ('A', 'a@example.com', 'Alice')")
+    db.commit()
+    db.close()
+    person = Store(path).employee("A")
+    assert person.role == "employee" and not person.support and not person.not_counted

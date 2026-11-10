@@ -12,6 +12,7 @@ from pathlib import Path
 from . import settings
 from .backup import Backup
 from .config import Config
+from .edge import EdgeClient
 from .collect import Collector
 from .enrolment import DoorEnrolment
 from .evidence import evidence_digest
@@ -77,6 +78,13 @@ class App:
         self.placement = Placement(self.store)
         self.service.placement = self.placement
         self.machine = MachineWatch(cfg, self.store, self.service.alert, self.service.now)
+        self.edge = EdgeClient(cfg.edge, self.store, self.data_dir, status=self._edge_status)
+        self.service.edge = self.edge if self.edge.enabled else None
+
+    def _edge_status(self) -> dict:
+        from .. import __version__
+
+        return {"camera_ok": self.live.camera_state == "ok", "camera_state": self.live.camera_state, "version": __version__}
 
     def recognizer(self):
         if self._recognizer is None:
@@ -296,6 +304,7 @@ def run(cfg: Config) -> None:
     app = App(cfg)
     service, live = app.service, app.live
     app.chat.start_background()  # a slow webhook must not hold up face recognition
+    app.edge.start()
     if cfg.web.enabled:
         from ..web import create_app
 

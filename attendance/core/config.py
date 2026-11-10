@@ -276,6 +276,13 @@ class CollectConfig:
 
 
 @dataclass
+class EdgeConfig:
+    """The office Mac mirrors camera events to the server at this address. Empty: no server."""
+    server_url: str = ""
+    token: str = field(default="", repr=False)
+
+
+@dataclass
 class Config:
     timezone: str = "Asia/Ho_Chi_Minh"
     data_dir: str = "data"
@@ -298,6 +305,7 @@ class Config:
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
     collect: CollectConfig = field(default_factory=CollectConfig)
+    edge: EdgeConfig = field(default_factory=EdgeConfig)
     base_dir: Path = field(default=Path("."), repr=False)
 
     @property

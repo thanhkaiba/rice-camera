@@ -83,6 +83,7 @@
         <td class="hide-sm">{% if p.chat_user %}<span class="badge ok plain" title="Google Chat ID set · @mentions work">{{ icon('at') }}</span>{% else %}<span class="muted" title="No Google Chat ID">–</span>{% endif %}</td>
         <td>{% if not p.active %}<span class="badge info">Not tracked</span>
             {% elif on_leave.get(p.id) %}<span class="badge info">{{ leave_label(on_leave[p.id]) }} today</span>
+            {% elif p.support %}<span class="badge info plain" title="Cook, cleaner…: recognised, never counted as late or absent">{{ icon('employees') }}Support staff</span>
             {% elif p.exempt %}<span class="badge info plain" title="Never counted as late or absent">{{ icon('crown') }}Not counted</span>
             {% else %}<span class="badge ok">Active</span>{% endif %}</td>
         <td class="num"><a class="btn btn-sm ghost icon" href="{{ url_for('employee', employee_id=p.id) }}" title="Open" aria-label="Open {{ shown }}">{{ icon('chevron-right') }}</a></td>
@@ -102,7 +103,9 @@
       <div class="form-row">
         <label class="field grow">Email<input type="email" name="email" id="new-email" required placeholder="person@example.com" autocomplete="email"></label>
         <label class="field grow">Full name<input name="name" required placeholder="Nguyen Van An"></label>
+        <label class="field">Role<select name="role">{% for value, label in roles.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
       </div>
+      <span class="hint">Support staff (cook, cleaner…) are recognised but never counted as late or absent.</span>
       <div><button class="primary">{{ icon('plus') }}Add</button></div>
     </form>
     <div class="divider" style="margin:0"></div>

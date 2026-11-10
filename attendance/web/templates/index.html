@@ -14,6 +14,7 @@
       {% elif status == 'on_time' %}<span class="badge ok">On time</span>
       {% elif status == 'on_leave' %}<span class="badge info">{{ note }}</span>
       {% elif status == 'exempt' %}<span class="badge {{ 'ok' if a else 'info' }}" title="Never counted as late or absent">{{ 'Arrived' if a else 'Not here' }} · not counted</span>
+      {% elif status == 'support' %}<span class="badge {{ 'ok' if a else 'info' }}" title="Cook, cleaner…: never counted as late or absent">{{ 'Arrived' if a else 'Not here' }} · support staff</span>
       {% elif rep.no_camera_data %}<span class="badge info">No camera data</span>
       {% else %}<span class="badge bad">Not seen</span>{% endif %}
       {% if status != 'on_leave' and (note or rep.requests.get(emp_id)) %}<div class="cell-sub"><span class="badge info">{{ note or rep.requests[emp_id] }}</span></div>{% endif %}
@@ -61,13 +62,14 @@
 {% if rep.day == today and rep.workday and not started %}<div class="alert info"><span class="ico">{{ icon('clock') }}</span><span>Camera starts at {{ rep.window.start.strftime('%H:%M') }}.</span></div>{% endif %}
 
 <div class="tiles today">
-  <button class="tile active" type="button" data-filter="all"><div class="n">{{ rep.total + rep.on_leave|length + rep.exempt|length }}</div><div class="l">Everyone</div></button>
+  <button class="tile active" type="button" data-filter="all"><div class="n">{{ rep.total + rep.on_leave|length + rep.exempt|length + rep.support|length }}</div><div class="l">Everyone</div></button>
   <button class="tile late" type="button" data-filter="late"><div class="n">{{ rep.late|length }}</div><div class="l">Late</div></button>
   <button class="tile bad" type="button" data-filter="not_seen"><div class="n">{{ rep.not_seen|length }}</div><div class="l">Not seen</div></button>
   <button class="tile ok" type="button" data-filter="on_time"><div class="n">{{ rep.on_time|length }}</div><div class="l">On time</div></button>
   <button class="tile info" type="button" data-filter="on_leave"><div class="n">{{ rep.on_leave|length }}</div><div class="l">On leave</div></button>
   <button class="tile info" type="button" data-filter="coming_late"><div class="n">{{ request_groups.coming_late|length }}</div><div class="l">Coming late</div></button>
   <button class="tile info" type="button" data-filter="wfh"><div class="n">{{ request_groups.wfh|length }}</div><div class="l">WFH</div></button>
+  {% if rep.support %}<button class="tile info" type="button" data-filter="support"><div class="n">{{ rep.support|length }}</div><div class="l">Support staff</div></button>{% endif %}
   {% if rep.pending_unknowns %}<a class="tile bad" href="{{ url_for('unknowns') }}" title="Faces to review"><div class="n">{{ rep.pending_unknowns }}</div><div class="l">Review {{ icon('chevron-right') }}</div></a>{% endif %}
 </div>
 
@@ -94,9 +96,10 @@
       {% for id, name, kind in rep.on_leave %}{{ row('on_leave', id, name, rep.permitted_arrivals.get(id), kind) }}{% endfor %}
       {% for a in rep.on_time %}{{ row('on_time', a.employee_id, a.name, a) }}{% endfor %}
       {% for id, name, a in rep.exempt %}{{ row('exempt', id, name, a) }}{% endfor %}
+      {% for id, name, a in rep.support %}{{ row('support', id, name, a) }}{% endfor %}
     </tbody>
   </table>
-  {% if not (rep.late or rep.not_seen or rep.on_leave or rep.on_time or rep.exempt) %}
+  {% if not (rep.late or rep.not_seen or rep.on_leave or rep.on_time or rep.exempt or rep.support) %}
     <div class="empty-state"><span class="ico">{{ icon('employees') }}</span><span>No people yet. <a href="{{ url_for('employees') }}">Add them</a>, or let the camera collect faces.</span></div>
   {% endif %}
   <div class="empty-state" id="empty" hidden><span class="ico">{{ icon('search') }}</span>Nobody matches.</div>

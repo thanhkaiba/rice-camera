@@ -321,3 +321,25 @@ def test_a_track_that_continues_an_unknown_track_joins_its_review_card(env):
     d = service.on_unknown(at(8, 31), "d.jpg", v, None, None, track=4, follows=3)
     e = service.on_unknown(at(8, 32), "e.jpg", v, None, None, track=5, follows=99)
     assert store.unknown(d).group_id == d and store.unknown(e).group_id == e
+
+
+def test_support_staff_are_recorded_but_never_late_or_missing(env):
+    service, store, clock, sent = env
+    store.update_employee("C", "Carol", True, role="support")  # the cook comes in at 10:20
+    run_until(service, clock, at(10, 30))
+    service.on_identified("C", at(10, 20), 0.8, None)
+    rep = service.report(DAY)
+    assert [(i, a.time) for i, _, a in rep.support] == [("C", "10:20")]
+    assert rep.exempt == [] and rep.total == 2
+    assert "C" not in [a.employee_id for a in rep.late] and "C" not in [i for i, _ in rep.not_seen]
+    assert "C" not in [p.employee_id for p in service.period_report(DAY, DAY).people]
+    assert not any("Carol" in m for m in sent)
+    store.update_employee("C", "Carol", True, role="employee")
+    assert service.report(DAY).support == [] and "C" in [a.employee_id for a in service.report(DAY).late]
+
+
+def test_unknown_role_is_refused(env):
+    _, store, _, _ = env
+    with pytest.raises(ValueError):
+        store.update_employee("C", "Carol", True, role="boss")
+    assert store.employee("C").role == "employee"

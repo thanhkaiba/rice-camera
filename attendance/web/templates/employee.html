@@ -13,7 +13,8 @@
         {% elif refs|length == 0 %}<span class="badge bad plain" title="Cannot be recognised yet">{{ icon('image') }}No photos</span>
         {% elif good < good_photos %}<span class="badge late plain" title="{{ good }} of {{ refs|length }} photos are sharp and frontal · add {{ good_photos - good }} more good ones">{{ icon('image') }}{{ good }}/{{ refs|length }} good photos</span>
         {% else %}<span class="badge ok plain" title="Ready">{{ icon('image') }}{{ good }}/{{ refs|length }} good photos</span>{% endif %}
-        {% if person.exempt %}<span class="badge brand plain" title="Never counted as late or absent">{{ icon('crown') }}Not counted</span>{% endif %}</p>
+        {% if person.support %}<span class="badge info plain" title="Cook, cleaner…: recognised, never counted as late or absent">{{ icon('employees') }}Support staff</span>
+        {% elif person.exempt %}<span class="badge brand plain" title="Never counted as late or absent">{{ icon('crown') }}Not counted</span>{% endif %}</p>
     </div>
   </div>
 </div>
@@ -121,13 +122,15 @@
       <form method="post" action="{{ url_for('update_employee', employee_id=person.id) }}" class="stack" style="margin:0">
         <label class="field">Email<input type="email" name="email" value="{{ person.email }}" required autocomplete="email"></label>
         <label class="field">Name<input name="name" value="{{ person.name }}" required></label>
+        <label class="field">Role<select name="role" onchange="document.getElementById('exempt-switch').hidden = this.value === 'support'">{% for value, label in roles.items() %}<option value="{{ value }}" {{ 'selected' if person.role == value }}>{{ label }}</option>{% endfor %}</select>
+          <span class="hint">Support staff (cook, cleaner…): camera recognises them and records arrivals, never late or absent, no alerts, no Base username needed.</span></label>
         <label class="field">Base username<input name="base_username" value="{{ person.base_username }}" autocomplete="off">
           <span class="hint">From Base Account; used to match Timeoff requests.</span></label>
         <label class="field">Google Chat user ID<input name="chat_user" value="{{ person.chat_user }}" placeholder="e.g. 112233445566778899000" autocomplete="off">
           <span class="hint">For @mentions · the number at the end of the user's page address in Google Admin.</span></label>
         <label class="switch"><input type="checkbox" name="active" {{ 'checked' if person.active }}><span>Tracked by the camera
           <span class="hint">Untick for people who left; their data is kept.</span></span></label>
-        <label class="switch"><input type="checkbox" name="exempt" {{ 'checked' if person.exempt }}><span>Never count as late or absent
+        <label class="switch" id="exempt-switch" {{ 'hidden' if person.support }}><input type="checkbox" name="exempt" {{ 'checked' if person.exempt }}><span>Never count as late or absent
           <span class="hint">Boss, part-timers, guests: arrival recorded, left out of alerts and reports.</span></span></label>
         <div class="btn-group"><button class="primary">{{ icon('check') }}Save</button>
           {% if person.chat_user %}<button formaction="{{ url_for('test_mention', employee_id=person.id) }}" title="Send a test @mention to Google Chat">{{ icon('send') }}Test mention</button>{% endif %}</div>

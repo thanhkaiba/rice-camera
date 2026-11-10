@@ -86,6 +86,7 @@ class DayReport:
     requests: dict[str, str] = field(default_factory=dict)
     # People not counted as late or absent (e.g. the boss): (id, name, arrival if seen)
     exempt: list[tuple[str, str, Arrival | None]] = field(default_factory=list)
+    support: list[tuple[str, str, Arrival | None]] = field(default_factory=list)  # cook, cleaner...: never counted
     no_photos: list[tuple[str, str]] = field(default_factory=list)
     pending_unknowns: int = 0
     outages: list[tuple[dt.datetime, dt.datetime]] = field(default_factory=list)
@@ -153,6 +154,7 @@ class AttendanceService:
         self.gallery = gallery
         self.library: FaceLibrary | None = None  # set by the app; used to learn admin-confirmed faces
         self.backup = None  # set by the app: the daily backup (backup.Backup)
+        self.edge = None  # set by the app when a server is configured: mirrors camera events (edge.EdgeClient)
         self.placement = None  # set by the app: how well the camera sees faces (placement.Placement)
         self._now = now or (lambda: dt.datetime.now(self.tz))
         saved = store.get("last_alive")
@@ -419,6 +421,8 @@ class AttendanceService:
         """The camera identified someone. The face embedding is kept with the sighting, so that
         if the admin later moves it to the right person, that person's face can be learned."""
         ts = self._local(ts)
+        if self.edge:
+            self.edge.identified(employee_id, ts, score, image, vector, sha256)
         result = self.store.record_checkin(ts.date(), employee_id, ts, "camera", score, image,
                                            self.model_id if vector is not None else None, vector, sha256)
         log.info("Identified %s at %s (score %.2f): %s", employee_id, ts.strftime("%H:%M:%S"), score, result)
@@ -436,6 +440,8 @@ class AttendanceService:
         `frames` and `votes` (frames seen, votes for the closest person) are logged, to tell a walk
         that gave no usable frame from one that fell one vote short."""
         ts = self._local(ts)
+        if self.edge:
+            self.edge.unknown(ts, image, vector, guess_id, guess_score, sha256, quality, track, follows, frames, votes)
         seen = "" if frames is None else f"; {frames} frames, {votes or 0} votes"
 
         again = self._seen_again(vector, guess_id, guess_score, ts.date())
@@ -796,12 +802,12 @@ class AttendanceService:
         permitted_late, permitted_absence, rep.requests = base_permissions(self.store, day)
         pending_late = base_pending_arrivals(self.store, day)
         enrolled = self.gallery.counts()
-        exempt = self.store.exempt_ids()
+        exempt, support = self.store.exempt_ids(), self.store.support_ids()
         for emp_id, name in employees.items():
             c = checkins.get(emp_id)
             if emp_id in exempt:
                 arrival = Arrival(emp_id, name, self._local(c.first_seen), c.source, c.image, c.score) if c else None
-                rep.exempt.append((emp_id, name, arrival))
+                (rep.support if emp_id in support else rep.exempt).append((emp_id, name, arrival))
                 continue
             if c is not None:
                 a = Arrival(emp_id, name, self._local(c.first_seen), c.source, c.image, c.score)

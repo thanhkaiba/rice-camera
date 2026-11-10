@@ -91,7 +91,7 @@ def register(app: Flask, core: "App") -> None:
         days = []
         for i in range(DAYS_SHOWN):
             d = today - dt.timedelta(days=i)
-            row = _status(d, employee_id, person.exempt, now)
+            row = _status(d, employee_id, person.not_counted, now)
             if row["workday"] or row["time"] or d in notes:
                 days.append({**row, "note": notes.get(d, "")})
         upcoming = {d: n for d, n in notes.items() if d > today}

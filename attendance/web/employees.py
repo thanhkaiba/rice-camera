@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for
 
+from ..store.schema import ROLE_EMPLOYEE, ROLES
 from . import current_user, done, failed, leave_status
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ def register(app: Flask, core: "App") -> None:
         people = sorted(store.all_employees(), key=lambda e: (not e.active, names[e.id].lower()))
         image_scores = sorted(r.image_score for r in store.references(cfg.recognition.model_id())
                               if r.image_score is not None)
-        return render_template("employees.html", people=people, counts=counts, thumbs=thumbs, image_scores=image_scores,
+        return render_template("employees.html", roles=ROLES, people=people, counts=counts, thumbs=thumbs, image_scores=image_scores,
                                look_alikes=quality_report["look_alikes"], names=names, quality=library.quality(),
                                good_photos=GOOD_PHOTOS, photo_scores=scores, recognition=recognition,
                                quality_report=quality_report,
@@ -70,7 +71,8 @@ def register(app: Flask, core: "App") -> None:
     @app.post("/employees")
     def add_employee():
         try:
-            employee_id = store.add_employee(request.form.get("email", ""), request.form.get("name", ""))
+            employee_id = store.add_employee(request.form.get("email", ""), request.form.get("name", ""),
+                                             request.form.get("role", ROLE_EMPLOYEE))
         except ValueError as exc:
             return failed(str(exc), "employees")
         store.log(service.now(), current_user(cfg), "add employee", f"{request.form['email']} {request.form['name']}")
@@ -159,7 +161,7 @@ def register(app: Flask, core: "App") -> None:
                           sorted(weeks[start], key=lambda r: (r.created_at.timestamp(), r.id), reverse=True))
                          for start in sorted(weeks, reverse=True)]
         quality_report = library.saved_quality()
-        return render_template("employee.html", person=person, refs=refs, photo_groups=photo_groups, good_photos=GOOD_PHOTOS,
+        return render_template("employee.html", roles=ROLES, person=person, refs=refs, photo_groups=photo_groups, good_photos=GOOD_PHOTOS,
                                good=sum(r.quality_ok is True for r in refs),
                                checks=quality_report["checks"], quality_report=quality_report,
                                recognition_params=cfg.recognition,
@@ -179,12 +181,14 @@ def register(app: Flask, core: "App") -> None:
             store.update_employee(employee_id, request.form.get("name", ""), request.form.get("active") == "on",
                                   request.form.get("chat_user"), request.form.get("exempt") == "on",
                                   email=request.form.get("email", person.email),
-                                  base_username=request.form.get('base_username', person.base_username))
+                                  base_username=request.form.get('base_username', person.base_username),
+                                  role=request.form.get("role", person.role))
         except ValueError as exc:
             return failed(str(exc), "employee", employee_id=employee_id)
         library.reload()
         store.log(service.now(), current_user(cfg), "edit employee", f"{store.employee(employee_id).email} {request.form.get('name')} "
-                  f"active={request.form.get('active') == 'on'} exempt={request.form.get('exempt') == 'on'}")
+                  f"active={request.form.get('active') == 'on'} exempt={request.form.get('exempt') == 'on'} "
+                  f"role={store.employee(employee_id).role}")
         return done("Saved.", "employee", employee_id=employee_id)
 
     @app.post("/employees/<employee_id>/test-mention")
