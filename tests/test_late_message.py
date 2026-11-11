@@ -757,3 +757,18 @@ def test_each_group_in_the_picture_has_a_heading():
     wfh = [latephoto.Person("W", "", 0, None, not_seen=True, wfh_pending="9:00-18:00")]
     assert [h for h, _ in latephoto.sections_of(late + missing + wfh)] == ["Late", "Not seen", "Not seen - WFH pending"]
     assert [h for h, _ in latephoto.sections_of(missing)] == ["Not seen"]
+
+
+def test_the_message_lists_people_with_a_pending_wfh_request_on_their_own_line(core):
+    import json
+
+    app, clock, _ = core
+    clock.t = at(10, 40)
+    late(app, "A", 10, 5)
+    with app.store._db:
+        app.store._db.execute("UPDATE employees SET base_username = 'carol' WHERE id = 'C'")
+    app.store.put(f"base_timeoffs:{DAY}", json.dumps({
+        "carol": [{"kind": "WFH", "absence": True, "approved": False, "shift": "9:00-18:00", "approvers": ["boss"]}]}))
+    app.cfg.late_message.include_not_seen = True
+    assert app.service.late_text(DAY, preview=True) == (
+        "Morning, coming late today: @Alice (10:05)\nNot seen: @Bob\nNot seen, WFH pending: @Carol (9:00-18:00)")
