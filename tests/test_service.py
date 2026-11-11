@@ -212,7 +212,7 @@ def test_pc_off_all_morning_sends_summary_and_a_system_report(env):
     service, _, clock, sent = env
     clock.t = at(14, 0)
     service.tick()
-    assert sent[0] == "Not seen: @Alice, @Bob, @Carol"
+    assert sent[0] == "Not seen (3):\n• @Alice\n• @Bob\n• @Carol"
     assert len(sent) == 3 and sent[1].startswith("📋") and sent[2].startswith("🛠")
     assert "was down" not in sent[1]
     assert "No camera data at all between 08:00 and 11:00" in sent[2]

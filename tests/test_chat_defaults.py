@@ -34,5 +34,5 @@ def test_without_the_summary_its_warnings_still_go_out(quiet):
     service, store, clock, sent = quiet
     clock.t = at(14, 0)  # the computer was off all morning
     service.tick()
-    assert sent[0] == "Not seen: @Alice, @Bob, @Carol"
+    assert sent[0] == "Not seen (3):\n• @Alice\n• @Bob\n• @Carol"
     assert len(sent) == 2 and sent[1].startswith("🛠") and "No camera data at all" in sent[1]

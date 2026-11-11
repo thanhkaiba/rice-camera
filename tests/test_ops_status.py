@@ -83,17 +83,18 @@ def test_override_is_shown_and_can_be_reset(core):
 
 # diagnostics ------------------------------------------------------------------------------
 
-SECRETS = ["k3y", "t0ken", "camPass", "s3cret", "hrTok", "abc-uuid"]
+SECRETS = ["k3y", "t0ken", "camPass", "s3cret", "hrTok", "abc-uuid", "cameraYamlSecret", "cameraSavedSecret"]
 
 
 def test_diagnostics_zip_has_logs_and_no_secrets(core):
     app, _, _ = core
     cfg, store = app.cfg, app.store
     data = app.data_dir
-    (cfg.base_dir / "config.yaml").write_text("web:\n  password: s3cret\ncamera:\n  url: rtsp://admin:camPass@10.0.0.5:554/x\n")
+    (cfg.base_dir / "config.yaml").write_text("web:\n  password: s3cret\ncamera:\n  url: rtsp://admin:camPass@10.0.0.5:554/x\ncamera_api:\n  key: cameraYamlSecret\n")
     settings.save(cfg, store, {"google_chat": {"webhook_url": "https://chat.googleapis.com/v1/spaces/S/messages?key=k3y&token=t0ken"},
                                "camera": {"url": "rtsp://admin:camPass@10.0.0.5:554/x"},
                                "leave_api": {"url": "https://hr/api?token=hrTok", "token": "hrTok"},
+                               "camera_api": {"key": "cameraSavedSecret"},
                                "": {"healthcheck_url": "https://hc-ping.com/abc-uuid"}})
     (data / "service.log").write_text("Camera rtsp://admin:camPass@10.0.0.5 failed\nposting to ...?key=k3y&token=t0ken\n")
     (data / "attendance.log").write_text("Authorization: Bearer hrTok\nhello\n")
@@ -110,6 +111,19 @@ def test_diagnostics_zip_has_logs_and_no_secrets(core):
         assert secret not in everything, secret
     assert "10.0.0.5" in everything and "chat.googleapis.com" in everything and "hello" in everything
     assert json.loads(z.read("history.json"))["outages"]
+
+
+@pytest.mark.parametrize('config_text', [
+    'camera_api: {key: "dummy-secret"}\n',
+    'camera_api:\n  key: |\n    dummy-secret\n',
+    'camera_api: {key: "dummy-secret"\n',
+])
+def test_diagnostics_never_archive_camera_secret_from_yaml_forms(core, config_text):
+    app, _, _ = core
+    (app.cfg.base_dir / 'config.yaml').write_text(config_text)
+    data = diagnostics.build(app.cfg, app.store)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        assert all('dummy-secret' not in archive.read(name).decode() for name in archive.namelist())
 
 
 def test_diagnostics_command_writes_the_zip(core, tmp_path, monkeypatch):

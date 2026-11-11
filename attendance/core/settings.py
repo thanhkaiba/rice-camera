@@ -26,7 +26,7 @@ EDITABLE: dict[str, list[str]] = {
                     "same_face_score", "blurry_score"],
     "google_chat": ["webhook_url", "system_webhook_url", "mention_people", "notify_late_arrivals", "late_time_list", "daily_summary",
                     "unknown_batch_minutes", "names"],
-    "camera_api": ["url", "key"],
+    "camera_api": ["url", "key", "send_at"],
     "leave_api": ["url", "token", "refresh_minutes"],
     "late_message": ["enabled", "include_not_seen", "intro", "item", "auto_send", "send_at", "photo", "occasions", "background"],
     "pending_reminder": ["enabled", "auto_send", "time", "kinds"],

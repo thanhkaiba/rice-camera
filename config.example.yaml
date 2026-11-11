@@ -110,5 +110,6 @@ web:
 # Reports late arrivals to the fine server (docs/CAMERA-API.md).
 # Settings → HR system can override the URL and key independently.
 camera_api:
-  url: ""  # HTTPS Apps Script web app /exec URL; empty disables reporting
+  send_at: ""  # HH:MM local time, after schedule.late_after; empty uses schedule.window_end
+  url: ""  # e.g. https://script.google.com/macros/s/DEPLOYMENT_ID/exec; empty disables reporting
   key: ""  # CAMERA_SECRET from the server administrator

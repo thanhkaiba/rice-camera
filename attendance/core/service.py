@@ -262,10 +262,10 @@ class AttendanceService:
         return report.not_seen if report.workday else []
 
     def late_text(self, day: dt.date, preview: bool = False) -> str | None:
-        """'Morning, coming late today: @A (10:15), and @B (10:32)'. With preview=True names are
-        shown as @Name instead of Google Chat mention codes. A message about another day than
-        today starts with that day. Expected people without an arrival appear on a separate
-        Not seen line."""
+        """List each person on their own line, grouped by late arrivals and not seen.
+
+        Preview uses @Name instead of Chat mention codes; past reports start with their date.
+        """
         people = self.late_people(day)
         missing = self.not_seen_people(day)
         if not people and not missing:
@@ -277,15 +277,17 @@ class AttendanceService:
                                 registered=f", {'request pending' if a.pending else 'registered'} {a.registered}"
                                 if a.registered else "")
                  for a in people]
-        lines = []
+        sections = []
         if items:
-            joined = items[0] if len(items) == 1 else ", ".join(items[:-1]) + ", and " + items[-1]
-            lines.append(f"{lm.intro} {joined}")
+            lines = [f"Late arrivals ({len(items)}):", *(f"• {item}" for item in items)]
+            if lm.intro.strip():
+                lines.insert(0, lm.intro.strip())
+            sections.append("\n".join(lines))
         if missing:
-            lines.append("Not seen: " + ", ".join(f"@{self.chat_name(emp, name)}" if preview else self.mention(emp)
-                                                  for emp, name in missing))
+            sections.append(f"Not seen ({len(missing)}):\n" + "\n".join(
+                f"• @{self.chat_name(emp, name)}" if preview else f"• {self.mention(emp)}" for emp, name in missing))
         prefix = "" if day == self.now().date() else f"{day:%A %d %b}: "
-        return prefix + "\n".join(lines)
+        return prefix + "\n\n".join(sections)
 
     def late_photo(self, day: dt.date) -> str | None:
         """One picture of the day's late people (the whole person as the camera saw them, or their
