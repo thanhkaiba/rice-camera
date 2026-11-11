@@ -54,11 +54,12 @@ class Person:
     from_gallery: bool = False  # a reference photo (a face), not the camera's picture of the arrival
     pending: bool = False  # the registered interval is a request still waiting for approval
     not_seen: bool = False  # expected today and not seen by the camera (shown with their reference photo)
+    wfh_pending: str = ""  # not seen, with a work-from-home request on Base still waiting for approval: its hours
 
     def lines(self) -> list[str]:
         """What the tag says under the name."""
         if self.not_seen:
-            return ["Not seen"]
+            return ["Not seen", f"WFH pending {self.wfh_pending}"] if self.wfh_pending else ["Not seen"]
         if self.registered:
             word = "Request pending" if self.pending else "Registered"
             return [f"{word} {self.registered}", f"Arrived {self.time} (+{self.minutes} min)"]
@@ -591,9 +592,11 @@ def layout(n: int) -> tuple[int, int]:
 
 
 def rows_of(people: list[Person]) -> list[list[Person]]:
-    """The late people in rows, then the people not seen in rows of their own below them."""
+    """The late people in rows, then the people not seen, then those not seen whose work-from-home request is
+    still pending, each group starting a row of its own."""
     rows = []
-    for group in ([p for p in people if not p.not_seen], [p for p in people if p.not_seen]):
+    for group in ([p for p in people if not p.not_seen], [p for p in people if p.not_seen and not p.wfh_pending],
+                  [p for p in people if p.not_seen and p.wfh_pending]):
         if group:
             count, per_row = layout(len(group))
             rows += [group[r * per_row:(r + 1) * per_row] for r in range(count)]
@@ -612,7 +615,7 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
     rows, per_row = len(lines), max(len(row) for row in lines)
     slot = CARD_W + GAP
     width = max(MIN_WIDTH, 2 * MARGIN + per_row * slot)
-    tag_h = TAG_H3 if any(p.registered for p in people) else TAG_H
+    tag_h = TAG_H3 if any(len(p.lines()) > 1 for p in people) else TAG_H
     row_h = CARD_H + TAG_GAP + tag_h + ROW_GAP
     height = max(HEIGHT, TOP + rows * row_h + BOTTOM - ROW_GAP)
     canvas = load_background(background, width, height, seed)
@@ -640,7 +643,7 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
 
 # files --------------------------------------------------------------------------------------
 
-LOOK = 8  # raise when the drawing changes, so pictures already made are made again
+LOOK = 9  # raise when the drawing changes, so pictures already made are made again
 
 
 def fingerprint(people: list[Person], background: Path | None) -> str:
@@ -650,7 +653,7 @@ def fingerprint(people: list[Person], background: Path | None) -> str:
         s = p.stat() if p and p.exists() else None
         return (str(p), s.st_size if s else 0, s.st_mtime_ns if s else 0)
 
-    parts = [(p.name, p.time, p.minutes, p.registered, p.pending, p.from_gallery, p.not_seen, stat(p.photo)) for p in people]
+    parts = [(p.name, p.time, p.minutes, p.registered, p.pending, p.from_gallery, p.not_seen, p.wfh_pending, stat(p.photo)) for p in people]
     parts += [stat(background), LOOK]
     return hashlib.sha256(repr(parts).encode()).hexdigest()
 

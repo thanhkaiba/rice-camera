@@ -266,6 +266,13 @@ class AttendanceService:
         report = self.report(day)
         return report.not_seen if report.workday else []
 
+    def pending_wfh(self, day: dt.date) -> dict[str, str]:
+        """People with a work-from-home request on Base for `day` that nobody has approved yet: {id: hours}."""
+        snapshot = json.loads(self.store.get(f"base_timeoffs:{day}") or "{}")
+        ids = {e.base_username: e.id for e in self.store.all_employees() if e.base_username}
+        return {ids[username]: entry["shift"] for username, entries in snapshot.items() if username in ids
+                for entry in entries if entry.get("kind") == "WFH" and not entry.get("approved")}
+
     def late_text(self, day: dt.date, preview: bool = False) -> str | None:
         """'Morning, coming late today: @A (10:15), and @B (10:32)'. With preview=True names are
         shown as @Name instead of Google Chat mention codes. A message about another day than
@@ -317,9 +324,10 @@ class AttendanceService:
                 from_gallery = photo is not None
             items.append(latephoto.Person(self.chat_name(a.employee_id, a.name), a.time, minutes_late(a, w), photo,
                                           a.registered, from_gallery, a.pending))
+        wfh = self.pending_wfh(day) if missing else {}
         for employee_id, name in missing:
             items.append(latephoto.Person(self.chat_name(employee_id, name), "", 0, self.best_reference_photo(employee_id),
-                                          from_gallery=True, not_seen=True))
+                                          from_gallery=True, not_seen=True, wfh_pending=wfh.get(employee_id, "")))
         if not any(p.photo for p in items):  # nobody on camera and no reference photos: nothing to show
             latephoto.remove(data_dir, day)
             return None

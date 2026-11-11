@@ -722,3 +722,28 @@ def test_people_not_seen_start_a_row_of_their_own():
     assert [[p.name for p in row] for row in rows] == [["L0", "L1", "L2"], ["N0", "N1", "N2", "N3"], ["N4", "N5", "N6"]]
     assert latephoto.rows_of(missing[:2]) == [missing[:2]]
     assert latephoto.compose(late + missing, "t")[:2] == b"\xff\xd8"
+
+
+def test_people_not_seen_with_a_pending_wfh_request_get_their_own_row(core, monkeypatch):
+    import json
+
+    from attendance.core import latephoto
+
+    app, clock, _ = core
+    clock.t = at(10, 40)
+    late(app, "A", 10, 5)
+    with app.store._db:
+        app.store._db.execute("UPDATE employees SET base_username = 'carol' WHERE id = 'C'")
+        app.store._db.execute("UPDATE employees SET base_username = 'bob' WHERE id = 'B'")
+    app.store.put(f"base_timeoffs:{DAY}", json.dumps({
+        "carol": [{"kind": "WFH", "absence": True, "approved": False, "shift": "9:00-13:00", "approvers": ["boss"]}],
+        "bob": [{"kind": "Coming late", "absence": False, "approved": False, "shift": "9:00-09:30"}]}))
+    assert app.service.pending_wfh(DAY) == {"C": "9:00-13:00"}
+    drawn = []
+    monkeypatch.setattr(latephoto, "write", lambda data_dir, day, people, *a: drawn.append(people) or "late/x.jpg")
+    monkeypatch.setattr(app.service, "best_reference_photo", lambda emp: app.data_dir / "x.jpg")
+    app.cfg.late_message.include_not_seen = True
+    app.service.late_photo(DAY)
+    rows = latephoto.rows_of(drawn[-1])
+    assert [[(p.name, p.lines()) for p in row] for row in rows] == [
+        [("Alice", ["10:05  +5 min"])], [("Bob", ["Not seen"])], [("Carol", ["Not seen", "WFH pending 9:00-13:00"])]]
