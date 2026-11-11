@@ -590,6 +590,16 @@ def layout(n: int) -> tuple[int, int]:
     return rows, math.ceil(n / rows)
 
 
+def rows_of(people: list[Person]) -> list[list[Person]]:
+    """The late people in rows, then the people not seen in rows of their own below them."""
+    rows = []
+    for group in ([p for p in people if not p.not_seen], [p for p in people if p.not_seen]):
+        if group:
+            count, per_row = layout(len(group))
+            rows += [group[r * per_row:(r + 1) * per_row] for r in range(count)]
+    return rows
+
+
 def compose(people: list[Person], title: str, background: Path | None = None, seed: int = 0) -> bytes:
     """Everyone's card in rows on the background, each with a name tag, as JPEG."""
     import cv2
@@ -598,7 +608,8 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
 
     if not people:
         raise ValueError("nobody to show")
-    rows, per_row = layout(len(people))
+    lines = rows_of(people)
+    rows, per_row = len(lines), max(len(row) for row in lines)
     slot = CARD_W + GAP
     width = max(MIN_WIDTH, 2 * MARGIN + per_row * slot)
     tag_h = TAG_H3 if any(p.registered for p in people) else TAG_H
@@ -607,7 +618,7 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
     canvas = load_background(background, width, height, seed)
     top = TOP + (height - TOP - BOTTOM - (rows * row_h - ROW_GAP)) // 2  # centre the rows below the banner
     for r in range(rows):
-        row = people[r * per_row:(r + 1) * per_row]
+        row = lines[r]
         left = (width - len(row) * slot) // 2 + GAP // 2  # a short last row is centred too
         y = top + r * row_h
         for i, person in enumerate(row):
@@ -629,7 +640,7 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
 
 # files --------------------------------------------------------------------------------------
 
-LOOK = 7  # raise when the drawing changes, so pictures already made are made again
+LOOK = 8  # raise when the drawing changes, so pictures already made are made again
 
 
 def fingerprint(people: list[Person], background: Path | None) -> str:

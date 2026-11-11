@@ -711,3 +711,14 @@ def test_a_picture_of_only_people_not_seen(core, monkeypatch):
     assert rel and cv2.imread(str(app.data_dir / rel)) is not None
     app.cfg.late_message.include_not_seen = False
     assert app.service.late_photo(DAY) is None
+
+
+def test_people_not_seen_start_a_row_of_their_own():
+    from attendance.core import latephoto
+
+    late = [latephoto.Person(f"L{i}", "10:00", 5, None) for i in range(3)]
+    missing = [latephoto.Person(f"N{i}", "", 0, None, not_seen=True) for i in range(7)]
+    rows = latephoto.rows_of(late + missing)
+    assert [[p.name for p in row] for row in rows] == [["L0", "L1", "L2"], ["N0", "N1", "N2", "N3"], ["N4", "N5", "N6"]]
+    assert latephoto.rows_of(missing[:2]) == [missing[:2]]
+    assert latephoto.compose(late + missing, "t")[:2] == b"\xff\xd8"
