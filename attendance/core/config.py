@@ -227,6 +227,7 @@ class LateMessageConfig:
 class CameraApiConfig:
     url: str = ""  # Apps Script web app /exec URL; empty disables reporting
     key: str = field(default="", repr=False)  # CAMERA_SECRET, sent as secret in the JSON body
+    send_at: str = ""  # empty: camera window_end; otherwise start reporting at this local time
 
 
 @dataclass
@@ -443,6 +444,16 @@ class Config:
             raise ValueError("unknown_batch_minutes must not be negative")
         self.camera_api.url = self.camera_api.url.strip()
         self.camera_api.key = self.camera_api.key.strip()
+        if str(self.camera_api.send_at).strip():
+            try:
+                send_time = parse_clock(self.camera_api.send_at)
+            except (TypeError, ValueError):
+                raise ValueError("camera_api.send_at must be HH:MM") from None
+            if send_time <= late:
+                raise ValueError("camera_api.send_at must be after schedule.late_after (On time through)")
+            self.camera_api.send_at = send_time.strftime("%H:%M")
+        else:
+            self.camera_api.send_at = ""
         url = urlsplit(self.camera_api.url)
         if self.camera_api.url and (url.scheme != "https" or not url.hostname or url.username or url.password or url.fragment):
             raise ValueError("camera_api.url must be an HTTPS server URL without credentials or fragment")

@@ -47,6 +47,61 @@ def test_camera_api_waits_until_end_and_remembers_delivery(core, monkeypatch):
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize('hour,minute', [(10, 30), (12, 0)])
+def test_camera_api_uses_its_own_send_time_before_or_after_camera_end(core, monkeypatch, hour, minute):
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [result()])
+    settings.save(app.cfg, app.store, {'camera_api': {'send_at': f'{hour:02d}:{minute:02d}'}})
+    app.service.on_identified('A', at(10, 12), .9, None)
+    clock.t = at(hour, minute) - dt.timedelta(seconds=1)
+    waiting = app.camera_sync.sync()
+    assert not calls
+    assert f'{hour:02d}:{minute:02d}' in waiting['message']
+    clock.t = at(hour, minute)
+    assert app.camera_sync.sync()['ok'] is True
+    app.camera_sync.sync()
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('send_at', ['25:00', 'not-a-time', '09:30', '10:00'])
+def test_camera_api_refuses_invalid_send_time_without_saving(core, send_at):
+    app, _, _ = core
+    before = app.store.get(settings.KEY)
+    with pytest.raises(ValueError, match='camera_api.send_at'):
+        settings.save(app.cfg, app.store, {'camera_api': {'send_at': send_at}})
+    assert app.store.get(settings.KEY) == before
+
+
+def test_camera_api_send_time_saved_on_page_survives_restart_and_can_follow_camera_end(core):
+    from attendance.core.config import Config
+
+    app, _, _ = core
+    client = create_app(app).test_client()
+    response = client.post('/settings', data={'camera_api.send_at': '12:30'}, follow_redirects=True)
+    assert response.status_code == 200
+    assert app.cfg.camera_api.send_at == '12:30'
+    cfg = Config()
+    settings.load(cfg, app.store)
+    assert cfg.camera_api.send_at == '12:30'
+    client.post('/settings', data={'camera_api.send_at': ''})
+    assert app.cfg.camera_api.send_at == ''
+
+
+def test_manual_camera_api_honors_saved_send_time(core, monkeypatch):
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [result()])
+    settings.save(app.cfg, app.store, {'camera_api': {'send_at': '12:30'}})
+    app.service.on_identified('A', at(10, 12), .9, None)
+    client = create_app(app).test_client()
+    clock.t = at(11, 0)
+    response = client.post('/settings/send-camera-api', follow_redirects=True)
+    assert '12:30' in response.get_data(as_text=True)
+    assert not calls
+    clock.t = at(12, 30)
+    client.post('/settings/send-camera-api')
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize('response', [OSError('offline'), {'ok': False}, {'ok': True, 'results': []},
                                      {'ok': True, 'results': [{'status': 'created'}]}])
 def test_camera_api_retries_incomplete_delivery_after_restart(core, monkeypatch, response):
@@ -131,6 +186,73 @@ def test_camera_api_waits_for_base_snapshot(core, monkeypatch):
     assert 'Waiting for HR' in app.camera_sync.status()['message']
 
 
+def test_camera_api_partial_delivery_keeps_blocked_day_visible(core, monkeypatch):
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [result()])
+    previous = DAY - dt.timedelta(days=1)
+    app.store.record_checkin(previous, 'B', at(10, 15, day=previous), 'camera', .9, None)
+    app.store.record_checkin(DAY, 'A', at(10, 12), 'camera', .9, None)
+    app.cfg.base_api_key = 'test-base-key'
+    for person in app.store.all_employees():
+        app.store.update_employee(person.id, person.name, True, base_username=person.id.lower())
+    clock.t = at(11, 0)
+    app.store.put(f'base_timeoffs:{DAY}', '{}')
+    app.store.put('leave_sync', json.dumps({'ok': True, 'day': str(DAY), 'last_success': clock.t.isoformat()}))
+
+    outcome = app.camera_sync.sync()
+    assert len(calls) == 1
+    assert app.store.notice_sent(DAY, 'camera_api:alice@example.com')
+    assert not app.store.notice_sent(previous, 'camera_api:bob@example.com')
+    assert outcome['ok'] is False
+    assert '1 processed' in outcome['message'] and 'Waiting for HR' in outcome['message']
+    assert str(previous) in outcome['message']
+    assert app.camera_sync.status() == outcome
+
+
+def test_camera_api_does_not_send_provisional_report_if_base_refreshes_during_report(core, monkeypatch):
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [result()])
+    app.cfg.base_api_key = 'test-base-key'
+    for person in app.store.all_employees():
+        app.store.update_employee(person.id, person.name, True, base_username=person.id.lower())
+    app.store.record_checkin(DAY, 'A', at(10, 12), 'camera', .9, None)
+    clock.t = at(11, 0)
+    report = app.service.report
+
+    def report_while_base_refreshes(day):
+        provisional = report(day)
+        if day == DAY:
+            app.store.put(f'base_timeoffs:{DAY}', json.dumps({'a': [
+                {'kind': 'Holiday', 'shift': 'Full day', 'approved': True, 'absence': True}]}))
+            app.store.put('leave_sync', json.dumps({'ok': True, 'day': str(DAY),
+                                                  'last_success': clock.t.isoformat()}))
+        return provisional
+
+    monkeypatch.setattr(app.service, 'report', report_while_base_refreshes)
+    assert app.camera_sync.sync()['ok'] is False
+    assert not calls
+    assert app.camera_sync.sync()['ok'] is True
+    assert not calls
+
+
+@pytest.mark.parametrize('state', ['empty', 'on_time', 'delivered'])
+def test_camera_api_does_not_require_base_without_unsent_events(core, monkeypatch, state):
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [])
+    app.cfg.base_api_key = 'test-base-key'
+    clock.t = at(11, 0)
+    if state != 'empty':
+        app.store.record_checkin(DAY, 'A', at(9, 0) if state == 'on_time' else at(10, 12), 'camera', .9, None)
+    if state == 'delivered':
+        app.store.mark_notice(DAY, 'camera_api:alice@example.com', clock.t)
+
+    outcome = app.camera_sync.sync()
+    assert not calls
+    assert outcome['ok'] is True
+    assert 'No unsent late arrivals' in outcome['message']
+    assert 'Waiting for HR' not in app.camera_sync.status().get('message', '')
+
+
 def test_camera_api_batch_limit_and_mixed_results(core, monkeypatch):
     app, clock, _ = core
     from attendance.integrations import camera_api
@@ -163,6 +285,86 @@ def test_camera_api_ping_uses_unsaved_fields_without_creating_fines(core, monkey
                                                   'camera_api.key': 'new-key'})
     assert calls == [('https://other.example/exec', {'action': 'camera.ping', 'secret': 'new-key'})]
     assert app.cfg.camera_api.key == 'camera-test-secret'
+
+
+def test_manual_camera_api_sends_saved_settings_and_does_not_resend(core, monkeypatch):
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [result()])
+    app.service.on_identified('A', at(10, 12), .9, None)
+    clock.t = at(11, 0)
+    client = create_app(app).test_client()
+    response = client.post('/settings/send-camera-api', data={
+        'camera_api.url': 'https://unsaved.example/exec', 'camera_api.key': 'unsaved-secret'},
+        follow_redirects=True)
+    assert response.status_code == 200
+    assert '1 processed, 0 rejected' in response.get_data(as_text=True)
+    assert calls[0][0] == 'https://script.google.com/macros/s/test/exec'
+    assert calls[0][1] == {'action': 'camera.late', 'secret': 'camera-test-secret', 'events': [
+        {'email': 'alice@example.com', 'date': DAY.isoformat(), 'arrivedAt': '10:12', 'lateMinutes': 12}]}
+    again = client.post('/settings/send-camera-api', follow_redirects=True)
+    assert 'No unsent late arrivals' in again.get_data(as_text=True)
+    assert len(calls) == 1
+    assert any(action == 'send camera API' for _, _, action, _ in app.store.audit())
+
+
+@pytest.mark.parametrize('state,expected', [
+    ('unconfigured', 'Save the Camera API URL and key'),
+    ('before_end', 'after scheduled send time 11:00'),
+    ('no_late', 'No unsent late arrivals'),
+    ('missing_base', 'Waiting for HR leave data'),
+    ('offline', 'Delivery failed'),
+    ('rejected', '0 processed, 1 rejected'),
+])
+def test_manual_camera_api_explains_why_nothing_was_sent(core, monkeypatch, state, expected):
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [OSError('offline') if state == 'offline' else result('rejected')])
+    clock.t = at(11, 0)
+    if state != 'no_late':
+        app.service.on_identified('A', at(10, 12), .9, None)
+    if state == 'unconfigured':
+        app.cfg.camera_api.key = ''
+    elif state == 'before_end':
+        clock.t = at(10, 30)
+    elif state == 'missing_base':
+        app.cfg.base_api_key = 'base-test-key'
+    response = create_app(app).test_client().post('/settings/send-camera-api', follow_redirects=True)
+    assert response.status_code == 200
+    assert expected in response.get_data(as_text=True)
+    if state not in ('offline', 'rejected'):
+        assert not calls
+    else:
+        assert not app.store.notice_sent(DAY, 'camera_api:alice@example.com')
+
+
+def test_camera_api_serializes_manual_and_automatic_delivery(core, monkeypatch):
+    app, clock, _ = core
+    from attendance.integrations import camera_api
+    connect(app, monkeypatch, [])
+    app.service.on_identified('A', at(10, 12), .9, None)
+    clock.t = at(11, 0)
+    nested = []
+
+    def post(url, payload):
+        nested.append(app.camera_sync.sync())
+        return result()
+
+    monkeypatch.setattr(camera_api, 'post', post)
+    assert app.camera_sync.sync()['ok'] is True
+    assert len(nested) == 1 and nested[0]['ok'] is False
+    assert 'already running' in nested[0]['message']
+
+
+def test_manual_camera_api_is_admin_only(core, monkeypatch):
+    app, _, _ = core
+    calls = connect(app, monkeypatch, [])
+    app.cfg.web.password = 'admin-password'
+    app.cfg.web.viewer_password = 'viewer-password'
+    app.cfg.web.viewer_username = 'viewer'
+    client = create_app(app).test_client()
+    assert client.post('/settings/send-camera-api').status_code == 401
+    response = client.post('/settings/send-camera-api', auth=('viewer', 'viewer-password'))
+    assert response.status_code == 403
+    assert not calls
 
 
 def test_camera_api_rejected_event_can_be_corrected(core, monkeypatch):

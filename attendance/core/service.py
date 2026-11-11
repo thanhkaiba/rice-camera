@@ -275,10 +275,11 @@ class AttendanceService:
                 for entry in entries if entry.get("kind") == "WFH" and not entry.get("approved")}
 
     def late_text(self, day: dt.date, preview: bool = False) -> str | None:
-        """'Morning, coming late today: @A (10:15), and @B (10:32)'. With preview=True names are
-        shown as @Name instead of Google Chat mention codes. A message about another day than
-        today starts with that day. Expected people without an arrival appear on a separate
-        Not seen line, those with a work-from-home request still pending on a line of their own."""
+        """List each person on their own line, grouped by late arrivals, not seen, and not seen with a
+        work-from-home request still pending on Base.
+
+        Preview uses @Name instead of Chat mention codes; past reports start with their date.
+        """
         people = self.late_people(day)
         missing = self.not_seen_people(day)
         if not people and not missing:
@@ -290,20 +291,23 @@ class AttendanceService:
                                 registered=f", {'request pending' if a.pending else 'registered'} {a.registered}"
                                 if a.registered else "")
                  for a in people]
-        lines = []
+        sections = []
         if items:
-            joined = items[0] if len(items) == 1 else ", ".join(items[:-1]) + ", and " + items[-1]
-            lines.append(f"{lm.intro} {joined}")
+            lines = [f"Late arrivals ({len(items)}):", *(f"• {item}" for item in items)]
+            if lm.intro.strip():
+                lines.insert(0, lm.intro.strip())
+            sections.append("\n".join(lines))
         who = lambda emp, name: f"@{self.chat_name(emp, name)}" if preview else self.mention(emp)  # noqa: E731
         wfh = self.pending_wfh(day) if missing else {}
         plain = [(emp, name) for emp, name in missing if emp not in wfh]
         waiting = [(emp, name) for emp, name in missing if emp in wfh]
         if plain:
-            lines.append("Not seen: " + ", ".join(who(emp, name) for emp, name in plain))
+            sections.append(f"Not seen ({len(plain)}):\n" + "\n".join(f"• {who(emp, name)}" for emp, name in plain))
         if waiting:  # their work-from-home request is still waiting for approval on Base
-            lines.append("Not seen, WFH pending: " + ", ".join(f"{who(emp, name)} ({wfh[emp]})" for emp, name in waiting))
+            sections.append(f"Not seen, WFH pending ({len(waiting)}):\n" + "\n".join(
+                f"• {who(emp, name)} ({wfh[emp]})" for emp, name in waiting))
         prefix = "" if day == self.now().date() else f"{day:%A %d %b}: "
-        return prefix + "\n".join(lines)
+        return prefix + "\n\n".join(sections)
 
     def late_photo(self, day: dt.date) -> str | None:
         """One picture of the day's late people (the whole person as the camera saw them, or their

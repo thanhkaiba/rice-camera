@@ -21,6 +21,29 @@ Một endpoint duy nhất, `POST`, body là JSON.
 
 ### Kiểm tra kết nối
 
+Trong ứng dụng camera, vào **Settings → HR system → Camera API · Late fines**:
+
+- Nhập **Server URL** và **Camera key** (`CAMERA_SECRET`), bấm **Save** để lưu.
+- **Send at**: giờ bắt đầu gửi hằng ngày, theo múi giờ ứng dụng. Để trống = giờ **Camera stops**.
+  Có thể đặt sớm hoặc muộn hơn giờ camera dừng, nhưng phải sau **On time through**.
+  Ví dụ: đúng giờ đến hết 09:30, camera chạy tới 18:00, đặt **Send at = 10:30** để bắt đầu gửi lúc 10:30.
+  Sau mốc này, người đến muộn mới được gửi ở lượt kiểm tra tiếp theo (khoảng mỗi 30 giây).
+- **Test connection** chỉ gọi `camera.ping`, không tạo phạt; dùng được với URL/key vừa nhập trước khi lưu.
+- **Send now** gửi ngay các báo cáo đủ điều kiện bằng URL/key đã lưu, gồm hôm nay và 7 ngày trước.
+  Vẫn chờ tới giờ **Send at** của ngày báo cáo, kiểm tra dữ liệu nghỉ phép và không gửi lại sự kiện đã xử lý.
+  Kết quả hiển thị số sự kiện đã xử lý/bị từ chối hoặc lý do chưa gửi; nút này có thể tạo khoản phạt thật.
+
+Cũng có thể cấu hình trong `config.yaml` rồi khởi động lại ứng dụng:
+
+```yaml
+camera_api:
+  url: "https://script.google.com/macros/s/DEPLOYMENT_ID/exec"
+  key: "CAMERA_SECRET_DO_BEN_NHAN_CUNG_CAP"
+  send_at: ""  # ví dụ "10:30"; để trống dùng giờ Camera stops
+```
+
+Giá trị đã lưu trong Settings ưu tiên hơn `config.yaml` theo từng trường.
+
 ```bash
 curl -L "$URL" -H 'Content-Type: text/plain' \
   -d '{"action":"camera.ping","secret":"<CAMERA_SECRET>"}'

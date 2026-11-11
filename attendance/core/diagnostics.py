@@ -14,6 +14,8 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
 if TYPE_CHECKING:
     from .config import Config
     from ..store import Store
@@ -21,14 +23,14 @@ if TYPE_CHECKING:
 LOG_TAIL_BYTES = 2_000_000
 DAYS = 30
 HIDDEN = "***"
-SECRET_FIELDS = {"password", "viewer_password", "token", "webhook_url", "system_webhook_url", "healthcheck_url", "base_api_key", "access_token_v2"}
+SECRET_FIELDS = {"password", "viewer_password", "token", "key", "webhook_url", "system_webhook_url", "healthcheck_url", "base_api_key", "access_token_v2"}
 
 _SECRETS = [
     (re.compile(r"(?i)\b(key|token|secret|password|access_token|access_token_v2|base_api_key)=([^&\s\"'<>]+)"), rf"\1={HIDDEN}"),
     (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)([^/\s:@\"']+):([^@\s\"']+)@"), rf"\1\2:{HIDDEN}@"),  # rtsp://user:pass@
     (re.compile(r"(?i)(hc-ping\.com/)[\w-]+"), rf"\1{HIDDEN}"),
     (re.compile(r"(?i)(bearer\s+)[\w.~+/=-]+"), rf"\1{HIDDEN}"),
-    (re.compile(r"(?im)^(\s*(?:password|viewer_password|token|webhook_url|system_webhook_url|healthcheck_url|base_api_key|access_token_v2)\s*:\s*).+$"), rf"\1{HIDDEN}"),
+    (re.compile(r"(?im)^(\s*(?:password|viewer_password|token|key|webhook_url|system_webhook_url|healthcheck_url|base_api_key|access_token_v2)\s*:\s*).+$"), rf"\1{HIDDEN}"),
 ]
 
 
@@ -43,7 +45,7 @@ def redact_settings(value, name: str = ""):
     if isinstance(value, dict):
         return {k: redact_settings(v, k) for k, v in value.items()}
     if name in SECRET_FIELDS and value:
-        return HIDDEN if name in ("password", "viewer_password", "token", "base_api_key", "access_token_v2") else redact(re.sub(r"\?.*", f"?{HIDDEN}", str(value)))
+        return HIDDEN if name in ("password", "viewer_password", "token", "key", "base_api_key", "access_token_v2") else redact(re.sub(r"\?.*", f"?{HIDDEN}", str(value)))
     return redact(value) if isinstance(value, str) else value
 
 
@@ -92,7 +94,14 @@ def build(cfg: "Config", store: "Store", config_path: Path | None = None, status
         add_json("system.json", {**system_info(), "created": now.isoformat(), "data_dir": str(data)})
         config_file = config_path or cfg.base_dir / "config.yaml"
         if config_file.exists():
-            add("config.yaml", redact(config_file.read_text(encoding="utf-8", errors="replace")))
+            try:
+                config_data = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+                if not isinstance(config_data, dict):
+                    raise ValueError("expected settings mapping")
+            except (OSError, UnicodeError, ValueError, yaml.YAMLError):
+                add("config.yaml", "# Configuration omitted: unreadable or invalid YAML.\n")
+            else:
+                add("config.yaml", yaml.safe_dump(redact_settings(config_data), sort_keys=False, allow_unicode=True))
         try:
             saved = json.loads(store.get(settings.KEY) or "{}")
         except ValueError:

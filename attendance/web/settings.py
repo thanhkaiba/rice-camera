@@ -415,6 +415,15 @@ def register(app: Flask, core: "App") -> None:
             return failed(str(exc), "settings_page")
         return done("Camera API connected. No fines created by this test.", "settings_page")
 
+    @app.post("/settings/send-camera-api")
+    def send_camera_api():
+        try:
+            result = core.camera_sync.sync()
+        except Exception:
+            return failed("Camera API could not prepare the report; check attendance and leave data.", "settings_page")
+        store.log(service.now(), current_user(cfg), "send camera API", result["message"])
+        return (done if result["ok"] else failed)(result["message"], "settings_page")
+
     # Google Chat API (the late message with its picture) -----------------------------------
 
     def google_redirect() -> str:

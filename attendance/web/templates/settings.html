@@ -4,10 +4,10 @@
   {%- if key in overrides %}<span class="hint override" title="Saved on this page; it wins over config.yaml">Overrides config.yaml ({{ overrides[key] }})
     <button class="link" formaction="{{ url_for('reset_setting') }}" formnovalidate name="reset" value="{{ key }}">Use config.yaml</button></span>{% endif -%}
 {% endmacro %}
-{% macro field(section, name, label, help='', type='text', step='', cls='') %}
+{% macro field(section, name, label, help='', type='text', step='', cls='', placeholder='') %}
   {% set key = section ~ '.' ~ name if section else name %}
   <label class="field {{ cls }}">{{ label }}
-    <input name="{{ key }}" type="{{ type }}" value="{{ s[section][name] }}" {% if step %}step="{{ step }}"{% endif %}>
+    <input name="{{ key }}" type="{{ type }}" value="{{ s[section][name] }}" {% if step %}step="{{ step }}"{% endif %} {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}>
     {% if help %}<span class="hint">{{ help }}</span>{% endif %}{{ src(key) }}
   </label>
 {% endmacro %}
@@ -122,7 +122,7 @@
 
     <hr>
     <h2 class="row">{{ icon('send') }}Daily late message</h2>
-    <p class="hint" style="margin-top:0">Lists late arrivals with their times and expected people without an arrival on a separate "Not seen" line. Leave and exemptions are excluded. Mentions need each person's Chat ID (People page).</p>
+    <p class="hint" style="margin-top:0">Groups late arrivals and people not seen, with a count and one person per line. Leave and exemptions are excluded. Mentions need each person's Chat ID (People page).</p>
     <div class="stack">{{ check('late_message', 'enabled', 'Post the daily late message') }}
       {{ check('late_message', 'include_not_seen', 'Include not seen employees', 'Off: only late arrivals are listed. Applies to automatic messages, preview and Send.') }}</div>
     <div class="form-row">
@@ -391,15 +391,21 @@
       {% if leave.enabled %}<button formaction="{{ url_for('leave_sync') }}">{{ icon('refresh') }}Load now</button>{% endif %}
     </div>
     <h3 style="margin:22px 0 8px">Camera API · Late fines</h3>
-    <p class="hint">Reports late arrivals after camera hours, using the same attendance and Base leave rules as Today.
+    <p class="hint">Reports late arrivals from the send time below, using the same attendance and Base leave rules as Today.
       Creates fines on the server. Retries the last 7 days every 30 seconds; weekends are excluded.
       Empty URL disables reporting. Each field can override config.yaml separately.</p>
     <div class="form-row">
-      {{ field('camera_api', 'url', 'Server URL', 'Apps Script web app URL ending in /exec', type='url', cls='grow') }}
+      {{ field('camera_api', 'url', 'Server URL', 'Apps Script web app URL ending in /exec', type='url', cls='grow', placeholder='https://script.google.com/macros/s/DEPLOYMENT_ID/exec') }}
       <label class="field">Camera key<input name="camera_api.key" type="password" autocomplete="off"
-        placeholder="{{ 'saved · leave empty to keep' if s.camera_api.key else 'none' }}">{{ src('camera_api.key') }}</label>
+        placeholder="{{ 'saved · leave empty to keep' if s.camera_api.key else 'CAMERA_SECRET from the receiving app' }}">{{ src('camera_api.key') }}</label>
       <button formaction="{{ url_for('test_camera_api') }}" formnovalidate>Test connection</button>
+      <button formaction="{{ url_for('send_camera_api') }}" formnovalidate
+              onclick="return confirm('Send unsent late arrivals for today and the previous 7 days using saved settings? This can create real fines.')">Send now</button>
     </div>
+    <div class="form-row">
+      {{ time24('camera_api', 'send_at', 'Send at', 'Leave empty to use Camera stops (' ~ s.schedule.window_end ~ '). Must be after On time through. Can be before the camera stops.', required=false) }}
+    </div>
+    <p class="hint">Save the URL, key and send time before sending. Send now checks unsent reports immediately; the saved send time, HR leave checks and duplicate protection still apply. New late arrivals after that time are sent on the next check.</p>
     {% if camera_api_status %}<p class="hint">{{ camera_api_status.at }} ·
       {{ 'OK' if camera_api_status.ok else 'Needs attention' }} · {{ camera_api_status.message }}</p>{% endif %}
     <p class="hint">Rejected events are listed in Audit. Correct their data to retry. Successful fines cannot be undone here; cancel them on the server.</p>
