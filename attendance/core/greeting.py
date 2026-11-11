@@ -315,7 +315,12 @@ class Greeter:
         """Asked from the server's Settings page: a fixed sentence, then, with a key, Claude is asked right
         away for one person's greetings in each language people are greeted in, and they are said. Works
         outside the morning hours and with greetings off, so the key and the model can be checked any time;
-        what Claude writes here is not kept."""
+        what Claude writes here is not kept. The result, with how long Claude took, also goes to the log."""
+        result = self._say_test()
+        log.log(logging.INFO if result["ok"] else logging.WARNING, "Test greeting: %s", result["message"])
+        return result
+
+    def _say_test(self) -> dict:
         try:
             self._speak(TEST_TEXT, "vi")
         except Exception as exc:
@@ -324,19 +329,23 @@ class Greeter:
         if not s.key:
             return {"ok": True, "message": f"{TEST_TEXT} · Claude: no API key, built-in greetings are used"}
         people = self._test_people()
+        started = time.monotonic()
         try:
             written = self._write(people, self.now().date())
         except Exception as exc:
-            return {"ok": False, "message": f"{TEST_TEXT} · Claude ({s.model}) failed: {type(exc).__name__}: {str(exc)[:200]}"}
+            took = time.monotonic() - started
+            return {"ok": False, "message": f"{TEST_TEXT} · Claude ({s.model}) failed after {took:.1f} s: "
+                                           f"{type(exc).__name__}: {str(exc)[:200]}"}
+        claude = f"Claude ({s.model}, {time.monotonic() - started:.1f} s)"
         lines = [(random.choice(written[p.id]["on_time"]), p.greet_language) for p in people if p.id in written]
         if not lines:
-            return {"ok": False, "message": f"{TEST_TEXT} · Claude ({s.model}) answered without a greeting"}
+            return {"ok": False, "message": f"{TEST_TEXT} · {claude} answered without a greeting"}
         try:
             for text, language in lines:
                 self._speak(text, language)
         except Exception as exc:
-            return {"ok": False, "message": f"Claude ({s.model}) works, could not speak: {type(exc).__name__}: {exc}"[:300]}
-        return {"ok": True, "message": f"Claude ({s.model}) works: " + " ".join(text for text, _ in lines)}
+            return {"ok": False, "message": f"{claude} works, could not speak: {type(exc).__name__}: {exc}"[:300]}
+        return {"ok": True, "message": f"{claude} works: " + " · ".join(text for text, _ in lines)}
 
     def _test_people(self) -> list:
         """One person per language people are greeted in, picked at random; a stand-in when nobody is greeted."""

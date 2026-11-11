@@ -1,5 +1,6 @@
 """The greeting at the door: spoken once a day per person, late or on time by the server's rules, never in the camera's way."""
 import json
+import re
 import time
 
 from attendance import server
@@ -261,7 +262,7 @@ def test_the_test_greeting_asks_claude_any_time(core):
     app.cfg.greeting.key = "k"
     said.clear()
     result = g.say_test()
-    assert result["ok"] and result["message"].startswith(f"Claude ({app.cfg.greeting.model}) works: Chào ")
+    assert result["ok"] and re.match(rf"Claude \({app.cfg.greeting.model}, \d+\.\d s\) works: Chào ", result["message"])
     assert said[0] == greeting.TEST_TEXT and len(said) == 2 and len(asked[0]) == 1
     assert g.lines(clock.t.date()) == {}  # a test writes nothing for the day
 
@@ -270,7 +271,7 @@ def test_the_test_greeting_says_why_claude_failed(core):
     app, clock, g, said, asked = make(core, fail=True)
     app.cfg.greeting.key = "k"
     result = g.say_test()
-    assert not result["ok"] and "failed: ConnectionError: no network" in result["message"]
+    assert not result["ok"] and re.search(r"failed after \d+\.\d s: ConnectionError: no network", result["message"])
     assert said == [greeting.TEST_TEXT]
 
 
