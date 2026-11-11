@@ -130,6 +130,11 @@ class AttendanceStoreMixin:
             for r in rows
         }
 
+    def first_days(self) -> dict[str, dt.date]:
+        """employee_id -> the first day they arrived, for everyone who ever has."""
+        rows = self._all("SELECT employee_id, MIN(day) AS first FROM checkins GROUP BY employee_id")
+        return {r["employee_id"]: dt.date.fromisoformat(r["first"]) for r in rows}
+
     def checkins_between(self, start: dt.date, end: dt.date) -> list[tuple[dt.date, Checkin]]:
         rows = self._all("SELECT * FROM checkins WHERE day BETWEEN ? AND ? ORDER BY day",
                          (start.isoformat(), end.isoformat()))

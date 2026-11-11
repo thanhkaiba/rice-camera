@@ -92,6 +92,10 @@ class App:
         self.greeter = Greeter(cfg, self.store, self.service.now, lambda d: self.service.window(d).late_from)
         self.edge.on_rules = self.greeter.set_rules
         self.edge.on_say = self.greeter.say_test
+        if not self.edge.enabled:  # on its own: the day's leave and holidays are here
+            from .greeting import rules_for
+
+            self.greeter.local_rules = lambda day: rules_for(self.service, day)
         self.photos_read_elsewhere = False  # the server: no face models there, the Mac reads uploaded photos
         send, kick = self.chat.send, self.chat.kick
         self.chat.send = lambda *a, **k: None if self.edge.following else send(*a, **k)

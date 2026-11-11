@@ -116,7 +116,7 @@ def test_rules_from_base_requests(core):
     app, clock, _ = core
     app.store.put(f"base_timeoffs:{DAY}", "{}")
     rules = rules_for(app.service, DAY)
-    assert rules == {"day": DAY.isoformat(), "workday": True, "people": {}}
+    assert rules == {"day": DAY.isoformat(), "workday": True, "people": {}, "day_notes": [], "notes": {}}
 
 
 def test_honorifics_are_set_on_the_server_and_reach_the_mac(live, tmp_path):  # noqa: F811
@@ -342,3 +342,50 @@ def test_a_spoken_greeting_is_remembered_and_no_weather_does_not_stop_the_writin
 
     monkeypatch.setattr("attendance.integrations.weather.place", broken)
     assert "Weather" not in g.day_context(DAY) and g.day_context(DAY).startswith("Today is")
+
+
+def test_long_breaks_are_told_on_the_last_and_the_first_work_day(core):
+    import datetime as dt
+
+    from attendance.core.greeting import day_notes
+
+    app, clock, _ = core
+    friday = DAY + dt.timedelta(days=2)  # DAY is a Wednesday
+    app.store.set_calendar_day(friday + dt.timedelta(days=3), "holiday", "Nghỉ bù")  # Monday off: 3 days
+    assert day_notes(app.service, friday) == ["Today is the last work day before 3 days off (Nghỉ bù); work starts again on 20/10."]
+    assert day_notes(app.service, friday + dt.timedelta(days=4)) == ["Today is the first work day after 3 days off (Nghỉ bù)."]
+    assert day_notes(app.service, DAY) == []  # a usual weekend is no long break
+
+
+def test_back_from_leave_and_first_day_are_noticed(core):
+    import datetime as dt
+
+    from attendance.core.greeting import person_notes
+
+    app, clock, _ = core
+    monday, tuesday = DAY - dt.timedelta(days=2), DAY - dt.timedelta(days=1)
+    app.store.add_leave("A", monday, tuesday, "annual")
+    app.store.add_leave("B", tuesday, tuesday, "annual")
+    app.store.record_checkin(tuesday, "B", at(8, 30, day=tuesday), "camera", 0.9, None)  # came after all: not away
+    assert person_notes(app.service, DAY) == {"A": "back at work after 2 work days of leave"}
+    old = DAY - dt.timedelta(days=20)
+    for emp in ("A", "B"):
+        app.store.record_checkin(old, emp, at(8, 30, day=old), "camera", 0.9, None)
+    notes = person_notes(app.service, DAY)  # C never came, and arrivals go back 20 days: C is new
+    assert notes == {"A": "back at work after 2 work days of leave", "C": "their first day at the company"}
+
+
+def test_claude_is_told_what_is_special_today(core):
+    app, clock, g, said, asked = make(core)
+    g.set_rules({"day": DAY.isoformat(), "workday": True, "people": {},
+                 "day_notes": ["Today is the first work day after 9 days off (Tết)."],
+                 "notes": {"A": "back at work after 3 work days of leave"}})
+    system, user, _ = g.prompt([app.store.employee("A"), app.store.employee("B")], DAY)
+    people = json.loads(user.split("People:\n")[1])
+    assert "first work day after 9 days off (Tết)" in user and people[0]["today"].startswith("back at work")
+    assert "today" not in people[1] and "Never say or guess why" in system
+    app.cfg.greeting.key = "k"
+    clock.t = at(8, 0)
+    assert g.write_if_due() and sorted(asked[-1]) == ["A", "B", "C"]
+    g.set_rules({"day": DAY.isoformat(), "workday": True, "people": {}, "notes": {"B": "their first day at the company"}})
+    assert g.write_if_due() and sorted(asked[-1]) == ["A", "B"]  # their note changed: new sentences
