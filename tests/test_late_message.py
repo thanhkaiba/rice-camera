@@ -772,3 +772,11 @@ def test_the_message_lists_people_with_a_pending_wfh_request_on_their_own_line(c
     app.cfg.late_message.include_not_seen = True
     assert app.service.late_text(DAY, preview=True) == (
         "Morning, coming late today: @Alice (10:05)\nNot seen: @Bob\nNot seen, WFH pending: @Carol (9:00-18:00)")
+
+
+def test_the_preview_keeps_the_line_breaks_of_the_message():
+    import pathlib
+    import re
+
+    css = (pathlib.Path(__file__).parents[1] / "attendance/web/static/app.css").read_text()
+    assert "white-space: pre-line" in re.search(r"\.preview-box \{[^}]*\}", css).group(0)
