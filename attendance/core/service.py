@@ -156,6 +156,7 @@ class AttendanceService:
         self.backup = None  # set by the app: the daily backup (backup.Backup)
         self.edge = None  # set by the app when a server is configured: mirrors camera events (edge.EdgeClient)
         self.placement = None  # set by the app: how well the camera sees faces (placement.Placement)
+        self.greeter = None  # set where the camera runs: says hello at the door (greeting.Greeter)
         self._now = now or (lambda: dt.datetime.now(self.tz))
         saved = store.get("last_alive")
         self._last_alive = dt.datetime.fromisoformat(saved) if saved else None
@@ -465,6 +466,11 @@ class AttendanceService:
                                            self.model_id if vector is not None else None, vector, sha256)
         log.info("Identified %s at %s (score %.2f): %s", employee_id, ts.strftime("%H:%M:%S"), score, result)
         if result == "new":
+            if self.greeter is not None:
+                try:
+                    self.greeter.arrived(employee_id, ts)
+                except Exception:  # a greeting never stops the camera
+                    log.exception("Greeting not queued")
             self._announce(employee_id, ts)
 
     def on_unknown(self, ts: dt.datetime, image: str | None, vector: np.ndarray | None,

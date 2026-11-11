@@ -124,6 +124,12 @@
         <label class="field">Name<input name="name" value="{{ person.name }}" required></label>
         <label class="field">Role<select name="role" onchange="document.getElementById('exempt-switch').hidden = this.value === 'support'">{% for value, label in roles.items() %}<option value="{{ value }}" {{ 'selected' if person.role == value }}>{{ label }}</option>{% endfor %}</select>
           <span class="hint">Support staff (cook, cleaner…): camera recognises them and records arrivals, never late or absent, no alerts, no Base username needed.</span></label>
+        <label class="field">Greeting<select name="honorific"><option value="" {{ 'selected' if not person.honorific }}>By name only</option>{% for value, h in honorifics.items() %}<option value="{{ value }}" {{ 'selected' if person.honorific == value }}>{{ h[0] }}</option>{% endfor %}</select>
+          <span class="hint">How the greeting at the door addresses them: “Chào anh Minh”, “Chào chị Lan”.</span></label>
+        <label class="field">Greeting language<select name="greet_language">{% for value, label in languages.items() %}<option value="{{ value }}" {{ 'selected' if person.greet_language == value }}>{{ label }}</option>{% endfor %}</select></label>
+        <input type="hidden" name="greet_shown" value="1">
+        <label class="switch"><input type="checkbox" name="greet" {{ 'checked' if person.greet }}><span>Greet at the door
+          <span class="hint">Untick: the speaker stays silent when they arrive.</span></span></label>
         <label class="field">Base username<input name="base_username" value="{{ person.base_username }}" autocomplete="off">
           <span class="hint">From Base Account; used to match Timeoff requests.</span></label>
         <label class="field">Google Chat user ID<input name="chat_user" value="{{ person.chat_user }}" placeholder="e.g. 112233445566778899000" autocomplete="off">

@@ -13,7 +13,7 @@ from collections import Counter, defaultdict
 import numpy as np
 
 from .schema import (CHAT_COLUMNS, ROLE_EMPLOYEE, ROLE_SUPPORT, Employee, Reference, _blob, _vec, normalize_chat_user,
-                     normalize_email, normalize_role)
+                     normalize_email, normalize_greet_language, normalize_honorific, normalize_role)
 
 
 class EmployeeStoreMixin:
@@ -122,7 +122,8 @@ class EmployeeStoreMixin:
 
     def update_employee(self, employee_id: str, name: str, active: bool, chat_user: str | None = None,
                         exempt: bool | None = None, *, email: str | None = None,
-                        base_username: str | None = None, role: str | None = None) -> None:
+                        base_username: str | None = None, role: str | None = None, honorific: str | None = None,
+                        greet: bool | None = None, greet_language: str | None = None) -> None:
         if not name.strip():
             raise ValueError("name is required")
         person = self.employee(employee_id)
@@ -132,12 +133,36 @@ class EmployeeStoreMixin:
         chat_user = normalize_chat_user(chat_user) if chat_user is not None else person.chat_user
         username = self.normalize_base_username(base_username) if base_username is not None else person.base_username
         role = normalize_role(role) if role is not None else person.role
+        honorific = normalize_honorific(honorific) if honorific is not None else person.honorific
+        greet = person.greet if greet is None else bool(greet)
+        greet_language = normalize_greet_language(greet_language) if greet_language is not None else person.greet_language
         try:
-            self._exec("UPDATE employees SET email = ?, name = ?, active = ?, chat_user = ?, exempt = ?, base_username = ?, role = ? WHERE id = ?",
+            self._exec("UPDATE employees SET email = ?, name = ?, active = ?, chat_user = ?, exempt = ?, base_username = ?, role = ?, "
+                       "honorific = ?, greet = ?, greet_language = ? WHERE id = ?",
                        (email, name.strip(), int(active), chat_user,
-                        int(exempt if exempt is not None else person.exempt), username, role, employee_id))
+                        int(exempt if exempt is not None else person.exempt), username, role, honorific, int(greet), greet_language, employee_id))
         except sqlite3.IntegrityError:
             raise ValueError('employee email or Base username already exists') from None
+
+    def set_greetings(self, values: dict[str, dict]) -> int:
+        """employee id -> {"honorific": anh / chi / "", "greet": bool, "language": vi / en} for many people at once;
+        a missing key keeps its value. Returns how many people changed."""
+        rows = {}
+        for employee_id, v in values.items():
+            person = self.employee(employee_id)
+            if person is None:
+                continue
+            rows[employee_id] = (normalize_honorific(v.get("honorific", person.honorific)),
+                                 int(bool(v.get("greet", person.greet))),
+                                 normalize_greet_language(v.get("language", person.greet_language)))
+        changed = 0
+        with self._lock, self._db:
+            for employee_id, (honorific, greet, language) in rows.items():
+                changed += self._db.execute(
+                    "UPDATE employees SET honorific = ?, greet = ?, greet_language = ? WHERE id = ? "
+                    "AND (honorific != ? OR greet != ? OR greet_language != ?)",
+                    (honorific, greet, language, employee_id, honorific, greet, language)).rowcount
+        return changed
 
     def employee_by_email(self, email: str) -> Employee | None:
         rows = self._all("SELECT * FROM employees WHERE email = ? COLLATE NOCASE", (normalize_email(email),))
@@ -169,7 +194,8 @@ class EmployeeStoreMixin:
 
     @staticmethod
     def _employee(r) -> Employee:
-        return Employee(r["id"], r["name"], bool(r["active"]), r["chat_user"] or "", bool(r["exempt"]), r["email"] or "", r['base_username'] or '', r["role"])
+        return Employee(r["id"], r["name"], bool(r["active"]), r["chat_user"] or "", bool(r["exempt"]), r["email"] or "", r['base_username'] or '', r["role"], r["honorific"] or "",
+                        bool(r["greet"]), r["greet_language"] or "vi")
 
     def all_employees(self) -> list[Employee]:
         return [self._employee(r) for r in self._all("SELECT * FROM employees ORDER BY active DESC, name")]

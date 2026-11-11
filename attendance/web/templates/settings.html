@@ -38,6 +38,7 @@
 <nav class="seg icons" id="tabs">
   <button type="button" data-tab="hours" title="Working hours">{{ icon('clock') }}<span class="lbl">Working hours</span></button>
   <button type="button" data-tab="notify" title="Notifications">{{ icon('chat') }}<span class="lbl">Notifications</span></button>
+  <button type="button" data-tab="greeting" title="Greeting at the door">{{ icon('wave') }}<span class="lbl">Greeting</span></button>
   <button type="button" data-tab="camera" title="Camera">{{ icon('camera') }}<span class="lbl">Camera</span></button>
   <button type="button" data-tab="admin" title="Access">{{ icon('shield') }}<span class="lbl">Access</span></button>
   <button type="button" data-tab="hr" title="HR system">{{ icon('hr') }}<span class="lbl">HR system</span></button>
@@ -178,6 +179,38 @@
           {% for o in occasion_list %}<option value="{{ o.key }}">Around {{ o.name }}</option>{% endfor %}
         </select></label>
       <button class="btn" form="late-bg" title="Save the chosen pictures">{{ icon('upload') }}Use</button>
+    </div>
+  </section>
+
+  <section class="card tab" id="greeting">
+    <h2 class="row">{{ icon('wave') }}Greeting at the door</h2>
+    <p class="hint" style="margin-top:0">The office computer says hello out loud, through its speaker, the first time each day the camera
+      recognises someone: by name, as <em>anh</em> or <em>chị</em>, in Vietnamese or English, or not at all (each person's choice on <a href="{{ url_for('honorifics_page') }}">People → Greetings</a>),
+      and a playful line for whoever comes after the late time (an approved coming-late request on Base counts as on time).
+      Claude writes everyone's sentences once in the morning, so nothing waits for the network at the door; the camera never waits for the greeting.</p>
+    <div class="stack">
+      {{ check('greeting', 'enabled', 'Greet people at the door', 'Off: silent, as before') }}
+    </div>
+    <div class="form-row" style="margin-top:12px">
+      <label class="field grow">Claude API key<input name="greeting.key" type="password" autocomplete="off"
+        placeholder="{{ 'saved · leave empty to keep' if s.greeting.key else 'none: short built-in greetings' }}">
+        <span class="hint">From console.anthropic.com → API keys. Only names and anh/chị are sent, never photos.</span>{{ src('greeting.key') }}</label>
+      {{ field('greeting', 'model', 'Model', 'claude-opus-5-5, or claude-haiku-5-5 for a cheaper one') }}
+    </div>
+    <div class="form-row">
+      {{ field('greeting', 'voice', 'Vietnamese voice', 'A macOS voice: Linh') }}
+      {{ field('greeting', 'voice_en', 'English voice', 'For people greeted in English: Samantha, Daniel, Karen…') }}
+      {{ field('greeting', 'rate', 'Speed (words/min)', '180 is calm; 90–360', type='number') }}
+    </div>
+    {{ field('greeting', 'style', 'Extra wishes for the sentences', 'Optional, e.g. "nhắc uống nước", "hài hước hơn"', cls='grow') }}
+    {% set gs = (edge_beat or {}).get('greeting') %}
+    <div class="row between" style="margin-top:14px">
+      <span class="hint">{% if gs %}Office computer: {{ 'on' if gs.enabled else 'off' }} ·
+        {% if gs.voice %}voice ready{% else %}<strong>voice {{ s.greeting.voice }} not found</strong>{% endif %} ·
+        sentences for {{ gs.ready }} people today · {{ gs.spoken }} greeted today
+        {% if gs.error %}<br><span class="badge bad">Problem</span> {{ gs.error }}{% endif %}
+        {% elif edge_beat is not none %}Office computer: no greeting yet (it needs version 1.1.48 or later){% else %}Greets on the computer with the camera{% endif %}</span>
+      <button formaction="{{ url_for('greeting_test') }}" formnovalidate title="The office computer says a test sentence now">{{ icon('play') }}Say a test greeting</button>
     </div>
   </section>
 

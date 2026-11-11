@@ -17,7 +17,10 @@ CREATE TABLE IF NOT EXISTS employees (
     active INTEGER NOT NULL DEFAULT 1,
     chat_user TEXT NOT NULL DEFAULT '',  -- Google Chat user ID, used to @mention the person
     exempt INTEGER NOT NULL DEFAULT 0,  -- arrivals are recorded but never counted as late or absent (e.g. the boss)
-    role TEXT NOT NULL DEFAULT 'employee'  -- employee or support (cook, cleaner...: on site, but not on the attendance list)
+    role TEXT NOT NULL DEFAULT 'employee',  -- employee or support (cook, cleaner...: on site, but not on the attendance list)
+    honorific TEXT NOT NULL DEFAULT '',  -- anh / chi: how the greeting at the door addresses them; empty: by name only
+    greet INTEGER NOT NULL DEFAULT 1,  -- 0: the greeting at the door stays silent for them
+    greet_language TEXT NOT NULL DEFAULT 'vi'  -- vi / en, see GREET_LANGUAGES
 );
 -- Mac: camera events not yet confirmed by the server. Server: events already applied, so a resend is harmless.
 CREATE TABLE IF NOT EXISTS edge_outbox (
@@ -153,6 +156,25 @@ LEAVE_KINDS = {"leave": "Leave", "business_trip": "Business trip", "remote": "Wo
 
 ROLE_EMPLOYEE, ROLE_SUPPORT = "employee", "support"
 ROLES = {ROLE_EMPLOYEE: "Employee", ROLE_SUPPORT: "Support staff"}
+# How the spoken greeting at the door addresses someone: value -> (label, the word said)
+HONORIFICS = {"anh": ("Anh (man)", "anh"), "chi": ("Chị (woman)", "chị")}
+
+
+GREET_LANGUAGES = {"vi": "Tiếng Việt", "en": "English"}
+
+
+def normalize_greet_language(value: str | None) -> str:
+    value = (value or "vi").strip().lower()
+    if value not in GREET_LANGUAGES:
+        raise ValueError("greeting language must be vi or en")
+    return value
+
+
+def normalize_honorific(value: str | None) -> str:
+    value = (value or "").strip().lower()
+    if value and value not in HONORIFICS:
+        raise ValueError("honorific must be anh, chi or empty")
+    return value
 
 
 @dataclass
@@ -165,6 +187,9 @@ class Employee:
     email: str = ""
     base_username: str = ""
     role: str = ROLE_EMPLOYEE
+    honorific: str = ""  # anh / chi, see HONORIFICS
+    greet: bool = True
+    greet_language: str = "vi"  # see GREET_LANGUAGES
 
     @property
     def support(self) -> bool:
@@ -298,7 +323,7 @@ def _blob(vector) -> bytes | None:
 def migrate(db: sqlite3.Connection) -> None:
     """Add columns introduced after a database was created."""
     added = {"embeddings": [("image", "TEXT"), ("quality_ok", "INTEGER"), ("quality_score", "REAL")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'"), ("quality", "REAL")],
-             "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT"), ("base_username", "TEXT NOT NULL DEFAULT ''"), ("role", "TEXT NOT NULL DEFAULT 'employee'")],
+             "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT"), ("base_username", "TEXT NOT NULL DEFAULT ''"), ("role", "TEXT NOT NULL DEFAULT 'employee'"), ("honorific", "TEXT NOT NULL DEFAULT ''"), ("greet", "INTEGER NOT NULL DEFAULT 1"), ("greet_language", "TEXT NOT NULL DEFAULT 'vi'")],
              "sightings": [("camera_id", "TEXT"), ("model", "TEXT"), ("vector", "BLOB"), ("sha256", "TEXT")],
              "calendar": [("source", "TEXT NOT NULL DEFAULT 'hr'")], "leaves": [("source", "TEXT NOT NULL DEFAULT 'hr'")]}
     for table, columns in added.items():

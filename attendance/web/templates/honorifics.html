@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% set title = 'Greetings' %}
+{% block body %}
+<div class="page-head">
+  <div><h1>Greetings</h1>
+    <div class="chips"><span class="chip">{{ icon('employees') }}<strong>{{ people|length }}</strong> active</span>
+      {% set off = people|rejectattr('greet')|list|length %}{% if off %}<span class="chip">{{ icon('x-circle') }}<strong>{{ off }}</strong> not greeted</span>{% endif %}
+      {% set en = people|selectattr('greet_language', 'equalto', 'en')|list|length %}{% if en %}<span class="chip">{{ icon('globe') }}<strong>{{ en }}</strong> in English</span>{% endif %}</div></div>
+  <div class="actions"><a class="btn" href="{{ url_for('employees') }}">{{ icon('chevron-left') }}People</a></div>
+</div>
+<form method="post" action="{{ url_for('save_honorifics') }}" class="card">
+  <p class="hint" style="margin-top:0">The greeting at the door for each person: “Chào anh Minh”, “Chào chị Lan”, by name only “Chào Minh”,
+    or in English “Good morning, Minh”. Untick Greet to keep the speaker silent for them.</p>
+  <table>
+    <thead><tr><th>Name</th><th>Greet</th><th>Language</th><th>Vietnamese: anh / chị</th></tr></thead>
+    <tbody>
+    {% for p in people %}
+      <tr><td><a href="{{ url_for('employee', employee_id=p.id) }}">{{ p.name }}</a><br><span class="hint">{{ p.email }}</span>
+        <input type="hidden" name="shown_{{ p.id }}" value="1"></td>
+        <td><input type="checkbox" name="g_{{ p.id }}" aria-label="Greet {{ p.name }}" {{ 'checked' if p.greet }}></td>
+        <td><select name="l_{{ p.id }}" aria-label="Language for {{ p.name }}">{% for value, label in languages.items() %}<option value="{{ value }}" {{ 'selected' if p.greet_language == value }}>{{ label }}</option>{% endfor %}</select></td>
+        <td><div class="days words">
+          {% for value, h in honorifics.items() %}<label><input type="radio" name="h_{{ p.id }}" value="{{ value }}" {{ 'checked' if p.honorific == value }}><span>{{ h[1]|capitalize }}</span></label>{% endfor %}
+          <label><input type="radio" name="h_{{ p.id }}" value="" {{ 'checked' if not p.honorific }}><span>Name only</span></label>
+        </div></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="btn-group" style="margin-top:14px"><button class="primary">{{ icon('check') }}Save</button></div>
+</form>
+{% endblock %}

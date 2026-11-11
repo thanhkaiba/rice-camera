@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,7 @@ from ..core import latephoto, occasions, settings, transfer
 from ..integrations import base_timeoff, camera_api, chat_api
 from ..vision.faces import decode_image, encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
+from .edge_api import heartbeat as edge_heartbeat
 
 if TYPE_CHECKING:
     from ..core.pipeline import App
@@ -139,7 +141,16 @@ def register(app: Flask, core: "App") -> None:
                                upcoming=occasions.upcoming(service.now().date()),
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
                                update=updater.read_status(core.data_dir), backup=core.backup.status(),
-                               versions=versions(), base_kinds=base_timeoff.KINDS)
+                               versions=versions(), base_kinds=base_timeoff.KINDS, edge_beat=edge_heartbeat(store))
+
+    @app.post("/settings/greeting/test")
+    def greeting_test():
+        if service.greeter is not None:  # the camera runs on this computer
+            threading.Thread(target=service.greeter.say_test, name="greeting-test", daemon=True).start()
+            return done("Saying a test greeting now.", "settings_page")
+        store.edge_job_add("say", {"kind": "say"}, service.now())
+        store.log(service.now(), current_user(cfg), "test greeting", "asked the office computer")
+        return done("The office computer says a test greeting within a minute; the result is in Audit.", "settings_page")
 
     def background_gallery() -> dict:
         """The pictures to choose from on the Settings page, which one is selected, and today's."""

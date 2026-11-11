@@ -193,7 +193,10 @@ def main() -> None:
         faces = app.recognizer().detect(np.zeros((480, 640, 3), dtype=np.uint8))
         pages = create_app(app).test_client()
         assert pages.get("/").status_code in (200, 302) and pages.get("/settings").status_code == 200
-        print(f"Self-test passed: models load, {len(faces)} faces in a black picture, pages render.")
+        import anthropic  # the greeting at the door; built only, nothing is sent
+
+        anthropic.Anthropic(api_key="self-test")
+        print(f"Self-test passed: models load, {len(faces)} faces in a black picture, pages render, Claude SDK {anthropic.__version__}.")
     elif args.command in ("report", "test-chat"):
         from .core.pipeline import App
 

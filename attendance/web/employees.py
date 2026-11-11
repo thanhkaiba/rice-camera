@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for
 
-from ..store.schema import ROLE_EMPLOYEE, ROLES
+from ..store.schema import GREET_LANGUAGES, HONORIFICS, ROLE_EMPLOYEE, ROLES
 from . import current_user, done, failed, leave_status
 
 if TYPE_CHECKING:
@@ -163,7 +163,7 @@ def register(app: Flask, core: "App") -> None:
                           sorted(weeks[start], key=lambda r: (r.created_at.timestamp(), r.id), reverse=True))
                          for start in sorted(weeks, reverse=True)]
         quality_report = library.saved_quality()
-        return render_template("employee.html", roles=ROLES, person=person, refs=refs, photo_groups=photo_groups, good_photos=GOOD_PHOTOS,
+        return render_template("employee.html", roles=ROLES, honorifics=HONORIFICS, languages=GREET_LANGUAGES, person=person, refs=refs, photo_groups=photo_groups, good_photos=GOOD_PHOTOS,
                                good=sum(r.quality_ok is True for r in refs),
                                checks=quality_report["checks"], quality_report=quality_report,
                                recognition_params=cfg.recognition,
@@ -176,6 +176,27 @@ def register(app: Flask, core: "App") -> None:
                                timeoff_day=today, timeoff_status=leave_status(core),
                                base_enabled=bool(cfg.base_api_key), base_upcoming=base_upcoming)
 
+    @app.get("/employees/honorifics")
+    def honorifics_page():
+        people = sorted((p for p in store.all_employees() if p.active), key=lambda p: p.name.lower())
+        return render_template("honorifics.html", people=people, honorifics=HONORIFICS, languages=GREET_LANGUAGES)
+
+    @app.post("/employees/honorifics")
+    def save_honorifics():
+        form = request.form
+        values = {}
+        for p in store.all_employees():
+            if f"shown_{p.id}" in form:
+                values[p.id] = {"honorific": form.get(f"h_{p.id}", p.honorific), "greet": form.get(f"g_{p.id}") == "on",
+                                "language": form.get(f"l_{p.id}", p.greet_language)}
+        try:
+            changed = store.set_greetings(values)
+        except ValueError as exc:
+            return failed(str(exc), "honorifics_page")
+        if changed:
+            store.log(service.now(), current_user(cfg), "set greetings", f"{changed} people")
+        return done(f"Saved: {changed} changed." if changed else "Nothing changed.", "honorifics_page")
+
     @app.post("/employees/<employee_id>")
     def update_employee(employee_id: str):
         person = store.employee(employee_id) or abort(404)
@@ -184,7 +205,10 @@ def register(app: Flask, core: "App") -> None:
                                   request.form.get("chat_user"), request.form.get("exempt") == "on",
                                   email=request.form.get("email", person.email),
                                   base_username=request.form.get('base_username', person.base_username),
-                                  role=request.form.get("role", person.role))
+                                  role=request.form.get("role", person.role),
+                                  honorific=request.form.get("honorific", person.honorific),
+                                  greet=request.form.get("greet") == "on" if "greet_shown" in request.form else None,
+                                  greet_language=request.form.get("greet_language", person.greet_language))
         except ValueError as exc:
             return failed(str(exc), "employee", employee_id=employee_id)
         library.reload()

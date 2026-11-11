@@ -87,6 +87,11 @@ class App:
         self.edge.on_config = self._config_from_server
         self.edge.add_photo = self._photo_from_server
         self.edge.camera_address = lambda: {"url": cfg.camera.url, "more": cfg.camera.more}
+        from .greeting import Greeter
+
+        self.greeter = Greeter(cfg, self.store, self.service.now, lambda d: self.service.window(d).late_from)
+        self.edge.on_rules = self.greeter.set_rules
+        self.edge.on_say = self.greeter.say_test
         self.photos_read_elsewhere = False  # the server: no face models there, the Mac reads uploaded photos
         send, kick = self.chat.send, self.chat.kick
         self.chat.send = lambda *a, **k: None if self.edge.following else send(*a, **k)
@@ -107,7 +112,8 @@ class App:
     def _edge_status(self) -> dict:
         from .. import __version__
 
-        return {"camera_ok": self.live.camera_state == "ok", "camera_state": self.live.camera_state, "version": __version__}
+        return {"camera_ok": self.live.camera_state == "ok", "camera_state": self.live.camera_state, "version": __version__,
+                "greeting": self.greeter.status()}
 
     def recognizer(self):
         if self._recognizer is None:
@@ -337,6 +343,8 @@ def run(cfg: Config) -> None:
     service, live = app.service, app.live
     app.chat.start_background()  # a slow webhook must not hold up face recognition
     app.edge.start()
+    service.greeter = app.greeter  # only where the camera runs: the server never speaks
+    app.greeter.start()
     if cfg.web.enabled:
         from ..web import create_app
 

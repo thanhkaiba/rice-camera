@@ -56,6 +56,8 @@ class EdgeClient:
         self.on_config = lambda config: None
         self.add_photo = None
         self.camera_address = lambda: {}
+        self.on_rules = lambda rules: None
+        self.on_say = lambda: {"ok": False, "message": "no greetings on this computer"}
 
     @property
     def enabled(self) -> bool:
@@ -206,6 +208,8 @@ class EdgeClient:
             self.on_config(answer["config"])
             versions["config"] = answer["config_version"]
         self.store.put(FOLLOW_KEY, json.dumps(versions))
+        if "greeting" in answer:
+            self.on_rules(answer["greeting"])
         for job in answer.get("jobs", []):
             self._do_job(job)
 
@@ -213,21 +217,23 @@ class EdgeClient:
         done = json.loads(self.store.get(JOBS_KEY) or "{}")
         result = done.get(str(job["id"]))
         if result is None:  # a result the server did not get is sent again, the photo is not added twice
-            payload = job["payload"]
-            status, data = self._send("GET", "/api/edge/files/" + urllib.parse.quote(payload["image"]), b"", "application/octet-stream")
-            if status != 200:
-                raise ConnectionError(f"file answered HTTP {status}")
-            try:
-                added = self.add_photo(payload["employee_id"], data, payload.get("source", "upload"))
-                result = {"ok": added.ok, "message": added.message, "warnings": list(added.warnings)}
-            except ValueError as exc:
-                result = {"ok": False, "message": str(exc), "warnings": []}
+            result = self.on_say() if job.get("kind") == "say" else self._add_uploaded(job["payload"])
             done[str(job["id"])] = result
             kept = sorted(done, key=int)[-JOBS_REMEMBERED:]
             self.store.put(JOBS_KEY, json.dumps({k: done[k] for k in kept}))
         status, _ = self._send("POST", f"/api/edge/jobs/{job['id']}/result", json.dumps(result).encode(), "application/json")
         if status != 200 and status not in PERMANENT:
             raise ConnectionError(f"job result answered HTTP {status}")
+
+    def _add_uploaded(self, payload: dict) -> dict:
+        status, data = self._send("GET", "/api/edge/files/" + urllib.parse.quote(payload["image"]), b"", "application/octet-stream")
+        if status != 200:
+            raise ConnectionError(f"file answered HTTP {status}")
+        try:
+            added = self.add_photo(payload["employee_id"], data, payload.get("source", "upload"))
+            return {"ok": added.ok, "message": added.message, "warnings": list(added.warnings)}
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc), "warnings": []}
 
     def _loop(self) -> None:
         backoff, last_beat, last_state = IDLE_S, 0.0, 0.0

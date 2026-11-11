@@ -30,7 +30,7 @@ ENDPOINTS = {"edge_events", "edge_photo", "edge_heartbeat", "edge_state", "edge_
 UPLOAD_PATH = re.compile(r"uploads/[0-9a-f]{32}")
 MAX_JOB_EMBEDDINGS = 500
 # What the Mac needs to run the camera. The detection area is drawn on the Mac and stays there.
-MAC_SECTIONS = ("schedule", "camera", "tracking", "recognition", "collect")
+MAC_SECTIONS = ("schedule", "camera", "tracking", "recognition", "collect", "greeting")
 SHADOW_DIFF_KEY = "shadow_diff"
 MAX_DIFF_LISTED = 50
 HEARTBEAT_KEY = "edge_heartbeat"
@@ -62,6 +62,14 @@ def _image(value: str | None) -> str | None:
     if value is not None and not PHOTO_PATH.fullmatch(value):
         raise ValueError("bad image path")
     return value
+
+
+def _greeting_status(value) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    error = value.get("error")
+    return {"enabled": bool(value.get("enabled")), "ready": int(value.get("ready") or 0), "voice": bool(value.get("voice")),
+            "spoken": int(value.get("spoken") or 0), "error": str(error)[:300] if error else None}
 
 
 def heartbeat(store) -> dict | None:
@@ -167,7 +175,8 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
         store.put(HEARTBEAT_KEY, json.dumps({"at": service.now().isoformat(), "camera_ok": bool(beat.get("camera_ok")),
                                              "camera_state": str(beat.get("camera_state", ""))[:200],
                                              "version": str(beat.get("version", ""))[:40],
-                                             "backlog": int(beat.get("backlog") or 0)}))
+                                             "backlog": int(beat.get("backlog") or 0),
+                                             "greeting": _greeting_status(beat.get("greeting"))}))
         return jsonify(ok=True, mode="shadow" if shadow else "live")
 
     def mac_config() -> dict:
@@ -189,6 +198,10 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
             answer.update(employees=store.edge_employee_rows(), embedding_keys=store.edge_embedding_keys())
         if request.args.get("config") != config_version:
             answer["config"] = config
+        if core.cfg.greeting.enabled:
+            from ..core.greeting import rules_for
+
+            answer["greeting"] = rules_for(service, service.now().date())
         return jsonify(answer)
 
     @app.post("/api/edge/sync/embeddings")
@@ -213,6 +226,10 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
         payload = store.edge_job_take(job_id)
         if payload is None:
             return jsonify(ok=True)  # the answer to a job already closed
+        if payload.get("kind") == "say":
+            store.log(service.now(), "office computer", "test greeting",
+                      ("said: " if result.get("ok") else "failed: ") + str(result.get("message", ""))[:400])
+            return jsonify(ok=True)
         if UPLOAD_PATH.fullmatch(payload.get("image", "")):
             (core.data_dir / payload["image"]).unlink(missing_ok=True)
         person = store.employee(payload.get("employee_id", ""))

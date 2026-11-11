@@ -284,6 +284,19 @@ class CollectConfig:
 
 
 @dataclass
+class GreetingConfig:
+    """The office Mac says hello at the door to each person recognised for the first time that day
+    (see greeting.py). The sentences are written by Claude once in the morning."""
+    enabled: bool = False
+    key: str = field(default="", repr=False)  # Claude API key; empty: plain built-in greetings
+    model: str = "claude-opus-5-5"
+    voice: str = "Linh"  # a macOS voice that speaks Vietnamese
+    voice_en: str = "Samantha"  # the macOS voice for people greeted in English
+    rate: int = 180  # words per minute
+    style: str = ""  # extra wishes for the sentences, e.g. "mention the weather" (any language)
+
+
+@dataclass
 class EdgeConfig:
     """The office Mac mirrors camera events to the server at this address. Empty: no server."""
     server_url: str = ""
@@ -315,6 +328,7 @@ class Config:
     backup: BackupConfig = field(default_factory=BackupConfig)
     collect: CollectConfig = field(default_factory=CollectConfig)
     edge: EdgeConfig = field(default_factory=EdgeConfig)
+    greeting: GreetingConfig = field(default_factory=GreetingConfig)
     base_dir: Path = field(default=Path("."), repr=False)
 
     @property
@@ -391,6 +405,12 @@ class Config:
             raise ValueError("collect.per_day and collect.enough must be at least 1")
         if not 0.2 <= c.fps <= 30:
             raise ValueError("collect.fps must be between 0.2 and 30")
+        g = self.greeting
+        g.key = g.key.strip()
+        g.model, g.voice, g.style = g.model.strip() or "claude-opus-5-5", g.voice.strip() or "Linh", g.style.strip()[:300]
+        g.voice_en = g.voice_en.strip() or "Samantha"
+        if not 90 <= g.rate <= 360:
+            raise ValueError("greeting.rate must be between 90 and 360 words per minute")
         lm = self.late_message
         if str(lm.send_at).strip():
             lm.send_at = parse_clock(lm.send_at).strftime("%H:%M")
