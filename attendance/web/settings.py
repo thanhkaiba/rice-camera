@@ -146,11 +146,18 @@ def register(app: Flask, core: "App") -> None:
     @app.post("/settings/greeting/test")
     def greeting_test():
         if service.greeter is not None:  # the camera runs on this computer
-            threading.Thread(target=service.greeter.say_test, name="greeting-test", daemon=True).start()
-            return done("Saying a test greeting now.", "settings_page")
+            who = current_user(cfg)
+
+            def say():
+                result = service.greeter.say_test()
+                store.log(service.now(), who, "test greeting",
+                          ("said: " if result.get("ok") else "failed: ") + str(result.get("message", ""))[:400])
+
+            threading.Thread(target=say, name="greeting-test", daemon=True).start()
+            return done("Saying a test greeting now, Claude included; the result is in Audit.", "settings_page")
         store.edge_job_add("say", {"kind": "say"}, service.now())
         store.log(service.now(), current_user(cfg), "test greeting", "asked the office computer")
-        return done("The office computer says a test greeting within a minute; the result is in Audit.", "settings_page")
+        return done("The office computer says a test greeting within a minute, Claude included; the result is in Audit.", "settings_page")
 
     def background_gallery() -> dict:
         """The pictures to choose from on the Settings page, which one is selected, and today's."""

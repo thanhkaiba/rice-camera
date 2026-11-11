@@ -21,6 +21,8 @@ import subprocess
 import threading
 import time
 
+from ..store import Employee
+
 log = logging.getLogger(__name__)
 
 LINES_KEY = "greeting_lines"
@@ -310,20 +312,38 @@ class Greeter:
                        timeout=SAY_TIMEOUT_S, check=True, capture_output=True)
 
     def say_test(self) -> dict:
-        """Asked from the server's Settings page: a fixed sentence, then one person's greeting per language."""
-        day = self.now().date()
-        said = [(TEST_TEXT, "vi")]
-        people = [p for p in self.store.all_employees() if p.active and p.greet and self._entry(p, day)]
-        for language in ("vi", "en"):
-            mine = [p for p in people if p.greet_language == language]
-            if mine:
-                said.append((random.choice(self._entry(random.choice(mine), day)["on_time"]), language))
+        """Asked from the server's Settings page: a fixed sentence, then, with a key, Claude is asked right
+        away for one person's greetings in each language people are greeted in, and they are said. Works
+        outside the morning hours and with greetings off, so the key and the model can be checked any time;
+        what Claude writes here is not kept."""
         try:
-            for text, language in said:
+            self._speak(TEST_TEXT, "vi")
+        except Exception as exc:
+            return {"ok": False, "message": f"could not speak: {type(exc).__name__}: {exc}"[:300]}
+        s = self.settings
+        if not s.key:
+            return {"ok": True, "message": f"{TEST_TEXT} · Claude: no API key, built-in greetings are used"}
+        people = self._test_people()
+        try:
+            written = self._write(people, self.now().date())
+        except Exception as exc:
+            return {"ok": False, "message": f"{TEST_TEXT} · Claude ({s.model}) failed: {type(exc).__name__}: {str(exc)[:200]}"}
+        lines = [(random.choice(written[p.id]["on_time"]), p.greet_language) for p in people if p.id in written]
+        if not lines:
+            return {"ok": False, "message": f"{TEST_TEXT} · Claude ({s.model}) answered without a greeting"}
+        try:
+            for text, language in lines:
                 self._speak(text, language)
         except Exception as exc:
-            return {"ok": False, "message": f"{type(exc).__name__}: {exc}"[:300]}
-        return {"ok": True, "message": " ".join(text for text, _ in said)}
+            return {"ok": False, "message": f"Claude ({s.model}) works, could not speak: {type(exc).__name__}: {exc}"[:300]}
+        return {"ok": True, "message": f"Claude ({s.model}) works: " + " ".join(text for text, _ in lines)}
+
+    def _test_people(self) -> list:
+        """One person per language people are greeted in, picked at random; a stand-in when nobody is greeted."""
+        people = [p for p in self.store.all_employees() if p.active and p.greet]
+        picked = [random.choice(mine) for language in ("vi", "en")
+                  if (mine := [p for p in people if p.greet_language == language])]
+        return picked or [Employee(id="greeting-test", name="Minh", active=True, honorific="anh")]
 
     def speak_next(self, timeout: float | None = None) -> bool:
         """Greet whoever is waiting: one person on their own, several at once together (one sentence per

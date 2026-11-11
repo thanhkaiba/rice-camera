@@ -250,3 +250,33 @@ def test_people_never_counted_late_get_the_happy_greeting(core):
     app.service.on_identified("A", at(10, 45), 0.9, None)
     g.speak_next(timeout=0)
     assert said == ["Chào Alice! Chúc một ngày làm việc vui vẻ."]
+
+
+def test_the_test_greeting_asks_claude_any_time(core):
+    app, clock, g, said, asked = make(core)
+    app.cfg.greeting.enabled = False  # off and in the evening: the test still checks the key
+    clock.t = at(19, 0)
+    result = g.say_test()
+    assert result["ok"] and "no API key" in result["message"] and said == [greeting.TEST_TEXT] and asked == []
+    app.cfg.greeting.key = "k"
+    said.clear()
+    result = g.say_test()
+    assert result["ok"] and result["message"].startswith(f"Claude ({app.cfg.greeting.model}) works: Chào ")
+    assert said[0] == greeting.TEST_TEXT and len(said) == 2 and len(asked[0]) == 1
+    assert g.lines(clock.t.date()) == {}  # a test writes nothing for the day
+
+
+def test_the_test_greeting_says_why_claude_failed(core):
+    app, clock, g, said, asked = make(core, fail=True)
+    app.cfg.greeting.key = "k"
+    result = g.say_test()
+    assert not result["ok"] and "failed: ConnectionError: no network" in result["message"]
+    assert said == [greeting.TEST_TEXT]
+
+
+def test_the_test_greeting_works_with_nobody_to_greet(core):
+    app, clock, g, said, asked = make(core)
+    app.cfg.greeting.key = "k"
+    for p in app.store.all_employees():
+        app.store.set_greetings({p.id: {"greet": False}})
+    assert g.say_test()["ok"] and asked == [["greeting-test"]]

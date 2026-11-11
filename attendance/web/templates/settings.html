@@ -210,7 +210,7 @@
         sentences for {{ gs.ready }} people today · {{ gs.spoken }} greeted today
         {% if gs.error %}<br><span class="badge bad">Problem</span> {{ gs.error }}{% endif %}
         {% elif edge_beat is not none %}Office computer: no greeting yet (it needs version 1.1.48 or later){% else %}Greets on the computer with the camera{% endif %}</span>
-      <button formaction="{{ url_for('greeting_test') }}" formnovalidate title="The office computer says a test sentence now">{{ icon('play') }}Say a test greeting</button>
+      <button formaction="{{ url_for('greeting_test') }}" formnovalidate title="The office computer says a test sentence, then asks Claude for a greeting and says it: checks the key and the model">{{ icon('play') }}Say a test greeting</button>
     </div>
   </section>
 
