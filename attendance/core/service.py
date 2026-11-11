@@ -296,11 +296,13 @@ class AttendanceService:
         """One picture of the day's late people (the whole person as the camera saw them, or their
         best reference photo when the arrival was entered by hand; name and time burned in), made
         or refreshed as needed: its path under the data folder. None when the picture is switched
-        off, nobody is late, or there is no photo of any of the late people."""
+        off, nobody is late, or there is no photo of any of the late people. When the message lists the
+        people not seen, they are in the picture too, after the late ones, with their reference photo."""
         if not self.cfg.late_message.photo:
             return None
         people = self.late_people(day)
-        if not people:
+        missing = self.not_seen_people(day)
+        if not people and not missing:
             return None
         data_dir, w = self.cfg.path(self.cfg.data_dir), self.window(day)
         items = []
@@ -315,11 +317,15 @@ class AttendanceService:
                 from_gallery = photo is not None
             items.append(latephoto.Person(self.chat_name(a.employee_id, a.name), a.time, minutes_late(a, w), photo,
                                           a.registered, from_gallery, a.pending))
+        for employee_id, name in missing:
+            items.append(latephoto.Person(self.chat_name(employee_id, name), "", 0, self.best_reference_photo(employee_id),
+                                          from_gallery=True, not_seen=True))
         if not any(p.photo for p in items):  # nobody on camera and no reference photos: nothing to show
             latephoto.remove(data_dir, day)
             return None
         try:
-            return latephoto.write(data_dir, day, items, f"Late on {day:%A %d %b %Y}", self.cfg.late_message.occasions,
+            title = f"{'Late and not seen' if missing and people else 'Not seen' if missing else 'Late'} on {day:%A %d %b %Y}"
+            return latephoto.write(data_dir, day, items, title, self.cfg.late_message.occasions,
                                    self.cfg.late_message.background)
         except Exception:
             log.exception("Could not make the picture of the late people")

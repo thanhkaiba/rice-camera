@@ -662,3 +662,52 @@ def test_notifications_can_turn_not_seen_off_and_restore_default(core):
     assert app.service.late_text(DAY) is None  # No late arrivals; Not seen switched off.
     client.post('/settings/reset', data={'reset': 'late_message.include_not_seen'})
     assert app.service.late_text(DAY) == 'Not seen: @Carol'
+
+
+def test_people_not_seen_are_in_the_picture_when_the_message_lists_them(core, monkeypatch):
+    from test_evidence import seen
+
+    from attendance.core import latephoto
+
+    app, clock, _ = core
+    clock.t = at(10, 40)
+    seen(app, "A", at(9, 0))
+    seen(app, "B", at(10, 15))  # late, on camera; Carol is not seen
+    reference = app.data_dir / "faces" / "C" / "c.jpg"
+    reference.parent.mkdir(parents=True)
+    import cv2
+    cv2.imwrite(str(reference), np.full((60, 40, 3), 128, np.uint8))
+    monkeypatch.setattr(app.service, "best_reference_photo", lambda emp: reference if emp == "C" else None)
+    drawn = []
+    real = latephoto.write
+    monkeypatch.setattr(latephoto, "write", lambda data_dir, day, people, title, *a: (drawn.append((people, title)), real(data_dir, day, people, title, *a))[1])
+
+    app.cfg.late_message.include_not_seen = True
+    assert app.service.late_photo(DAY)
+    people, title = drawn[-1]
+    assert [(p.name, p.not_seen, p.lines()) for p in people] == [("Bob", False, ["10:15  +15 min"]), ("Carol", True, ["Not seen"])]
+    assert people[1].photo == reference and title.startswith("Late and not seen on ")
+
+    app.cfg.late_message.include_not_seen = False
+    app.service.late_photo(DAY)
+    people, title = drawn[-1]
+    assert [p.name for p in people] == ["Bob"] and title.startswith("Late on ")
+
+
+def test_a_picture_of_only_people_not_seen(core, monkeypatch):
+    from attendance.core import latephoto
+
+    app, clock, _ = core
+    clock.t = at(10, 40)
+    late(app, "A", 9, 0)
+    late(app, "B", 9, 5)
+    reference = app.data_dir / "faces" / "C" / "c.jpg"
+    reference.parent.mkdir(parents=True)
+    import cv2
+    cv2.imwrite(str(reference), np.full((60, 40, 3), 128, np.uint8))
+    monkeypatch.setattr(app.service, "best_reference_photo", lambda emp: reference if emp == "C" else None)
+    app.cfg.late_message.include_not_seen = True
+    rel = app.service.late_photo(DAY)
+    assert rel and cv2.imread(str(app.data_dir / rel)) is not None
+    app.cfg.late_message.include_not_seen = False
+    assert app.service.late_photo(DAY) is None

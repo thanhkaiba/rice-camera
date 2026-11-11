@@ -53,9 +53,12 @@ class Person:
     registered: str = ""  # the "coming late" interval approved on Base (9:00-09:20) that was still missed
     from_gallery: bool = False  # a reference photo (a face), not the camera's picture of the arrival
     pending: bool = False  # the registered interval is a request still waiting for approval
+    not_seen: bool = False  # expected today and not seen by the camera (shown with their reference photo)
 
     def lines(self) -> list[str]:
         """What the tag says under the name."""
+        if self.not_seen:
+            return ["Not seen"]
         if self.registered:
             word = "Request pending" if self.pending else "Registered"
             return [f"{word} {self.registered}", f"Arrived {self.time} (+{self.minutes} min)"]
@@ -535,7 +538,12 @@ def _card(person: Person) -> tuple[np.ndarray, np.ndarray]:
     return image, alpha
 
 
-def _tag(canvas: np.ndarray, cx: int, y: int, name: str, lines: list[str], width: int, height: int) -> None:
+NOT_SEEN_COLOUR = (40, 40, 210)  # BGR: red, set apart from the blue arrival times
+TIME_COLOUR = (0, 110, 230)
+
+
+def _tag(canvas: np.ndarray, cx: int, y: int, name: str, lines: list[str], width: int, height: int,
+         colour=TIME_COLOUR) -> None:
     """A rounded name tag centred on cx with its top at y, the name as large as fits `width`, then
     `lines` (one or two) in blue below it."""
     import cv2
@@ -555,7 +563,7 @@ def _tag(canvas: np.ndarray, cx: int, y: int, name: str, lines: list[str], width
     _rounded(canvas, x1, y, x2, y + height, (255, 255, 255), 10)
     cv2.putText(canvas, name, (cx - _width(name, size, 2) // 2, y + 25), FONT, size, (40, 40, 40), 2, cv2.LINE_AA)
     for i, line in enumerate(lines):
-        cv2.putText(canvas, line, (cx - _width(line, small) // 2, y + 47 + i * 21), FONT, small, (0, 110, 230), 1,
+        cv2.putText(canvas, line, (cx - _width(line, small) // 2, y + 47 + i * 21), FONT, small, colour, 1,
                     cv2.LINE_AA)
 
 
@@ -609,7 +617,8 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
             _rounded(shadow, x + 6, y + 8, x + CARD_W + 6, y + CARD_H + 8, (30, 30, 30), 16)
             cv2.addWeighted(shadow, 0.3, canvas, 0.7, 0, canvas)
             _paste(canvas, image, alpha, x, y)
-            _tag(canvas, x + CARD_W // 2, y + CARD_H + TAG_GAP, person.name, person.lines(), slot - 4, tag_h)
+            _tag(canvas, x + CARD_W // 2, y + CARD_H + TAG_GAP, person.name, person.lines(), slot - 4, tag_h,
+                 NOT_SEEN_COLOUR if person.not_seen else TIME_COLOUR)
     bottom = top + rows * row_h - ROW_GAP + 8
     banner_right = 24 + _width(_fit(ascii_label(title), width - 160, 0.9, 2), 0.9, 2) + 110
     if background is None or not background.exists():  # fairies and balloons belong to the drawn scenes
@@ -630,7 +639,7 @@ def fingerprint(people: list[Person], background: Path | None) -> str:
         s = p.stat() if p and p.exists() else None
         return (str(p), s.st_size if s else 0, s.st_mtime_ns if s else 0)
 
-    parts = [(p.name, p.time, p.minutes, p.registered, p.pending, p.from_gallery, stat(p.photo)) for p in people]
+    parts = [(p.name, p.time, p.minutes, p.registered, p.pending, p.from_gallery, p.not_seen, stat(p.photo)) for p in people]
     parts += [stat(background), LOOK]
     return hashlib.sha256(repr(parts).encode()).hexdigest()
 
