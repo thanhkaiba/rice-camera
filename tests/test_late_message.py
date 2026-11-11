@@ -747,3 +747,13 @@ def test_people_not_seen_with_a_pending_wfh_request_get_their_own_row(core, monk
     rows = latephoto.rows_of(drawn[-1])
     assert [[(p.name, p.lines()) for p in row] for row in rows] == [
         [("Alice", ["10:05  +5 min"])], [("Bob", ["Not seen"])], [("Carol", ["Not seen", "WFH pending 9:00-13:00"])]]
+
+
+def test_each_group_in_the_picture_has_a_heading():
+    from attendance.core import latephoto
+
+    late = [latephoto.Person("L", "10:00", 5, None)]
+    missing = [latephoto.Person("N", "", 0, None, not_seen=True)]
+    wfh = [latephoto.Person("W", "", 0, None, not_seen=True, wfh_pending="9:00-18:00")]
+    assert [h for h, _ in latephoto.sections_of(late + missing + wfh)] == ["Late", "Not seen", "Not seen - WFH pending"]
+    assert [h for h, _ in latephoto.sections_of(missing)] == ["Not seen"]

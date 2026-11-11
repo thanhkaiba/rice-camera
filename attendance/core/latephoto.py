@@ -591,49 +591,74 @@ def layout(n: int) -> tuple[int, int]:
     return rows, math.ceil(n / rows)
 
 
-def rows_of(people: list[Person]) -> list[list[Person]]:
-    """The late people in rows, then the people not seen, then those not seen whose work-from-home request is
-    still pending, each group starting a row of its own."""
-    rows = []
-    for group in ([p for p in people if not p.not_seen], [p for p in people if p.not_seen and not p.wfh_pending],
-                  [p for p in people if p.not_seen and p.wfh_pending]):
+SECTION_H = 46  # the heading above each group: Late, Not seen, Not seen · WFH pending
+
+
+def sections_of(people: list[Person]) -> list[tuple[str, list[list[Person]]]]:
+    """(heading, rows) for the late people, the people not seen, and those not seen whose work-from-home
+    request is still pending; each group starts a row of its own."""
+    groups = (("Late", [p for p in people if not p.not_seen]),
+              ("Not seen", [p for p in people if p.not_seen and not p.wfh_pending]),
+              ("Not seen - WFH pending", [p for p in people if p.not_seen and p.wfh_pending]))
+    sections = []
+    for heading, group in groups:
         if group:
             count, per_row = layout(len(group))
-            rows += [group[r * per_row:(r + 1) * per_row] for r in range(count)]
-    return rows
+            sections.append((heading, [group[r * per_row:(r + 1) * per_row] for r in range(count)]))
+    return sections
+
+
+def rows_of(people: list[Person]) -> list[list[Person]]:
+    return [row for _, rows in sections_of(people) for row in rows]
+
+
+def _heading(canvas: np.ndarray, cx: int, y: int, text: str, colour) -> None:
+    """A group's heading in a dark rounded box centred on cx, with a coloured dot."""
+    import cv2
+
+    size, tw = 0.62, _width(text, 0.62, 2)
+    x1, x2 = cx - tw // 2 - 30, cx + tw // 2 + 16
+    _rounded(canvas, x1, y, x2, y + 34, (35, 35, 35), 12, alpha=0.75)
+    cv2.circle(canvas, (x1 + 16, y + 17), 6, colour, -1, cv2.LINE_AA)
+    cv2.putText(canvas, text, (x1 + 30, y + 24), FONT, size, (255, 255, 255), 2, cv2.LINE_AA)
 
 
 def compose(people: list[Person], title: str, background: Path | None = None, seed: int = 0) -> bytes:
-    """Everyone's card in rows on the background, each with a name tag, as JPEG."""
+    """Everyone's card in rows on the background, each with a name tag, each group under its heading, as JPEG."""
     import cv2
 
     from ..vision.faces import encode_jpeg
 
     if not people:
         raise ValueError("nobody to show")
-    lines = rows_of(people)
-    rows, per_row = len(lines), max(len(row) for row in lines)
+    sections = sections_of(people)
+    rows = sum(len(r) for _, r in sections)
+    per_row = max(len(row) for _, r in sections for row in r)
     slot = CARD_W + GAP
     width = max(MIN_WIDTH, 2 * MARGIN + per_row * slot)
     tag_h = TAG_H3 if any(len(p.lines()) > 1 for p in people) else TAG_H
     row_h = CARD_H + TAG_GAP + tag_h + ROW_GAP
-    height = max(HEIGHT, TOP + rows * row_h + BOTTOM - ROW_GAP)
+    content = rows * row_h - ROW_GAP + len(sections) * SECTION_H
+    height = max(HEIGHT, TOP + content + BOTTOM)
     canvas = load_background(background, width, height, seed)
-    top = TOP + (height - TOP - BOTTOM - (rows * row_h - ROW_GAP)) // 2  # centre the rows below the banner
-    for r in range(rows):
-        row = lines[r]
-        left = (width - len(row) * slot) // 2 + GAP // 2  # a short last row is centred too
-        y = top + r * row_h
-        for i, person in enumerate(row):
-            x = left + i * slot
-            image, alpha = _card(person)
-            shadow = canvas.copy()
-            _rounded(shadow, x + 6, y + 8, x + CARD_W + 6, y + CARD_H + 8, (30, 30, 30), 16)
-            cv2.addWeighted(shadow, 0.3, canvas, 0.7, 0, canvas)
-            _paste(canvas, image, alpha, x, y)
-            _tag(canvas, x + CARD_W // 2, y + CARD_H + TAG_GAP, person.name, person.lines(), slot - 4, tag_h,
-                 NOT_SEEN_COLOUR if person.not_seen else TIME_COLOUR)
-    bottom = top + rows * row_h - ROW_GAP + 8
+    top = TOP + (height - TOP - BOTTOM - content) // 2  # centre the groups below the banner
+    y = top
+    for heading, lines in sections:
+        _heading(canvas, width // 2, y, heading, TIME_COLOUR if heading == "Late" else NOT_SEEN_COLOUR)
+        y += SECTION_H
+        for row in lines:
+            left = (width - len(row) * slot) // 2 + GAP // 2  # a short last row is centred too
+            for i, person in enumerate(row):
+                x = left + i * slot
+                image, alpha = _card(person)
+                shadow = canvas.copy()
+                _rounded(shadow, x + 6, y + 8, x + CARD_W + 6, y + CARD_H + 8, (30, 30, 30), 16)
+                cv2.addWeighted(shadow, 0.3, canvas, 0.7, 0, canvas)
+                _paste(canvas, image, alpha, x, y)
+                _tag(canvas, x + CARD_W // 2, y + CARD_H + TAG_GAP, person.name, person.lines(), slot - 4, tag_h,
+                     NOT_SEEN_COLOUR if person.not_seen else TIME_COLOUR)
+            y += row_h
+    bottom = top + content + 8
     banner_right = 24 + _width(_fit(ascii_label(title), width - 160, 0.9, 2), 0.9, 2) + 110
     if background is None or not background.exists():  # fairies and balloons belong to the drawn scenes
         draw_extras(canvas, [(banner_right, 0, width, top - 8), (0, 96, width, top - 8), (0, bottom, width, height)], seed)
@@ -643,7 +668,7 @@ def compose(people: list[Person], title: str, background: Path | None = None, se
 
 # files --------------------------------------------------------------------------------------
 
-LOOK = 9  # raise when the drawing changes, so pictures already made are made again
+LOOK = 10  # raise when the drawing changes, so pictures already made are made again
 
 
 def fingerprint(people: list[Person], background: Path | None) -> str:
