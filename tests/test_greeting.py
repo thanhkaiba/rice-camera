@@ -281,3 +281,64 @@ def test_the_test_greeting_works_with_nobody_to_greet(core):
     for p in app.store.all_employees():
         app.store.set_greetings({p.id: {"greet": False}})
     assert g.say_test()["ok"] and asked == [["greeting-test"]]
+
+
+def test_occasions_near_say_which_and_how_far():
+    import datetime as dt
+
+    from attendance.core.greeting import occasions_near
+
+    assert occasions_near(dt.date(2026, 11, 17)) == ["Teachers' Day (20/11, in 3 days)"]
+    assert occasions_near(dt.date(2026, 11, 20)) == ["Teachers' Day (20/11, today)"]
+    assert occasions_near(dt.date(2026, 7, 1)) == []
+
+
+def test_the_weather_at_the_office():
+    import datetime as dt
+
+    from attendance.integrations import weather
+
+    asked = []
+
+    def fetch(url, params):
+        asked.append((url, params))
+        if url == weather.GEOCODE:
+            return {"results": [{"latitude": 21.03, "longitude": 105.85, "name": "Hà Nội"}]}
+        return {"hourly": {"time": ["2026-11-12T07:00", "2026-11-12T08:00"], "temperature_2m": [21.4, 22.6],
+                           "weather_code": [3, 61]},
+                "daily": {"temperature_2m_min": [20.2], "temperature_2m_max": [26.7], "precipitation_probability_max": [80]}}
+
+    assert weather.place("21.03, 105.85", fetch) == (21.03, 105.85, "21.03, 105.85") and asked == []
+    lat, lon, name = weather.place("Ha Noi", fetch)
+    assert (lat, lon, name) == (21.03, 105.85, "Hà Nội")
+    text = weather.forecast(lat, lon, name, dt.date(2026, 11, 12), 8, fetch)
+    assert text == "Weather in Hà Nội today: light rain around 08:00, 23°C; 20-27°C over the day, 80% chance of rain."
+    assert asked[-1][1]["start_date"] == "2026-11-12"
+
+
+def test_claude_is_told_the_day_and_what_each_person_heard_lately(core, monkeypatch):
+    app, clock, g, said, _ = make(core)
+    app.cfg.greeting.location = "Hà Nội"
+    monkeypatch.setattr("attendance.integrations.weather.place", lambda location: (21.0, 105.8, "Hà Nội"))
+    monkeypatch.setattr("attendance.integrations.weather.forecast", lambda *a: "Weather in Hà Nội today: rain.")
+    alice = app.store.employee("A")
+    for days_ago, text in ((9, "Too old"), (2, "Chào chị Alice hôm kia!"), (1, "Chào chị Alice hôm qua!")):
+        g._note_heard("A", clock.t.date() - __import__("datetime").timedelta(days=days_ago), text)
+    system, user, ids = g.prompt([alice], clock.t.date())
+    assert "Weather in Hà Nội today: rain." in user and "Today is" in user and '"recent"' in system
+    people = json.loads(user.split("People:\n")[1])
+    assert people[0]["recent"] == ["Chào chị Alice hôm kia!", "Chào chị Alice hôm qua!"] and ids == {"1": "A"}
+
+
+def test_a_spoken_greeting_is_remembered_and_no_weather_does_not_stop_the_writing(core, monkeypatch):
+    app, clock, g, said, _ = make(core)
+    app.service.on_identified("A", at(8, 40), 0.9, None)
+    assert g.speak_next(timeout=0)
+    assert json.loads(app.store.get(greeting.HEARD_KEY))["A"] == [[DAY.isoformat(), said[0]]]
+    app.cfg.greeting.location = "Nowhere"
+
+    def broken(location):
+        raise LookupError("no place called Nowhere")
+
+    monkeypatch.setattr("attendance.integrations.weather.place", broken)
+    assert "Weather" not in g.day_context(DAY) and g.day_context(DAY).startswith("Today is")

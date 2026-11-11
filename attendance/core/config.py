@@ -295,6 +295,7 @@ class GreetingConfig:
     voice_en: str = "Samantha"  # the macOS voice for people greeted in English
     rate: int = 180  # words per minute
     style: str = ""  # extra wishes for the sentences, e.g. "mention the weather" (any language)
+    location: str = ""  # the office, for the morning weather: a place ("Hà Nội") or "21.03,105.85"; empty: no weather
 
 
 @dataclass
@@ -410,6 +411,7 @@ class Config:
         g.key = g.key.strip()
         g.model, g.voice, g.style = g.model.strip() or "claude-opus-5-5", g.voice.strip() or "Linh", g.style.strip()[:300]
         g.voice_en = g.voice_en.strip() or "Samantha"
+        g.location = g.location.strip()[:100]
         if not 90 <= g.rate <= 360:
             raise ValueError("greeting.rate must be between 90 and 360 words per minute")
         lm = self.late_message

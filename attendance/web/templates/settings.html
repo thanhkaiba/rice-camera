@@ -202,6 +202,9 @@
       {{ field('greeting', 'voice_en', 'English voice', 'For people greeted in English: Samantha, Daniel, Karen…') }}
       {{ field('greeting', 'rate', 'Speed (words/min)', '180 is calm; 90–360', type='number') }}
     </div>
+    <div class="form-row">
+      {{ field('greeting', 'location', 'Office location, for the weather', 'A city, e.g. "Hà Nội", or latitude,longitude "21.03,105.85" · the morning forecast from open-meteo.com · empty: no weather', cls='grow') }}
+    </div>
     {{ field('greeting', 'style', 'Extra wishes for the sentences', 'Optional, e.g. "nhắc uống nước", "hài hước hơn"', cls='grow') }}
     {% set gs = (edge_beat or {}).get('greeting') %}
     <div class="row between" style="margin-top:14px">
