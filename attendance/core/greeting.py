@@ -15,6 +15,7 @@ import json
 import logging
 import queue
 import random
+import re
 import shutil
 import subprocess
 import threading
@@ -36,6 +37,13 @@ SAID = {"anh": "anh", "chi": "chị"}
 # Server-side refusal fallbacks exist only for these (see the Claude API docs on refusals).
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-fable-5-2", "claude-fable-5-1"}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+GROUP_NAMES = 6  # names in one shared greeting; more get a second one
+TOGETHER_VI = ["Chào {names}! Chúc cả nhà một ngày làm việc vui vẻ.",
+               "Xin chào {names}! Hôm nay mình cùng làm việc thật vui nhé.",
+               "Chào buổi sáng {names}! Đông vui quá, chúc cả nhà một ngày tuyệt vời."]
+TOGETHER_EN = ["Good morning, {names}! Have a great day, everyone.",
+               "Hello {names}! Great to see you all this morning.",
+               "Morning, {names}! Wishing you all a wonderful day."]
 TEST_TEXT = "Xin chào! Đây là lời chào thử của hệ thống chấm công."
 
 SYSTEM = """You write short spoken greetings for the front door of an office in Vietnam. \
@@ -46,9 +54,7 @@ after the start of the working day ("late"), in the person's "language": "vi" Vi
 
 Rules:
 - One or two short sentences, at most 20 words: natural, warm, cheerful, the way a friendly colleague would say it.
-- Call name: the name colleagues use. For a Vietnamese full name that is the given name, the last word \
-(Nguyễn Văn Minh: Minh); for a Western-style name with the family name last, the first name (Alvin Vu: Alvin). \
-A one-word name, a nickname or a team name (Head Chef) stays as written.
+- Call each person exactly by their "name", as written: it is the name colleagues use.
 - Vietnamese: when "address" is "anh" or "chị", call the person "<address> <call name>" and refer to them with that word. \
 When "address" is empty, use only the call name, without anh, chị, em or bạn. No English words except the name.
 - English: use only the call name (no anh or chị), plain everyday English, no Vietnamese words except the name.
@@ -93,21 +99,44 @@ def call_name(name: str) -> str:
     return name.strip()
 
 
+def called(person) -> str:
+    """What the greeting calls someone: their email's first part (alan@… is Alan), else from their name. When it is
+    a word of their name without the accents (bach@ for Hoàng Minh Bách), the accented word, so the voice says it right."""
+    local = re.split(r"[._+\-]", (person.email or "").partition("@")[0])[0]
+    local = re.sub(r"\d+", "", local)
+    if not local:
+        return call_name(person.name)
+    same = [w for w in person.name.split() if _plain_word(w) == local.lower()]
+    return same[-1] if same else local.capitalize()
+
+
 def addressed(name: str, honorific: str) -> str:
     """What the built-in greetings call someone: "anh Minh", "chị Lan", or just "Minh"."""
     said = SAID.get(honorific)
-    return f"{said} {call_name(name)}" if said else call_name(name)
+    return f"{said} {name}" if said else name
 
 
 def plain(name: str, honorific: str, late: bool, language: str = "vi") -> str:
-    """The greeting when Claude wrote none (no key, no network, someone added today)."""
+    """The greeting when Claude wrote none (no key, no network, someone added today); `name` as it is said."""
     if language == "en":
-        who = call_name(name)
+        who = name
         return f"{who} is here! Let's have a great day." if late else f"Good morning, {who}! Have a great day."
     who = addressed(name, honorific)
     if late:
         return f"{who[0].upper()}{who[1:]} đến rồi! Vào làm việc vui vẻ nhé."
     return f"Chào {who}! Chúc một ngày làm việc vui vẻ."
+
+
+def _listed(names: list[str], word: str) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" {word} " + names[-1]
+
+
+def together(people: list, language: str) -> str:
+    """One cheerful greeting for several people arriving at once; never about being late."""
+    if language == "en":
+        return random.choice(TOGETHER_EN).format(names=_listed([called(p) for p in people], "and"))
+    names = _listed([addressed(called(p), p.honorific) for p in people], "và")
+    return random.choice(TOGETHER_VI).format(names=names)
 
 
 def rules_for(service, day: dt.date) -> dict:
@@ -183,12 +212,13 @@ class Greeter:
         late = self.is_late(person, ts)
         entry = self._entry(person, ts.date())
         written = entry.get("late" if late else "on_time") or []
-        return random.choice(written) if written else plain(person.name, person.honorific, late, person.greet_language)
+        return random.choice(written) if written else plain(called(person), person.honorific, late, person.greet_language)
 
     def _entry(self, person, day: dt.date) -> dict:
         """Today's written sentences for someone, unless written for another language or address than they now have."""
         entry = self.lines(day).get(person.id, {})
-        same = entry.get("language", "vi") == person.greet_language and entry.get("honorific", "") == person.honorific
+        same = (entry.get("language", "vi"), entry.get("honorific", ""), entry.get("called")) == (
+            person.greet_language, person.honorific, called(person))
         return entry if same else {}
 
     def write_if_due(self) -> bool:
@@ -213,7 +243,7 @@ class Greeter:
                 written = self._write(group, day)
                 for p in group:  # what they were written for: a change later in the day gets new ones
                     if p.id in written:
-                        have[p.id] = {**written[p.id], "language": p.greet_language, "honorific": p.honorific}
+                        have[p.id] = {**written[p.id], "language": p.greet_language, "honorific": p.honorific, "called": called(p)}
                 self.store.put(LINES_KEY, json.dumps({"day": day.isoformat(), "model": s.model, "people": have}))
         except Exception as exc:
             self._failed_at = time.monotonic()
@@ -229,7 +259,7 @@ class Greeter:
 
         s = self.settings
         ids = {str(n): p.id for n, p in enumerate(people, 1)}
-        listed = [{"id": n, "name": p.name, "language": p.greet_language,
+        listed = [{"id": n, "name": called(p), "language": p.greet_language,
                    "address": SAID.get(p.honorific, "") if p.greet_language == "vi" else ""} for n, p in zip(ids, people)]
         from .occasions import occasion_on
 
@@ -296,26 +326,55 @@ class Greeter:
         return {"ok": True, "message": " ".join(text for text, _ in said)}
 
     def speak_next(self, timeout: float | None = None) -> bool:
+        """Greet whoever is waiting: one person on their own, several at once together (one sentence per
+        language), so a group walking in is greeted before it has walked on. True if anything was said."""
         try:
-            employee_id, ts, queued = self._queue.get(timeout=timeout)
+            batch = [self._queue.get(timeout=timeout)]
         except queue.Empty:
             return False
-        if time.monotonic() - queued > STALE_S:
-            return False
-        person = self.store.employee(employee_id)
-        if person is None or not person.greet:
-            return False
-        text = self.sentence(person, ts)
-        try:
-            self._speak(text, person.greet_language)
-        except Exception as exc:
-            self.error = f"{ts:%H:%M} could not speak: {type(exc).__name__}: {str(exc)[:200]}"
-            log.warning("Greetings: %s", self.error)
-            return False
-        day = ts.date().isoformat()
-        self.spoken = {day: self.spoken.get(day, 0) + 1}
-        log.info("Greeted %s: %s", employee_id, text)
-        return True
+        while True:  # the ones recognised while the previous greeting was being said
+            try:
+                batch.append(self._queue.get_nowait())
+            except queue.Empty:
+                break
+        waiting = []
+        for employee_id, ts, queued in batch:
+            person = self.store.employee(employee_id)
+            if person is not None and person.greet and person.id not in {p.id for p, _, _ in waiting}:
+                waiting.append((person, ts, queued))
+        said_any = False
+        for text, language, group in self._plan(waiting):
+            if all(time.monotonic() - queued > STALE_S for _, _, queued in group):
+                continue  # they have walked on
+            ts = group[0][1]
+            try:
+                self._speak(text, language)
+            except Exception as exc:
+                self.error = f"{ts:%H:%M} could not speak: {type(exc).__name__}: {str(exc)[:200]}"
+                log.warning("Greetings: %s", self.error)
+                return said_any
+            day = ts.date().isoformat()
+            self.spoken = {day: self.spoken.get(day, 0) + len(group)}
+            log.info("Greeted %s: %s", ", ".join(p.id for p, _, _ in group), text)
+            said_any = True
+        return said_any
+
+    def _plan(self, waiting: list) -> list[tuple[str, str, list]]:
+        """(sentence, language, the people it greets): their own line for one person, a shared one for several."""
+        if len(waiting) == 1:
+            person, ts, _ = waiting[0]
+            return [(self.sentence(person, ts), person.greet_language, waiting)]
+        plan = []
+        for language in ("vi", "en"):
+            mine = [w for w in waiting if w[0].greet_language == language]
+            for i in range(0, len(mine), GROUP_NAMES):
+                group = mine[i:i + GROUP_NAMES]
+                if len(group) == 1:
+                    person, ts, _ = group[0]
+                    plan.append((self.sentence(person, ts), language, group))
+                else:
+                    plan.append((together([p for p, _, _ in group], language), language, group))
+        return plan
 
     # threads ----------------------------------------------------------------------------------
 

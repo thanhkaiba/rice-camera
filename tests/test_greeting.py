@@ -4,7 +4,7 @@ import time
 
 from attendance import server
 from attendance.core import greeting
-from attendance.core.greeting import Greeter, plain, rules_for
+from attendance.core.greeting import Greeter, called, plain, rules_for
 from conftest import DAY, at
 from test_edge import AUTH, HASH, PASSWORD, admin, follower, live  # noqa: F401  (live is a fixture)
 
@@ -28,11 +28,20 @@ def make(core, written=None, fail=False):
 
 
 def test_built_in_greetings_use_anh_chi_or_the_name():
-    assert plain("Nguyễn Văn Minh", "anh", False) == "Chào anh Minh! Chúc một ngày làm việc vui vẻ."
-    assert plain("Trần Thị Lan", "chi", True) == "Chị Lan đến rồi! Vào làm việc vui vẻ nhé."
+    assert plain("Minh", "anh", False) == "Chào anh Minh! Chúc một ngày làm việc vui vẻ."
+    assert plain("Lan", "chi", True) == "Chị Lan đến rồi! Vào làm việc vui vẻ nhé."
     assert plain("Bob", "", False).startswith("Chào Bob!")
-    assert plain("Alvin Vu", "anh", False).startswith("Chào anh Alvin!")
-    assert plain("Head Chef", "", True).startswith("Head Chef đến rồi!")
+
+
+def test_people_are_called_by_their_email():
+    from types import SimpleNamespace as P
+
+    assert called(P(email="alan@offspring.com", name="Bùi Quang Huy")) == "Alan"
+    assert called(P(email="thanh.nguyen2@x.com", name="x")) == "Thanh"
+    assert called(P(email="bach@x.com", name="Hoàng Minh Bách")) == "Bách"
+    assert called(P(email="chien@x.com", name="Đường Minh Chiến")) == "Chiến"
+    assert called(P(email="", name="Nguyễn Văn Minh")) == "Minh"
+    assert called(P(email="", name="Alvin Vu")) == "Alvin"
 
 
 def test_the_first_arrival_of_the_day_is_greeted_once(core):
@@ -176,7 +185,7 @@ def test_server_build_has_no_greeter(tmp_path):
 def test_english_and_switched_off_people(core):
     app, clock, g, said, asked = make(core)
     app.store.set_greetings({"A": {"language": "en"}, "B": {"greet": False}})
-    assert plain("Alvin Vu", "anh", True, "en") == "Alvin is here! Let's have a great day."
+    assert plain("Alvin", "anh", True, "en") == "Alvin is here! Let's have a great day."
     for emp in "AB":
         app.service.on_identified(emp, at(8, 40), 0.9, None)
     g.speak_next(timeout=0), g.speak_next(timeout=0)
@@ -207,3 +216,37 @@ def test_the_employee_page_sets_the_greeting(live):  # noqa: F811
     assert c.post("/employees/A", data=form, headers=admin()).status_code == 302
     a = core.store.employee("A")
     assert (a.greet, a.greet_language, a.honorific) == (False, "en", "chi")
+
+
+def test_people_arriving_together_get_one_greeting_per_language(core, monkeypatch):
+    app, clock, g, said, _ = make(core)
+    monkeypatch.setattr(greeting.random, "choice", lambda options: options[0])
+    app.store.set_greetings({"A": {"honorific": "chi"}, "B": {"honorific": "anh"}, "C": {"language": "en"}})
+    for emp in "ABC":
+        app.service.on_identified(emp, at(10, 20), 0.9, None)  # late, but together: one cheerful line
+    assert g.speak_next(timeout=0)
+    assert said == ["Chào chị Alice và anh Bob! Chúc cả nhà một ngày làm việc vui vẻ.",
+                    ("en", "Carol is here! Let's have a great day.")]  # alone in English: her own (late) line
+    assert g.spoken == {DAY.isoformat(): 3}
+
+
+def test_a_big_group_is_split_and_each_name_said_once(core):
+    app, clock, g, said, _ = make(core)
+    from types import SimpleNamespace as P
+
+    people = [P(email=f"{n}@x.com", name="x", honorific="", greet_language="vi") for n in ("an", "binh", "chi", "dung")]
+    assert "An, Binh, Chi và Dung!" in greeting.together(people, "vi")
+    many = [(P(id=str(i), email=f"p{i}@x.com", name="x", honorific="", greet_language="vi", greet=True, not_counted=False), at(8, 40), time.monotonic())
+            for i in range(greeting.GROUP_NAMES + 1)]
+    assert len(g._plan(many)) == 2
+    g.arrived("A", at(8, 40)), g.arrived("A", at(8, 40))
+    g.speak_next(timeout=0)
+    assert said == ["Chào Alice! Chúc một ngày làm việc vui vẻ."]
+
+
+def test_people_never_counted_late_get_the_happy_greeting(core):
+    app, clock, g, said, _ = make(core)
+    app.store.update_employee("A", "Alice", True, exempt=True)
+    app.service.on_identified("A", at(10, 45), 0.9, None)
+    g.speak_next(timeout=0)
+    assert said == ["Chào Alice! Chúc một ngày làm việc vui vẻ."]
