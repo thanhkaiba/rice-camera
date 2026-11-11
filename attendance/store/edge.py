@@ -16,6 +16,7 @@ DAY_TABLES = {  # columns whose change means the day must be sent again
     "outages": "start, end",
 }
 BLOB = "$b"
+EDGE_JOB_LAST_KEY = "edge_job_last"  # the last job id given, so none is given again
 
 
 def _plain(row: sqlite3.Row) -> dict:
@@ -98,7 +99,16 @@ class EdgeStoreMixin:
 
     # On the server -------------------------------------------------------------
     def edge_job_add(self, kind: str, payload: dict, now: dt.datetime) -> None:
-        self._exec("INSERT INTO edge_jobs (kind, payload, created_at) VALUES (?, ?, ?)", (kind, json.dumps(payload), now.isoformat()))
+        """A job for the Mac. Ids are never given twice (SQLite would start again at 1 once the table is
+        empty), so the Mac can tell a new job from one it already did."""
+        with self._lock, self._db:
+            last = self._db.execute("SELECT value FROM kv WHERE key = ?", (EDGE_JOB_LAST_KEY,)).fetchone()
+            top = self._db.execute("SELECT COALESCE(MAX(id), 0) FROM edge_jobs").fetchone()[0]
+            job_id = max(int(last[0]) if last else 0, top) + 1
+            self._db.execute("INSERT INTO edge_jobs (id, kind, payload, created_at) VALUES (?, ?, ?, ?)",
+                             (job_id, kind, json.dumps(payload), now.isoformat()))
+            self._db.execute("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                             (EDGE_JOB_LAST_KEY, str(job_id)))
 
     def edge_jobs(self, limit: int = 20) -> list[dict]:
         return [{"id": r["id"], "kind": r["kind"], "payload": json.loads(r["payload"])}

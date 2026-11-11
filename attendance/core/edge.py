@@ -35,7 +35,9 @@ TIMEOUT_S = 30.0
 PERMANENT = {400, 404, 413, 415, 422}
 FOLLOWING_KEY = "edge_following"  # set while the server is the one in charge
 FOLLOW_KEY = "edge_follow_versions"
-JOBS_KEY = "edge_jobs_done"
+# Results the server has not acknowledged yet, by job id, sent again until it has; a delivered one is
+# forgotten. ("edge_jobs_done", before, kept every result, and an id the server gave again got an old answer.)
+JOBS_KEY = "edge_jobs_unsent"
 FOLLOW_S = 30.0
 FETCH_EMBEDDINGS = 200
 JOBS_REMEMBERED = 50
@@ -214,16 +216,19 @@ class EdgeClient:
             self._do_job(job)
 
     def _do_job(self, job: dict) -> None:
-        done = json.loads(self.store.get(JOBS_KEY) or "{}")
-        result = done.get(str(job["id"]))
+        key = str(job["id"])
+        unsent = json.loads(self.store.get(JOBS_KEY) or "{}")
+        result = unsent.get(key)
         if result is None:  # a result the server did not get is sent again, the photo is not added twice
             result = self.on_say() if job.get("kind") == "say" else self._add_uploaded(job["payload"])
-            done[str(job["id"])] = result
-            kept = sorted(done, key=int)[-JOBS_REMEMBERED:]
-            self.store.put(JOBS_KEY, json.dumps({k: done[k] for k in kept}))
+            unsent[key] = result
+            self.store.put(JOBS_KEY, json.dumps(dict(list(unsent.items())[-JOBS_REMEMBERED:])))
         status, _ = self._send("POST", f"/api/edge/jobs/{job['id']}/result", json.dumps(result).encode(), "application/json")
         if status != 200 and status not in PERMANENT:
             raise ConnectionError(f"job result answered HTTP {status}")
+        unsent = json.loads(self.store.get(JOBS_KEY) or "{}")
+        unsent.pop(key, None)  # the server has it and has closed the job: a later job with this id is a new one
+        self.store.put(JOBS_KEY, json.dumps(unsent))
 
     def _add_uploaded(self, payload: dict) -> dict:
         status, data = self._send("GET", "/api/edge/files/" + urllib.parse.quote(payload["image"]), b"", "application/octet-stream")

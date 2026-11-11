@@ -583,3 +583,22 @@ def test_a_mac_never_loses_its_camera_to_an_empty_server_address(tmp_path):
     core = App(cfg, now=lambda: at(10, 30))
     core._config_from_server({"camera": {"url": "", "more": "", "process_fps": 7.0}})
     assert cfg.camera.url == "rtsp://cam/1" and cfg.camera.process_fps == 7.0
+
+
+def test_a_second_job_is_done_even_when_the_server_gives_the_same_id(live, tmp_path):
+    _, core, c = live
+    mac, edge = follower(live, tmp_path)
+    said = []
+    edge.on_say = lambda: said.append(1) or {"ok": True, "message": f"test {len(said)}"}
+    for _ in range(2):
+        assert c.post("/settings/greeting/test", headers=admin()).status_code == 302
+        edge.follow()
+    assert said == [1, 1] and core.store.edge_jobs() == []
+    page = c.get("/audit", headers=admin()).get_data(as_text=True)
+    assert "said: test 1" in page and "said: test 2" in page
+    core.store.edge_job_add("say", {"kind": "say"}, core.service.now())
+    assert core.store.edge_jobs()[0]["id"] == 3  # never 1 again, though the table was empty
+    mac.put("edge_jobs_unsent", json.dumps({"3": {"ok": True, "message": "sent before"}}))
+    edge.follow()  # a result the server did not get is sent again, not done twice
+    assert said == [1, 1] and "said: sent before" in c.get("/audit", headers=admin()).get_data(as_text=True)
+    assert json.loads(mac.get("edge_jobs_unsent")) == {}
