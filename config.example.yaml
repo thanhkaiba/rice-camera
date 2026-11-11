@@ -113,3 +113,8 @@ camera_api:
   send_at: ""  # HH:MM local time, after schedule.late_after; empty uses schedule.window_end
   url: ""  # e.g. https://script.google.com/macros/s/DEPLOYMENT_ID/exec; empty disables reporting
   key: ""  # CAMERA_SECRET from the server administrator
+
+# Office Mac only: the server portal it sends arrivals to and takes people, faces and settings from.
+edge:
+  server_url: ""  # e.g. https://checkin.example.com; empty: this computer works on its own
+  token: ""  # the token whose SHA-256 is CHECKIN_EDGE_TOKEN_SHA256 on the server

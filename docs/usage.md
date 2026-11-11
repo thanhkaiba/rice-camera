@@ -1,0 +1,68 @@
+# Using it
+
+How arrivals are counted, the pages, the HR system, accuracy and privacy. Installing: [README](../README.md) and [install.md](install.md).
+
+## How it decides
+
+Times are set in Settings; defaults shown.
+
+| | |
+|---|---|
+| Seen through **10:00:59** | On time |
+| Not seen by **10:01**, or seen later | Late (a late arrival is posted as it happens) |
+| Not seen all morning | "Not seen" in the summary |
+| On leave or holiday (HR system) | Never late or missing; holidays send nothing |
+| Marked *never count as late* (the boss) | Arrival recorded, never reported |
+| Camera down all day | Nobody counted as missing |
+| Face unsure | Goes to **Review**; confirming records the arrival and teaches the face |
+
+**Google Chat**, all in one thread per day: the not-seen list at 10:01 (skipped when everyone is already in), each late arrival, faces to review (one link, batched), a summary at 11:00, and warnings when the camera is down or two people's photos look alike. A separate **late message**, with counts and one person per line under **Late arrivals** and **Not seen**, goes out when the camera stops; its wording is in Settings. It carries one picture of the late people: each one cut out of the camera photo and put on a cheerful drawn scene (or a picture you upload in Settings) with a name tag and the time; Google Chat shows it only when the page's address is https and reachable from the internet (see [remote access](install.md#remote-access)), otherwise the message links to it. @mentions need each person's Google Chat user ID (People page).
+
+Several cameras (a second door) can be watched at once: list the extra addresses in Settings → Camera → *More cameras*; they share the settings, each has its own tracker, and each costs as much CPU as the first. The camera only runs during the camera hours (default 08:00–11:00). Someone who arrives before 08:00 and does not pass again is counted as late, so set the start time early enough.
+
+## Using it
+
+- **Today:** everyone's status. Click a person to correct: move a sighting to the right person (the face is learned for them), mark it *Not them*, type an arrival time, or delete the arrival. The page says when everyone is in. **Evidence** (a link in that dialog) is a printable page for the person's day: the camera pictures with the time stamp burned in, every sighting, every correction, and whether the files are unchanged since they were taken; also as a ZIP to hand over.
+- **Review:** each unidentified face track gets its own card. A walk the camera loses for a moment (a turned or masked face, a slow computer) continues the card it just left when the new track begins within 5 s and looks like it, so one visit is one card with several photos. Different faces in the same camera picture stay separate, even when they look alike; later visits create new cards too. Existing cards with several photos still let you select individual photos: *Confirm selected* names and learns only those photos, while *Delete selected* removes them from review. Unselected photos stay pending. You can also pick a person, add a *New employee*, or *Skip* a whole card. Nothing reloads: the card goes and the next one is shown. After a confirmation, the other cards of that day that look like the confirmed face are offered ("3 more cards look like X"): *Confirm all* names them in one go, *Show them* selects them to look at first. Select cards and *Name selected* to confirm several as one person; the keys (arrows, Enter, 1–3, O, S, D, X) act on the highlighted card. Start without any photos this way: let the camera run a day, name each face once.
+- **People:** add by email and name, or import CSV (`email,name`, optional `chat_user`). Email is unique; names may repeat. Upload 5–10 photos each and switch *never count as late* when needed. Each reference shows image clarity out of 100 and a **Recognition check**: consistency with different photos of the same person, separation from active colleagues, and near-duplicates. Use **Re-evaluate quality** in People or a person's profile to update these checks for all employees. Results are saved between visits and restarts; changed photos or recognition settings require another evaluation instead of running checks on page load. A photo and its near-duplicates are excluded from their own check, using the current recognition thresholds and matching rules. These findings help inspect misplaced or redundant references; they are not measured camera accuracy and never automatically delete or exclude photos. Old photos get clarity scores in the background when recognition starts. In a person's profile, tick photos or *Select all photos*, then *Delete selected* and confirm to remove their images and face data.
+  *Delete below score* removes references below a chosen displayed Image score (default **20/100**) after confirming the count; equal-score and unscored photos are kept.
+- **Leave & holidays** (People page, or *On leave* in a person's Today dialog): enter leave, holidays and extra work days by hand. They count like the HR system's, are kept when it updates, and a hand-entered day wins over its day.
+- **Personal page:** each person's page (link on their People page) shows only their own arrivals and leave, without the admin password; they can write a note for a day ("business trip") that shows on Today. *New link* makes the old one stop working.
+- **Read-only login** (Settings → Access): sees Today, Review and Reports, cannot change anything.
+- **Reports:** late & absence per person and per day (CSV), recognition accuracy from your corrections, change log.
+- **Camera:** live picture with labelled faces; draw the **detection area** over the walkway. **Enrol at the door:** pick a person and turn the screen towards them; the picture walks them through five steps in big letters (look at the camera, come close, turn to one side, the other side, mask on), ticks each one off as the camera sees it, and says when there is enough. The clearest different views seen in those 90 seconds become their reference photos (up to 8); a step can be skipped, and the time extended. The camera's own pictures beat ID photos as references, because they show the face as this camera sees it. Only one person may be in view, and their arrival is not recorded meanwhile.
+- **Settings:** hours, notifications, camera, access, HR system, recognition. Light/dark follows the system; the moon/sun button switches.
+
+The automatic Google Chat late message includes both late arrivals (with arrival times) and a
+separate **Not seen** list, excluding leave and exempt employees. Configure **Settings → Notifications
+→ Daily late message → Send automatically at**; an empty time uses the end of camera hours.
+Turn **Include not seen employees** off to list only late arrivals. The Today preview and Send button
+use the same option. Only late arrivals appear in the attached picture.
+
+## HR system
+
+`GET <url>?from=…&to=…` with a bearer token, returning holidays, make-up work days and leave as JSON; refreshed every 15 minutes. Format and options: [docs/hr-api.md](hr-api.md). Other formats: change `parse()` in `attendance/integrations/leave_api.py`.
+
+To report late arrivals to the fine server, set `camera_api.url` (HTTPS web app `/exec` URL) and
+`camera_api.key` (`CAMERA_SECRET`) in `config.yaml`. Settings → HR system → **Camera API · Late fines**
+can override either value independently, apply changes immediately, and reset each value with **Use config.yaml**.
+A blank key in the form keeps the current key; a blank URL disables delivery. **Test connection** uses
+`camera.ping`, which creates no fine. Protocol: [docs/CAMERA-API.md](CAMERA-API.md).
+
+Delivery runs in the background after camera hours, in batches of at most 200. Enabling it also sends
+unsent late arrivals from the previous 7 days; older arrivals and weekends are excluded. Reports use
+the Today attendance rules, including exemptions and Base permissions, and wait when configured HR
+data is unavailable. Network/server failures retry every 30 seconds and survive restarts. Successful,
+duplicate and skipped events are remembered; rejected events appear in Audit and retry only after
+local event data changes. Settings shows delivery status. Local attendance corrections do not cancel
+fines already created: an administrator must cancel those on the server.
+
+## Accuracy and licence
+
+Camera placement matters most: face height, people walking towards it, light from the front, faces ≥ 80 px, no glass door behind. Then draw the detection area. Everything else (model choice, tuning with your photos, groups of people, slow computers, how wrong matches are avoided, test results on a public doorway video) is in [docs/recognition.md](recognition.md).
+
+The default `insightface` models are **non-commercial research only**; company use needs a licence from InsightFace or `backend: opencv` in `config.yaml` (free, less accurate).
+
+## Privacy
+
+Face photos are personal data: inform employees and get consent. Camera snapshots are deleted after 90 days, except for days on which the person was late: those are kept for a year as evidence (both in Settings); reference photos stay until deleted; deleting a person removes their face data. **Backup:** once a day everything is copied to a folder you choose (external drive, network share or cloud-synced folder); moving to another computer is `restore` from that folder, see [docs/install.md](install.md#backup-and-moving-to-another-computer). Everything is in the data folder (`attendance.db`, `faces/`, `crops/`, `attendance.log`). The admin page is for the office network only; for remote access use [Tailscale](https://tailscale.com), never an open port.
