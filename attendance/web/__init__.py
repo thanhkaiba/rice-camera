@@ -230,6 +230,9 @@ def create_app(core: "App") -> "Flask":
     reports_routes.register(app, core)
     settings_routes.register(app, core)
     status_routes.register(app, core)
+    from . import public_api
+
+    public_api.register(app, core)
 
     @app.get("/late-photo/<day>/<token>.jpg")
     def late_photo(day: str, token: str):

@@ -256,6 +256,24 @@
         <span class="hint">Alerts when this whole computer is off or asleep, which it cannot report itself: create a free check at healthchecks.io (period 1 minute), paste its ping URL here and add Google Chat or e-mail there</span>{{ src('healthcheck_url') }}</label>
     </div>
     <hr>
+    <h2 class="row">{{ icon('key') }}API for other systems</h2>
+    <p class="hint" style="margin-top:0">Lets another system (payroll, HR) read a person's arrival and lateness by day. Give each system its own key;
+      revoke it when the system stops using it. Send the developers this page:
+      <a href="{{ url_for('api_docs') }}" target="_blank" rel="noopener">{{ url_for('api_docs', _external=True) }}</a></p>
+    {% set keys = api_keys() %}
+    {% if keys %}
+    <table style="margin-bottom:12px">
+      <thead><tr><th>System</th><th>Made</th><th>Last used</th><th></th></tr></thead>
+      <tbody>{% for k in keys %}<tr><td>{{ k.name }}</td><td class="tnum">{{ k.created_at|replace('T', ' ') }}</td>
+        <td class="tnum">{{ (k.last_used or 'never')|replace('T', ' ') }}</td>
+        <td><button class="danger btn-sm" form="api-revoke-{{ k.id }}">{{ icon('trash') }}Revoke</button></td></tr>{% endfor %}</tbody>
+    </table>
+    {% endif %}
+    <div class="form-row" style="align-items:flex-end">
+      <label class="field grow">New key for<input name="name" form="api-key-new" placeholder="e.g. Payroll system" maxlength="60" autocomplete="off"></label>
+      <button class="btn-sm" form="api-key-new">{{ icon('plus') }}Make a key</button>
+    </div>
+    <hr>
     <h2 class="row">{{ icon('database') }}Backup</h2>
     <p class="hint" style="margin-top:0">Daily copy of the database, settings and photos to a folder: external drive, network share or a Drive / OneDrive / Dropbox folder.
       Move to another computer with <code>restore</code> from that folder.
@@ -413,6 +431,8 @@
     <button class="primary btn-lg">{{ icon('check') }}Save</button>
   </div>
 </form>
+<form method="post" action="{{ url_for('api_key_create') }}" id="api-key-new" hidden></form>
+{% for k in api_keys() %}<form method="post" action="{{ url_for('api_key_revoke', key_id=k.id) }}" id="api-revoke-{{ k.id }}" data-confirm="Revoke the key for {{ k.name }}? That system stops getting data at once." hidden></form>{% endfor %}
 <form method="post" action="{{ url_for('late_background') }}" enctype="multipart/form-data" id="late-bg" hidden></form>
 <form method="post" action="{{ url_for('choose_late_background') }}" id="late-bg-choose" hidden></form>
 <form method="post" action="{{ url_for('google_client') }}" enctype="multipart/form-data" id="google-client" hidden></form>
