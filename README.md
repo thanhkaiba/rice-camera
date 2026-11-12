@@ -20,6 +20,9 @@ flowchart LR
 
 Settings are made on the server; the Mac takes them within a minute.
 
+Development conventions: [Mac Camera vs web server responsibilities](docs/architecture.md).
+Camera/voice inference runs on the Mac; the server queues work and serves its results.
+
 ## Server
 
 Python 3.12, from this repository:

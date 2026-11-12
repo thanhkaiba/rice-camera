@@ -237,13 +237,13 @@
     <h3>Try any text with ZeroTTS</h3>
     <label class="field">Text to read
       <textarea name="text" form="voice-text-test" rows="3" maxlength="500" required placeholder="Nhập nội dung bạn muốn giọng đọc thử…"></textarea>
-      <span class="hint">Uses the voice selected above without saving settings. On the remote portal, Auto uses the camera's daily choice and needs a fresh heartbeat with ZeroTTS enabled. Up to 500 characters and 20 seconds of audio. Plays in this browser. The model and voice pack must be on this computer/server; first use may download models.</span>
+      <span class="hint">Uses the voice selected above without saving settings. Up to 500 characters and 20 seconds of audio. Plays in this browser. On the remote portal, audio is generated on the camera computer; Auto uses its daily voice. Keep the camera online. Pickup may take 30 seconds before generation starts.</span>
     </label>
     <button type="submit" form="voice-text-test" id="voice-text-button">Generate audio</button>
     <p class="hint" id="voice-text-status" role="status" aria-live="polite"></p>
     <audio id="voice-text-audio" controls preload="none" hidden aria-label="Listen to your text"></audio>
     <h3>Create a voice from a recording</h3>
-    <p class="hint">Use a clean recording of your own voice, or a speaker who has agreed to its use. The recording is processed on this computer/server, without an external voice service. Listen to the result before choosing it.</p>
+    <p class="hint">Use a clean recording of your own voice, or a speaker who has agreed to its use. The recording is processed on the camera computer, without an external voice service. Listen to the result before choosing it.</p>
     <div class="form-row">
       <label class="field">New voice name
         <input name="voice_name" form="voice-create" placeholder="giong-vinh" required maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*">
@@ -273,12 +273,12 @@
         <span class="hint">WAV, 3–30 seconds, mono or stereo, at most 25 MB.</span>
       </label>
     </details>
-    <p class="hint">Your microphone recording stays in this tab until you press Create voice. It is then sent to this app for local processing; no external voice service is used.</p>
+    <p class="hint">Your microphone recording stays in this tab until you press Create voice. It is then sent to this app and forwarded to the camera computer for processing; no external voice service is used.</p>
     <button type="submit" form="voice-create" id="voice-create-button">Create voice</button>
     <p class="hint" id="voice-creation-status" role="status" aria-live="polite"></p>
     <audio id="voice-creation-preview" controls preload="none" hidden></audio>
     <button type="submit" form="voice-use" id="voice-use-button" hidden>Use this voice</button>
-    <p class="hint">Missing ZeroTTS models download automatically on first use (about 1 GB; Internet required). The first test may take several minutes. Save changes before testing. Audio plays through the camera computer’s speaker.</p>
+    <p class="hint">Missing ZeroTTS models download on the camera computer on first use (about 1 GB; Internet required). Say a test greeting uses the camera speaker; text tests and creation previews play in this browser.</p>
     <div class="form-row">
       {{ field('greeting', 'voice', 'macOS Vietnamese voice', 'Used when the engine is macOS: Linh') }}
       {{ field('greeting', 'voice_en', 'English voice', 'For people greeted in English: Samantha, Daniel, Karen…') }}
@@ -609,13 +609,21 @@
     const data = new FormData(textForm);
     data.set('voice', document.querySelector('[name="greeting.zerotts_voice"]').value);
     textButton.disabled = true;
-    textStatus.textContent = 'Generating audio… First model download or load may take several minutes.';
+    textStatus.textContent = 'Generating audio… Waiting for the camera computer; this may take up to two minutes.';
     try {
-      const response = await fetch(textForm.action, {method: 'POST', body: data});
+      let response = await fetch(textForm.action, {method: 'POST', body: data});
+      while (response.status === 202) {
+        const pending = await response.json();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        response = await fetch(pending.preview_url, {cache: 'no-store'});
+      }
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
-        throw new Error(error.message || 'Could not generate audio. Please try again.');
+        throw new Error(`HTTP ${response.status} ${response.statusText || ''}: ${error.message || 'Could not generate audio. Check the server/proxy logs.'}`);
       }
+      const contentType = (response.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+      if (contentType !== 'audio/wav')
+        throw new Error(`Expected WAV audio but the server returned ${contentType || 'an unknown content type'} (HTTP ${response.status}). Check the server version and login.`);
       const blob = await response.blob();
       if (textAudioUrl) URL.revokeObjectURL(textAudioUrl);
       textAudioUrl = URL.createObjectURL(blob);
@@ -698,7 +706,7 @@
   async function refreshCreation() {
     try {
       const response = await fetch({{ url_for('greeting_creation_status')|tojson }});
-      if (!response.ok) throw new Error('Could not read voice creation status. Reload this page to retry.');
+      if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}: Could not read voice creation status. Reload this page to retry.`);
       showCreation(await response.json());
     } catch (error) {
       creationStatus.textContent = error.message;
@@ -720,8 +728,8 @@
     try {
       const response = await fetch(creationForm.action, {method: 'POST', body: data,
         headers: {'X-Requested-With': 'fetch'}});
-      const status = await response.json().catch(() => ({message: 'Upload failed. Choose a WAV under 25 MB and try again.'}));
-      if (!response.ok) throw new Error(status.message);
+      const status = await response.json().catch(() => ({message: 'Upload failed. Check the server/proxy logs.'}));
+      if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}: ${status.message}`);
       showCreation(status);
     } catch (error) {
       creatingVoice = false; recorder.onChange(recorder);

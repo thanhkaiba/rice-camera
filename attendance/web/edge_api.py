@@ -11,6 +11,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 import uuid
 from functools import wraps
 from typing import TYPE_CHECKING
@@ -26,7 +27,7 @@ from ..core import settings
 log = logging.getLogger(__name__)
 
 ENDPOINTS = {"edge_events", "edge_photo", "edge_heartbeat", "edge_state", "edge_sync", "edge_sync_embeddings",
-             "edge_file", "edge_job_result", "healthz"}
+             "edge_file", "edge_job_result", "edge_preview_upload", "healthz"}
 UPLOAD_PATH = re.compile(r"uploads/[0-9a-f]{32}")
 MAX_JOB_EMBEDDINGS = 500
 # What the Mac needs to run the camera. The detection area is drawn on the Mac and stays there.
@@ -206,7 +207,16 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
         config = mac_config()
         config_version = hashlib.md5(json.dumps(config, sort_keys=True).encode()).hexdigest()
         gallery = store.edge_gallery_version()
-        answer = {"mode": "live", "gallery": gallery, "config_version": config_version, "jobs": store.edge_jobs()}
+        jobs = []
+        for job in store.edge_jobs():
+            payload = job["payload"]
+            if job["kind"] in ("preview_text", "create_voice") and time.time() >= payload["expires"]:
+                store.edge_job_take(job["id"])
+                if job["kind"] == "create_voice":
+                    core.voice_creator.complete(payload, {"ok": False, "message": "Camera voice creation expired. Check that the camera is online and updated."})
+                continue
+            jobs.append(job)
+        answer = {"mode": "live", "gallery": gallery, "config_version": config_version, "jobs": jobs}
         if request.args.get("gallery") != gallery:
             answer.update(employees=store.edge_employee_rows(), embedding_keys=store.edge_embedding_keys())
         if request.args.get("config") != config_version:
@@ -234,13 +244,59 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
             abort(400, "bad path")
         return send_from_directory(core.data_dir, rel, mimetype="application/octet-stream")
 
+    @app.put("/api/edge/previews/<token>")
+    @from_the_mac
+    def edge_preview_upload(token):
+        request.max_content_length = 512 * 1024
+        try:
+            offset, total = int(request.args["offset"]), int(request.args["total"])
+        except (KeyError, ValueError):
+            abort(400, "expected upload offset and total")
+        if offset < 0 or not 12 <= total <= 4 * 1024 * 1024:
+            abort(400, "invalid preview audio size")
+        chunk = request.get_data()
+        if not chunk or offset + len(chunk) > total:
+            abort(400, "invalid preview audio chunk")
+        with app.extensions["voice_preview_lock"]:
+            preview = app.extensions["voice_previews"].get(token)
+            if preview is None or time.time() >= preview["expires"]:
+                abort(404, "preview expired or server restarted")
+            if offset == 0:
+                preview["upload"] = bytearray()
+                preview["upload_total"] = total
+            upload = preview.get("upload", bytearray())
+            if offset != len(upload) or total != preview.get("upload_total"):
+                abort(409, "unexpected preview audio offset")
+            upload.extend(chunk)
+            if len(upload) == total:
+                audio = bytes(preview.pop("upload"))
+                if not audio.startswith(b"RIFF") or audio[8:12] != b"WAVE":
+                    abort(400, "invalid WAV audio from camera")
+                preview["result"] = {"ok": True, "audio": audio}
+        return jsonify(ok=True)
+
     @app.post("/api/edge/jobs/<int:job_id>/result")
     @from_the_mac
     def edge_job_result(job_id: int):
+        request.max_content_length = 256 * 1024
         result = request.get_json(silent=True) or {}
+        if not isinstance(result, dict):
+            abort(400, "expected a job result")
         payload = store.edge_job_take(job_id)
         if payload is None:
             return jsonify(ok=True)  # the answer to a job already closed
+        if payload.get("kind") == "preview_text":
+            with app.extensions["voice_preview_lock"]:
+                preview = app.extensions["voice_previews"].get(payload["preview_id"])
+                if preview is not None:
+                    if not result.get("ok"):
+                        preview["result"] = {"ok": False, "message": str(result.get("message", "Camera could not generate audio."))[:400]}
+                    elif "result" not in preview:
+                        preview["result"] = {"ok": False, "message": "Camera returned no WAV audio."}
+            return jsonify(ok=True)
+        if payload.get("kind") == "create_voice":
+            core.voice_creator.complete(payload, result)
+            return jsonify(ok=True)
         if payload.get("kind") == "say":
             store.log(service.now(), "office computer", "test greeting",
                       ("said: " if result.get("ok") else "failed: ") + str(result.get("message", ""))[:400])

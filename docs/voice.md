@@ -7,6 +7,17 @@ and an Internet connection for initial setup. Files are kept in `models/ZeroTTS/
 the active config, across restarts and app updates. Downloads are checked with SHA-256
 before installation; failed downloads are retried on next use. No TTS API key is needed.
 Once models are installed, speech and voice creation work offline.
+
+If audio generation reports `No module named 'soundfile'`, install the project requirements
+in the camera app’s Python environment (or the standalone app serving Settings), then restart that application. If it instead
+reports `cannot load library 'libsndfile.so'`, Python found SoundFile but cannot load its
+native Linux library. SoundFile's platform wheels normally bundle that library; a source
+installation needs the OS package (on Debian/Ubuntu: `sudo apt-get install libsndfile1`).
+For a standalone Docker deployment, install the library in the container performing audio generation.
+See [SoundFile installation](https://python-soundfile.readthedocs.io/en/latest/#installation).
+Packaged desktop apps need the native library included at build time; the package self-test
+checks WAV reading/writing and resampling before release.
+
 Custom packs in `data/voices/` must still be transferred using the uploader or copied separately;
 they are never downloaded from a public repository.
 
@@ -19,12 +30,20 @@ To test other content, use **Try any text with ZeroTTS**. Choose a voice in the 
 enter up to 500 characters, and press **Generate audio**. Press Play in the audio player
 when ready. This uses the current dropdown selection without saving settings, calls no
 Claude API, and plays only in the browser. Each output is capped at 20 seconds, so longer
-text may be cut short. The WAV stays in memory; the app does not retain this test text/audio.
-On a remote portal the selected pack must be installed on the server as well as the camera.
-Auto previews use the camera's reported daily choice, never a separate choice on the server.
-Keep the camera online with ZeroTTS enabled and wait for its next heartbeat. Reports older
-than three minutes or from the previous camera-local day require a new heartbeat. If the
-chosen pack is missing on the server, the preview reports an error without substituting a voice.
+text may be cut short. On a remote portal, the server queues the text and selected voice for
+the camera computer, which generates WAV audio without playing its speaker. The browser
+polls for the result; no long HTTP request waits for model loading or synthesis. The server
+does not load or download ZeroTTS for text previews. Auto is resolved on the camera using
+its daily choice, and custom packs need only be installed on the camera.
+
+Update both the server and camera app before using remote text previews. Keep the camera
+online; it picks up the request on its next sync (normally within 30 seconds). A preview
+expires after two minutes; only one can be pending at a time. Text and audio are held
+temporarily in the delivery queue until delivery or expiry cleanup, and returned WAVs are
+not cached by the browser. A server restart discards pending browser results; generate
+again. HTTP errors show their actual status code and camera errors include the cause.
+The camera uploads WAV audio in chunks of at most 512 KB, below nginx’s default 1 MB
+request body limit, with a 4 MB limit for the complete preview. Audio quality is unchanged.
 
 Presets: `maichi`, `baotrang`, `kimoanh`, `hamy`, `giahuy`, `huuduc`, `quangminh`, `tiendat`.
 English greetings keep the configured macOS voice. The speed setting applies only to macOS.
@@ -74,19 +93,25 @@ the browser until Create voice sends its WAV to this app. No external voice serv
 Alternatively, expand **Or choose an existing WAV file** and choose a clean **3–30 second WAV**,
 mono or stereo, at most 25 MB. You do not need to create or select a file when using the microphone.
 
-Generation runs in the background on the computer/server serving Settings. The page shows
-progress and an audio player when ready. **Listen**, then press **Use this voice** to install
+On the remote portal, generation runs on the camera computer after its next sync. The
+server only validates the recording and stores the returned draft; it does not load or
+download speech or encoder models. A standalone camera app still creates drafts locally.
+The page shows progress and an audio player when ready. **Listen**, then press **Use this voice** to install
 and select it. Creation alone leaves the active voice unchanged.
 
-The app keeps the uploaded recording in RAM rather than retaining the original file. Only the
-generated pack and sample WAV are stored under the data directory's `voice-drafts/` folder.
-One job runs at a time; a finished draft survives a restart. An interrupted job needs a new upload.
+The standalone camera app keeps the uploaded recording in RAM. The remote portal temporarily
+queues the reference WAV under `data/uploads/` so the authenticated camera can fetch it;
+it removes the recording after completion or expiry cleanup. Creation expires after ten
+minutes. The generated pack and sample WAV are stored under `voice-drafts/`. One creation
+job runs at a time; a finished draft survives a restart. An interrupted job needs a new upload.
 The preview plays in the browser; the existing test greeting plays on the camera computer.
 
-No external voice service, Claude call or training is used for creation. The computer serving
-Settings needs the local ZeroTTS model plus two MOSS audio encoder files; this checkout is ready.
-See [local model setup](voice-local.md). A remote server needs these files even if the camera
-computer already has them. Using the created voice reuses the server-to-camera transfer below.
+No external voice service, Claude call or training is used for creation. The camera computer
+needs the local ZeroTTS model plus two MOSS audio encoder files; they download there on
+first use. See [local model setup](voice-local.md). Update both server and camera before use.
+Using the created voice reuses the server-to-camera transfer below. Reference recordings
+are still sent from the browser as one multipart upload (up to 25 MB); if nginx rejects that
+upload, the page reports HTTP 413. The existing proxy upload limit must allow the recording.
 
 ### Import a finished voice pack
 

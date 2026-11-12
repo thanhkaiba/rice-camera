@@ -62,6 +62,10 @@ class EdgeClient:
         self.on_rules = lambda rules: None
         self.on_arrived = lambda arrived: None
         self.on_say = lambda: {"ok": False, "message": "no greetings on this computer"}
+        self.render_text = None
+        self.on_create_voice = None
+        self._preview_results = {}
+        self._creation_jobs = {}
 
     @property
     def enabled(self) -> bool:
@@ -216,17 +220,91 @@ class EdgeClient:
             self.on_rules(answer["greeting"])
         if "arrived" in answer:
             self.on_arrived(answer["arrived"])
-        for job in answer.get("jobs", []):
+        jobs = answer.get("jobs", [])
+        active = {str(job["id"]) for job in jobs}
+        self._preview_results = {key: item for key, item in self._preview_results.items()
+                                 if key in active and time.time() < item["expires"]}
+        self._creation_jobs = {key: item for key, item in self._creation_jobs.items()
+                               if item["thread"].is_alive() or key in active and time.time() < item["expires"]}
+        for job in jobs:
             self._do_job(job)
 
+    def _upload_preview(self, token: str, audio: bytes) -> None:
+        if not 12 <= len(audio) <= 4 * 1024 * 1024:
+            raise ValueError("Preview audio must be a WAV of at most 4 MB.")
+        for offset in range(0, len(audio), 512 * 1024):
+            path = f"/api/edge/previews/{urllib.parse.quote(token)}?offset={offset}&total={len(audio)}"
+            status, body = self._send("PUT", path, audio[offset:offset + 512 * 1024], "audio/wav")
+            if status != 200:
+                raise ConnectionError(f"preview upload answered HTTP {status}: {body[:200].decode(errors='replace')}")
+
+    def _do_preview(self, job: dict) -> None:
+        key, payload = str(job["id"]), job["payload"]
+        cached = self._preview_results.get(key)
+        if cached is None:
+            try:
+                if time.time() >= payload["expires"]:
+                    raise ValueError("Text preview expired. Generate audio again.")
+                if self.render_text is None:
+                    raise ValueError("Text previews are not available on this camera. Update the camera app.")
+                audio = self.render_text(payload["text"], payload["voice"])
+                if not 12 <= len(audio) <= 4 * 1024 * 1024:
+                    raise ValueError("Preview audio must be a WAV of at most 4 MB.")
+                result = {"ok": True}
+            except Exception as exc:
+                log.exception("Text voice preview failed on camera")
+                audio = None
+                result = {"ok": False, "message": f"Camera: {type(exc).__name__}: {exc}"[:400]}
+            cached = {"expires": payload["expires"], "result": result, "audio": audio}
+            self._preview_results[key] = cached
+        if cached["audio"] is not None and not cached.get("uploaded"):
+            self._upload_preview(payload["preview_id"], cached["audio"])
+            cached["uploaded"] = True
+        status, _ = self._send("POST", f"/api/edge/jobs/{job['id']}/result",
+                               json.dumps(cached["result"]).encode(), "application/json")
+        if status != 200 and status not in PERMANENT:
+            raise ConnectionError(f"job result answered HTTP {status}")
+        self._preview_results.pop(key, None)
+
+    def _run_creation(self, payload: dict, pending: dict) -> None:
+        try:
+            if time.time() >= payload["expires"]:
+                raise ValueError("Voice creation expired. Upload the recording again.")
+            if self.on_create_voice is None:
+                raise ValueError("Voice creation is not available on this camera. Update the app.")
+            pending["result"] = self.on_create_voice(payload)
+        except Exception as exc:
+            log.exception("Voice creation failed on camera")
+            pending["result"] = {"ok": False, "message": f"Camera: {type(exc).__name__}: {exc}"[:400]}
+
     def _do_job(self, job: dict) -> None:
+        if job.get("kind") == "preview_text":
+            self._do_preview(job)
+            return
         key = str(job["id"])
         unsent = json.loads(self.store.get(JOBS_KEY) or "{}")
         result = unsent.get(key)
         if result is None:  # a result the server did not get is sent again, the photo is not added twice
-            result = self.on_say() if job.get("kind") == "say" else self._add_uploaded(job["payload"])
+            if job.get("kind") == "create_voice":
+                pending = self._creation_jobs.get(key)
+                if pending is None and time.time() >= job["payload"]["expires"]:
+                    result = {"ok": False, "message": "Voice creation expired. Upload the recording again."}
+                elif pending is None:
+                    pending = {"expires": job["payload"]["expires"]}
+                    pending["thread"] = threading.Thread(target=self._run_creation, args=(job["payload"], pending),
+                                                         name="edge-create-voice", daemon=True)
+                    self._creation_jobs[key] = pending
+                    pending["thread"].start()
+                    return
+                elif pending["thread"].is_alive():
+                    return
+                else:
+                    result = pending["result"]
+            else:
+                result = self.on_say() if job.get("kind") == "say" else self._add_uploaded(job["payload"])
             unsent[key] = result
             self.store.put(JOBS_KEY, json.dumps(dict(list(unsent.items())[-JOBS_REMEMBERED:])))
+            self._creation_jobs.pop(key, None)
         status, _ = self._send("POST", f"/api/edge/jobs/{job['id']}/result", json.dumps(result).encode(), "application/json")
         if status != 200 and status not in PERMANENT:
             raise ConnectionError(f"job result answered HTTP {status}")

@@ -196,7 +196,16 @@ def main() -> None:
         import anthropic  # the greeting at the door; built only, nothing is sent
 
         anthropic.Anthropic(api_key="self-test")
-        print(f"Self-test passed: models load, {len(faces)} faces in a black picture, pages render, Claude SDK {anthropic.__version__}.")
+        import io
+        import soundfile as sf
+        import zerotts
+        from .core.voice_creation import prepare_reference
+
+        wav = io.BytesIO()
+        sf.write(wav, np.full(48000, 0.1, dtype=np.float32), 16000, format="WAV")
+        assert prepare_reference(wav.getvalue()).shape == (1, 2, 144000)
+        print(f"Self-test passed: models load, {len(faces)} faces in a black picture, pages render, "
+              f"Claude SDK {anthropic.__version__}, ZeroTTS imports, WAV and resampling work.")
     elif args.command in ("report", "test-chat"):
         from .core.pipeline import App
 

@@ -275,6 +275,29 @@ def register(app: Flask, core: "App") -> None:
         return (done if ok else failed)(message, "settings_page", _anchor="greeting")
 
     text_preview_lock = threading.Lock()
+    app.extensions["voice_previews"] = previews = {}
+    app.extensions["voice_preview_lock"] = text_preview_lock
+
+    @app.get("/settings/greeting/preview-text/<preview_id>")
+    def greeting_preview_text_result(preview_id):
+        with text_preview_lock:
+            preview = previews.get(preview_id)
+            if preview is None or preview.get("kind") != "preview_text":
+                return jsonify(ok=False, message="Preview expired or server restarted. Generate audio again."), 404
+            if time.time() >= preview["expires"]:
+                store.edge_job_take(preview["job_id"])
+                previews.pop(preview_id)
+                return jsonify(ok=False, message="Camera did not return audio within 120 seconds. Check that it is online and updated."), 504
+            if "result" not in preview:
+                response = jsonify(ok=True, preview_url=url_for("greeting_preview_text_result", preview_id=preview_id))
+                response.headers["Cache-Control"] = "private, no-store"
+                return response, 202
+            result = previews.pop(preview_id)["result"]
+        if not result["ok"]:
+            return jsonify(ok=False, message=result["message"]), 502
+        response = send_file(io.BytesIO(result["audio"]), mimetype="audio/wav", download_name="voice-test.wav")
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     @app.post("/settings/greeting/preview-text")
     def greeting_preview_text():
@@ -283,18 +306,20 @@ def register(app: Flask, core: "App") -> None:
         voice = request.form.get("voice", cfg.greeting.zerotts_voice)
         if not text or len(text) > 500:
             return jsonify(ok=False, message="Enter between 1 and 500 characters."), 400
-        if core.photos_read_elsewhere and voice == "auto":
-            daily = ((edge_heartbeat(store) or {}).get("greeting") or {}).get("daily_voice") or {}
-            try:
-                at = dt.datetime.fromisoformat(daily.get("at", ""))
-                now = service.now()
-                if (at.tzinfo is None or not 0 <= (now - at).total_seconds() <= 180
-                        or now.astimezone(at.tzinfo).date() != at.date() or not daily.get("name")):
-                    raise ValueError("stale daily voice")
-                voice = daily["name"]
-            except (TypeError, ValueError):
-                return jsonify(ok=False, message="Waiting for today's Auto voice from the camera. "
-                               "Keep the camera online with ZeroTTS enabled and wait for its next heartbeat."), 409
+        if core.photos_read_elsewhere:
+            with text_preview_lock:
+                for key, preview in list(previews.items()):
+                    if preview.get("kind") == "preview_text" and time.time() >= preview["expires"]:
+                        store.edge_job_take(preview["job_id"])
+                        previews.pop(key)
+                if any(p.get("kind") == "preview_text" for p in previews.values()):
+                    return jsonify(ok=False, message="Another text preview is pending. Wait for it to finish or expire."), 409
+                preview_id = uuid.uuid4().hex
+                expires = time.time() + 120
+                job_id = store.edge_job_add("preview_text", {"kind": "preview_text", "preview_id": preview_id,
+                    "text": text, "voice": voice, "expires": expires}, service.now())
+                previews[preview_id] = {"job_id": job_id, "expires": expires, "kind": "preview_text"}
+            return jsonify(ok=True, preview_url=url_for("greeting_preview_text_result", preview_id=preview_id)), 202
         if not text_preview_lock.acquire(blocking=False):
             return jsonify(ok=False, message="Another text preview is being generated. Try again when it finishes."), 409
         try:

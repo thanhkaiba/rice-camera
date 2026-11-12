@@ -93,6 +93,10 @@ class App:
         self.edge.on_rules = self.greeter.set_rules
         self.edge.on_arrived = self.service.set_arrived
         self.edge.on_say = self.greeter.say_test
+        self.edge.render_text = self.greeter.render_text
+        from .remote_voice_creation import run_on_camera
+
+        self.edge.on_create_voice = lambda payload: run_on_camera(self, payload)
         from .voice import install_voice
 
         self.edge.add_voice = lambda name, data: install_voice(cfg.path("data/voices"), name, data)

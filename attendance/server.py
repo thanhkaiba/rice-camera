@@ -123,6 +123,10 @@ def build(home: Path, admin_password: str, token_sha256: str, *, admin_user: str
     if shadow:
         _mute(core)
     application = create_app(core)
+    from .core.remote_voice_creation import RemoteVoiceCreator
+
+    core.voice_creator = RemoteVoiceCreator(cfg, core.store, application.extensions["voice_previews"],
+                                           application.extensions["voice_preview_lock"])
     _camera_is_at_the_office(application, office_url)
     core.photos_read_elsewhere = True
     application.jinja_env.globals["shadow_site"] = shadow

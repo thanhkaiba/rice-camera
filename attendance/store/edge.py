@@ -98,7 +98,7 @@ class EdgeStoreMixin:
                 self._edge_write("embeddings", row)
 
     # On the server -------------------------------------------------------------
-    def edge_job_add(self, kind: str, payload: dict, now: dt.datetime) -> None:
+    def edge_job_add(self, kind: str, payload: dict, now: dt.datetime) -> int:
         """A job for the Mac. Ids are never given twice (SQLite would start again at 1 once the table is
         empty), so the Mac can tell a new job from one it already did."""
         with self._lock, self._db:
@@ -109,6 +109,7 @@ class EdgeStoreMixin:
                              (job_id, kind, json.dumps(payload), now.isoformat()))
             self._db.execute("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                              (EDGE_JOB_LAST_KEY, str(job_id)))
+            return job_id
 
     def edge_jobs(self, limit: int = 20) -> list[dict]:
         return [{"id": r["id"], "kind": r["kind"], "payload": json.loads(r["payload"])}
