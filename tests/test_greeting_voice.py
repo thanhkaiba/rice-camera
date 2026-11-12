@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from attendance.core import greeting, settings
+from attendance.web import create_app
 
 
 @pytest.fixture
@@ -158,3 +159,15 @@ def test_first_speech_prepares_models_before_readiness(speech, monkeypatch):
     g._say('Xin chào')
     assert prepared and prepared[0] is app.cfg
     assert any(c[0] == 'play' for c in calls)
+
+
+def test_greeting_settings_keep_upstream_unknown_and_custom_voice_fields(core):
+    app, _, _ = core
+    fields = {'unknown': True, 'engine': 'zerotts', 'zerotts_voice': 'office',
+              'zerotts_voices_dir': 'data/voices'}
+    settings.save(app.cfg, app.store, {'greeting': fields})
+    saved = settings.current(app.cfg)['greeting']
+    assert all(saved[name] == value for name, value in fields.items())
+    page = create_app(app).test_client().get('/settings')
+    assert page.status_code == 200
+    assert all(f'name="greeting.{name}"' in page.text for name in fields)
