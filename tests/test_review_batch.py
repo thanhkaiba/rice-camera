@@ -95,3 +95,27 @@ def test_review_page_draws_its_own_employee_suggestions(core):
     assert 'list="employee-options"' not in html
     assert 'id="pick-suggest"' in html and 'id="bulk-suggest"' in html
     assert 'id="employee-options"' in html  # still the list of people the script reads
+
+
+def test_high_suggestions_are_confirmed_together_each_as_its_own(core):
+    app, clock, sent = core
+    clock.t = at(10, 30)
+    alice = app.service.on_unknown(at(9, 5), "crops/a.jpg", person_vector(1), None, None, quality=0.6)
+    bob = app.service.on_unknown(at(9, 6), "crops/b.jpg", person_vector(2), None, None, quality=0.6)
+    stranger = app.service.on_unknown(at(9, 7), "crops/s.jpg", person_vector(31), None, None, quality=0.6)
+    blurry = app.service.on_unknown(at(9, 8), None, person_vector(3), None, None, quality=0.04)  # High, but blurry
+    web = client(app)
+    page = web.get("/unknowns").get_data(as_text=True)
+    assert "Confirm all High (2)" in page and "/unknowns/confirm-suggestions" in page
+    headers = {"X-Requested-With": "fetch"}
+    r = web.post("/unknowns/confirm-suggestions", data={"unknown_id": [alice, bob, stranger, blurry]}, headers=headers)
+    data = r.get_json()
+    assert r.status_code == 200 and data["confirmed"] == [alice, bob]
+    assert data["message"] == "2 cards confirmed, each as its suggestion; faces learned. 2 left for review: their suggestion is no longer High."
+    assert app.store.unknown(alice).employee_id == "A" and app.store.unknown(bob).employee_id == "B"
+    assert set(app.store.checkins(DAY)) == {"A", "B"}
+    assert app.store.unknown(stranger).status == app.store.unknown(blurry).status == "pending"
+    r = web.post("/unknowns/confirm-suggestions", data={"unknown_id": [alice]}, headers=headers)
+    assert r.status_code == 400 and not r.get_json()["ok"]  # already handled: nothing confirmed twice
+    assert "Confirm all High" not in web.get("/unknowns").get_data(as_text=True)
+    assert web.post("/unknowns/confirm-suggestions", data={}).status_code == 302  # a plain post is redirected back

@@ -41,6 +41,9 @@ CAMERA_ALERT_KEY = "camera_alert"  # set while a "camera not working" alert is o
 ALIVE_SAVE_EVERY = dt.timedelta(seconds=10)
 FLUSH_EVERY = dt.timedelta(seconds=30)
 MIN_REFERENCES = 3  # reference photos the midnight housekeeping always leaves someone, however poor
+# On Review, a suggestion at or above this was the person the admin then confirmed for 65 of 68 photos
+# (November 2026); such cards may be confirmed together, each as its own suggestion, after a look.
+HIGH_SCORE = 0.50
 SOURCES = {"camera": "Camera", "admin": "Admin confirmed photo", "manual": "Entered by admin",
            "corrected": "Corrected by admin"}
 
@@ -682,6 +685,27 @@ class AttendanceService:
                 raise ValueError("Choose at least one pending photo from this card. Reload if it has changed.")
             members = [u for u in members if u.id in selected]
         return members
+
+    def high_suggestion(self, members) -> tuple[str, float] | None:
+        """A card's suggestion when it may be confirmed together with the others ("Confirm all High"): a clear
+        guess at HIGH_SCORE or more, on a camera or outside-hours card that is not blurry."""
+        if not members or members[-1].source == "seed" or self.blurry_card(members):
+            return None
+        guess = self.review_guess(members)
+        return guess if guess and guess[1] >= HIGH_SCORE else None
+
+    def confirm_suggestions(self, unknown_ids: list[int], user: str = "admin") -> list[tuple[int, str]]:
+        """Confirm each chosen card as its own High suggestion, worked out again here (a card whose suggestion
+        changed or dropped below High since the page was shown is left for review). Returns (card, employee)."""
+        confirmed = []
+        for unknown_id in unknown_ids:
+            u = self.store.unknown(unknown_id)
+            members = self.store.group(u.group_id or u.id) if u and u.status == "pending" else []
+            guess = self.high_suggestion(members)
+            if guess:
+                self.resolve_unknown(members[-1].id, guess[0], user)
+                confirmed.append((unknown_id, guess[0]))
+        return confirmed
 
     def resolve_unknowns(self, unknown_ids: list[int], employee_id: str, user: str = "admin") -> list:
         """Confirm several whole cards as one person at once (the cards selected on Review, or the

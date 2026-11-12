@@ -10,6 +10,8 @@
     {% if groups %}<span class="badge bad" id="count-total" title="{{ groups|length }} to review">{{ groups|length }}</span>{% endif %}
     {% set ready = groups|selectattr('sure')|list|length %}
     {% if ready %}<span class="badge ok" id="count-ready" title="Shown first: these only need Confirm">{{ ready }} ready to confirm</span>{% endif %}
+    {% set high = groups|selectattr('high')|list %}
+    {% if high %}<button type="button" class="primary" id="confirm-high" title="Look over the cards whose suggestion is High, then confirm each as its own suggestion">{{ icon('check') }}Confirm all High ({{ high|length }})</button>{% endif %}
     {% if groups %}
     <button type="button" id="focus-toggle" title="Show one face at a time, with large buttons (handy on a phone)">{{ icon('eye') }}<span>One at a time</span></button>
     <button type="button" id="name-selected" disabled title="Confirm every selected card as one person">{{ icon('check') }}Name selected (<span id="selected-count" aria-live="polite">0</span>)</button>
@@ -77,7 +79,7 @@
       {% if g.source == 'seed' %}<span class="badge info" title="No attendance will be recorded when this sample is labelled">Seed sample</span>{% endif %}
       {% if g.source == 'collect' %}<span class="badge info" title="A clear face seen outside the camera hours that nobody was recognised as. Naming it teaches the face; no attendance is recorded">Outside camera hours</span>{% endif %}
       <div class="small muted tnum">{{ local(last.ts).strftime('%a %d %b %H:%M') }}</div>
-      {% if guess %}<div class="small">{% if g.guess_score >= 0.5 %}<span class="badge ok">High</span>{% elif g.sure %}<span class="badge info">Medium</span>{% else %}<span class="badge bad" title="Often wrong at this score: check the photo before confirming">Low</span>{% endif %} Looks like <strong>{{ guess_label }}</strong> <span class="muted" title="Similarity score, not a probability of identity">(similarity {{ '%.2f'|format(g.guess_score) }})</span>{{ arrived(g, g.guess) }}</div>
+      {% if guess %}<div class="small">{% if g.guess_score >= high_score %}<span class="badge ok">High</span>{% elif g.sure %}<span class="badge info">Medium</span>{% else %}<span class="badge bad" title="Often wrong at this score: check the photo before confirming">Low</span>{% endif %} Looks like <strong>{{ guess_label }}</strong> <span class="muted" title="Similarity score, not a probability of identity">(similarity {{ '%.2f'|format(g.guess_score) }})</span>{{ arrived(g, g.guess) }}</div>
       {% if g.maybe %}<div class="small muted">or {% for pid, score in g.maybe %}{{ employee_labels.get(pid, '') }} <span class="tnum">{{ '%.2f'|format(score) }}</span>{{ arrived(g, pid) }}{{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}
       {% elif g.maybe %}<div class="small">Maybe {% for pid, score in g.maybe %}<strong>{{ employee_labels.get(pid, '') }}</strong> <span class="muted tnum" title="Similarity score, not a probability of identity">{{ '%.2f'|format(score) }}</span>{{ arrived(g, pid) }}{{ ' · ' if not loop.last }}{% endfor %} <span class="muted">· not sure, check the photo</span></div>
       {% else %}<div class="small muted">No clear suggestion · choose a person manually</div>{% endif %}
@@ -164,6 +166,36 @@
 </details>
 {% endif %}
 
+{% if high %}
+<dialog id="high-dialog">
+  <div class="dialog-head"><strong>Confirm {{ high|length }} High suggestion(s)</strong><button type="button" class="close" data-close aria-label="Close">{{ icon('close') }}</button></div>
+  <div class="dialog-body">
+    <p class="hint" style="margin-top:0">Each card is confirmed as the person under it: the arrival is recorded and the face learned.
+      At this similarity the suggestion was right about 24 times in 25, not always: untick any card that is not that person.</p>
+    <form method="post" id="high-form" action="{{ url_for('confirm_suggestions') }}">
+      <div class="high-list">
+        {% for g in high %}{% set face = g.photos[0] if g.photos else None %}
+        <label class="high-item">
+          <input type="checkbox" name="unknown_id" value="{{ g.id }}" checked>
+          {% if face %}<img src="{{ url_for('media', path=face) }}" alt="" loading="lazy">{% endif %}
+          <span><strong>{{ employee_labels.get(g.guess, '') }}</strong><br><span class="muted small tnum">{{ '%.2f'|format(g.guess_score) }} · {{ local(g.latest.ts).strftime('%a %d %b %H:%M') }}</span></span>
+        </label>
+        {% endfor %}
+      </div>
+      <div class="row" style="justify-content:flex-end; margin-top:12px"><button class="primary">{{ icon('check') }}Confirm the ticked cards</button></div>
+    </form>
+  </div>
+</dialog>
+<style>
+  .high-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; max-height: 60vh; overflow: auto; }
+  .high-item { display: flex; gap: 8px; align-items: center; padding: 6px; border: 1px solid var(--line-strong); border-radius: 8px; cursor: pointer; }
+  .high-item img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex: none; }
+  .high-item:has(input:not(:checked)) { opacity: .45; }
+</style>
+<script>
+  document.getElementById('confirm-high')?.addEventListener('click', () => document.getElementById('high-dialog').showModal());
+</script>
+{% endif %}
 <dialog id="bulk-name-dialog">
   <div class="dialog-head"><strong>Name the selected cards</strong><button type="button" class="close" data-close aria-label="Close">{{ icon('close') }}</button></div>
   <div class="dialog-body">

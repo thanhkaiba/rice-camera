@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, url_for
 
-from ..core.service import SOURCES, minutes_late
+from ..core.service import HIGH_SCORE, SOURCES, minutes_late
 from ..core import evidence as evidence_module
 from ..store import body_photo
 from . import (
@@ -214,6 +214,7 @@ def register(app: Flask, core: "App") -> None:
                                          and (core.data_dir / body_photo(u.image)).exists()), None),
                            "guess": best[0] if best else None, "guess_score": best[1] if best else None,
                            "sure": bool(best and best[1] >= SURE_SCORE),
+                           "high": bool(service.high_suggestion(members)),
                            "maybe": maybe, "blurry": blurry, "in_at": arrived(camera_day) if camera_day else {}})
         # Cards that only need "Confirm" first, then those with likely people, then the rest; the
         # most similar first within each, newest first among equals. Camera faces before seed samples;
@@ -242,7 +243,7 @@ def register(app: Flask, core: "App") -> None:
                                auto_labelled=auto_labelled, employee_labels=labels,
                                local=lambda ts: ts.astimezone(service.tz),
                                no_photos=not core.gallery.counts(), open_id=open_id,
-                               blurry_score=cfg.recognition.blurry_score)
+                               blurry_score=cfg.recognition.blurry_score, high_score=HIGH_SCORE)
 
     @app.post("/unknowns/<int:unknown_id>/reopen-seed")
     def reopen_seed(unknown_id: int):
@@ -298,6 +299,22 @@ def register(app: Flask, core: "App") -> None:
         cards = len({u.group_id for u in members})
         return reply(True, f"{cards} card{'s' if cards != 1 else ''} confirmed as {label}; faces learned.",
                      related=related(members, employee_id))
+
+    @app.post("/unknowns/confirm-suggestions")
+    def confirm_suggestions():
+        """The High cards ticked in "Confirm all High", each confirmed as its own suggestion."""
+        try:
+            ids = [int(value) for value in request.form.getlist("unknown_id")]
+        except ValueError:
+            return reply(False, "Invalid review selection.")
+        if not ids:
+            return reply(False, "Tick at least one card to confirm.")
+        confirmed = service.confirm_suggestions(ids, current_user(cfg))
+        left = len(ids) - len(confirmed)
+        message = f"{len(confirmed)} card{'s' if len(confirmed) != 1 else ''} confirmed, each as its suggestion; faces learned."
+        if left:
+            message += f" {left} left for review: their suggestion is no longer High."
+        return reply(bool(confirmed), message, confirmed=[card for card, _ in confirmed])
 
     @app.post("/unknowns/<int:unknown_id>/new-employee")
     def new_employee_from_face(unknown_id: int):
