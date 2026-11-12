@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import datetime as dt
 import json
 import uuid
 from pathlib import PurePosixPath
@@ -134,6 +135,11 @@ def register(app: Flask, core: "App") -> None:
 
     # settings ---------------------------------------------------------------------
 
+    def camera_voice_names(beat) -> set[str]:
+        from ..core.voice import preset_names
+
+        return preset_names() | set(((beat or {}).get("greeting") or {}).get("voices", []))
+
     def creation_status() -> dict:
         status = core.voice_creator.status()
         if status.get("state") in ("ready", "used"):
@@ -159,6 +165,15 @@ def register(app: Flask, core: "App") -> None:
 
     @app.get("/settings")
     def settings_page():
+        from ..core.voice import voice_names
+
+        beat = edge_heartbeat(store)
+        names = set(voice_names(cfg, presets=True))
+        if core.photos_read_elsewhere:
+            names.update(((beat or {}).get("greeting") or {}).get("voices", []))
+        names.add(cfg.greeting.zerotts_voice)
+        names.discard("auto")
+        unavailable = names - camera_voice_names(beat) if core.photos_read_elsewhere else set()
         return render_template("settings.html", s=settings.current(cfg), cfg=cfg, leave=leave_status(core),
                                overrides=settings.overrides(cfg, store),
                                late_background=latephoto.background_path(core.data_dir).exists(),
@@ -169,7 +184,9 @@ def register(app: Flask, core: "App") -> None:
                                upcoming=occasions.upcoming(service.now().date()),
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
                                update=updater.read_status(core.data_dir), backup=core.backup.status(),
-                               versions=versions(), base_kinds=base_timeoff.KINDS, edge_beat=edge_heartbeat(store),
+                               versions=versions(), base_kinds=base_timeoff.KINDS, edge_beat=beat,
+                               zerotts_voices=sorted(names),
+                               unavailable_voices=unavailable,
                                voice_creation=creation_status())
 
     @app.post("/settings/greeting/create")
@@ -232,6 +249,15 @@ def register(app: Flask, core: "App") -> None:
         message, ok = "", False
         try:
             files = request.files.getlist("voice_files")
+            single = request.files.getlist("voice_file")
+            if single:
+                if len(single) != 1 or files:
+                    raise ValueError("Choose one voice.npz file or one voice folder.")
+                message = activate_voice(request.form.get("voice_name", "").strip(),
+                                         single[0].read(MAX_VOICE_BYTES + 1))
+                if wants_json():
+                    return jsonify(ok=True, message=message)
+                return done(message, "settings_page", _anchor="greeting")
             names = [PurePosixPath((f.filename or "").replace("\\", "/")) for f in files]
             if any(p.is_absolute() or ".." in p.parts for p in names):
                 raise ValueError("The folder contains an unsafe file path.")
@@ -247,6 +273,42 @@ def register(app: Flask, core: "App") -> None:
         if wants_json():
             return jsonify(ok=ok, message=message), (200 if ok else 400)
         return (done if ok else failed)(message, "settings_page", _anchor="greeting")
+
+    text_preview_lock = threading.Lock()
+
+    @app.post("/settings/greeting/preview-text")
+    def greeting_preview_text():
+        request.max_content_length = 8192
+        text = request.form.get("text", "").strip()
+        voice = request.form.get("voice", cfg.greeting.zerotts_voice)
+        if not text or len(text) > 500:
+            return jsonify(ok=False, message="Enter between 1 and 500 characters."), 400
+        if core.photos_read_elsewhere and voice == "auto":
+            daily = ((edge_heartbeat(store) or {}).get("greeting") or {}).get("daily_voice") or {}
+            try:
+                at = dt.datetime.fromisoformat(daily.get("at", ""))
+                now = service.now()
+                if (at.tzinfo is None or not 0 <= (now - at).total_seconds() <= 180
+                        or now.astimezone(at.tzinfo).date() != at.date() or not daily.get("name")):
+                    raise ValueError("stale daily voice")
+                voice = daily["name"]
+            except (TypeError, ValueError):
+                return jsonify(ok=False, message="Waiting for today's Auto voice from the camera. "
+                               "Keep the camera online with ZeroTTS enabled and wait for its next heartbeat."), 409
+        if not text_preview_lock.acquire(blocking=False):
+            return jsonify(ok=False, message="Another text preview is being generated. Try again when it finishes."), 409
+        try:
+            data = core.greeter.render_text(text, voice)
+            response = send_file(io.BytesIO(data), mimetype="audio/wav", download_name="voice-test.wav")
+            response.headers["Cache-Control"] = "private, no-store"
+            return response
+        except ValueError as exc:
+            return jsonify(ok=False, message=str(exc)), 400
+        except Exception as exc:
+            app.logger.exception("Text voice preview failed")
+            return jsonify(ok=False, message=f"Could not generate audio: {str(exc)[:250]}"), 500
+        finally:
+            text_preview_lock.release()
 
     @app.post("/settings/greeting/test")
     def greeting_test():
@@ -309,6 +371,10 @@ def register(app: Flask, core: "App") -> None:
         if form.get("web.viewer_off") == "on":
             changes.setdefault("web", {})["viewer_password"] = ""
         try:
+            name = changes.get("greeting", {}).get("zerotts_voice")
+            if (core.photos_read_elsewhere and name is not None and name != "auto"
+                    and name not in camera_voice_names(edge_heartbeat(store))):
+                raise ValueError("That voice has not been confirmed on the camera. Wait for installation and its next heartbeat.")
             settings.save(cfg, store, changes)
         except ValueError as exc:
             return failed(f"Not saved: {exc}", "settings_page")

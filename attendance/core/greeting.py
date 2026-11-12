@@ -23,6 +23,7 @@ import time
 
 from ..store import Employee
 from .voice_models import ensure as ensure_voice_models
+from .voice import voice_names
 
 log = logging.getLogger(__name__)
 
@@ -268,6 +269,7 @@ class Greeter:
         self.spoken: dict[str, int] = {}
         self._voices: set[str] | None = None
         self._speech_lock = threading.Lock()  # the test button and arrival worker share one speaker/model
+        self._voice_choice_lock = threading.Lock()
         self._tts = None
         self._tts_key = None
         self._weather: dict = {}
@@ -500,8 +502,26 @@ class Greeter:
 
     def voice_for(self, language: str) -> str:
         if language != "en" and self.settings.engine == "zerotts":
-            return self.settings.zerotts_voice
+            return self.zerotts_voice()
         return self.settings.voice_en if language == "en" else self.settings.voice
+
+    def zerotts_voice(self, name: str | None = None) -> str:
+        name = self.settings.zerotts_voice if name is None else name
+        if name == "auto":
+            names = voice_names(self.cfg)
+            if not names:
+                return ""
+            day = self.now().date().isoformat()
+            with self._voice_choice_lock:
+                saved = json.loads(self.store.get("greeting_daily_voice") or "{}")
+                previous = saved.get("voice")
+                if saved.get("day") == day and previous in names:
+                    return previous
+                index = (names.index(previous) + 1) % len(names) if previous in names else 0
+                chosen = names[index]
+                self.store.put("greeting_daily_voice", json.dumps({"day": day, "voice": chosen}))
+                return chosen
+        return name
 
     def voice_ready(self, language: str = "vi") -> bool:
         if language != "en" and self.settings.engine == "zerotts":
@@ -520,7 +540,8 @@ class Greeter:
                 if not custom.is_dir():
                     return False
                 voices.insert(0, custom)
-            return any((folder / self.settings.zerotts_voice / "voice.npz").is_file() for folder in voices)
+            voice = self.voice_for(language)
+            return bool(voice) and any((folder / voice / "voice.npz").is_file() for folder in voices)
         if not shutil.which("say"):
             return False
         if self._voices is None:
@@ -533,9 +554,9 @@ class Greeter:
 
     def _say(self, text: str, language: str = "vi") -> None:
         with self._speech_lock:
-            voice = self.voice_for(language)
             if language != "en" and self.settings.engine == "zerotts":
                 ensure_voice_models(self.cfg)
+            voice = self.voice_for(language)
             if not self.voice_ready(language):
                 engine = "ZeroTTS model or" if language != "en" and self.settings.engine == "zerotts" else "the"
                 raise RuntimeError(f"{engine} voice {voice} is not on this computer")
@@ -573,6 +594,28 @@ class Greeter:
             if not audio.size:
                 raise RuntimeError("ZeroTTS returned no audio")
             model.save_audio(audio, path)
+
+    def render_text(self, text: str, voice: str) -> bytes:
+        """Render a short browser test without saving settings or playing the speaker."""
+        import io
+        import soundfile as sf
+
+        text = text.strip()
+        if not text or len(text) > 500:
+            raise ValueError("Enter between 1 and 500 characters.")
+        with self._speech_lock:
+            model = self._zerotts_model()
+            name = self.zerotts_voice(voice)
+            if not name or name not in voice_names(self.cfg):
+                raise ValueError("That voice is not installed on this computer/server. Upload its pack here first.")
+            if self.settings.zerotts_voices_dir:
+                model.add_voices(self.cfg.path(self.settings.zerotts_voices_dir))
+            audio = model.synthesize(text, voice=name, max_frames=int(SAY_TIMEOUT_S * model.frame_rate))
+            if not audio.size:
+                raise RuntimeError("ZeroTTS returned no audio")
+            output = io.BytesIO()
+            sf.write(output, audio.reshape(-1), model.sample_rate, format="WAV", subtype="PCM_16")
+            return output.getvalue()
 
     def say_test(self) -> dict:
         """Asked from the server's Settings page: a fixed sentence, then, with a key, Claude is asked right

@@ -122,9 +122,14 @@ class App:
 
     def _edge_status(self) -> dict:
         from .. import __version__
+        from .voice import voice_names
 
+        greeting = {**self.greeter.status(), "voices": voice_names(self.cfg)}
+        if self.cfg.greeting.engine == "zerotts" and greeting["voices"]:
+            greeting["daily_voice"] = {"name": self.greeter.zerotts_voice("auto"),
+                                       "at": self.service.now().isoformat()}
         return {"camera_ok": self.live.camera_state == "ok", "camera_state": self.live.camera_state, "version": __version__,
-                "greeting": self.greeter.status()}
+                "greeting": greeting}
 
     def recognizer(self):
         if self._recognizer is None:

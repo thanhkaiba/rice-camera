@@ -15,9 +15,35 @@ choose a voice name, save, and press **Say a test greeting**. The speaker is on 
 camera computer; the admin's browser does not play it. The test also calls Claude
 when a Claude key is configured, as it did before.
 
+To test other content, use **Try any text with ZeroTTS**. Choose a voice in the dropdown,
+enter up to 500 characters, and press **Generate audio**. Press Play in the audio player
+when ready. This uses the current dropdown selection without saving settings, calls no
+Claude API, and plays only in the browser. Each output is capped at 20 seconds, so longer
+text may be cut short. The WAV stays in memory; the app does not retain this test text/audio.
+On a remote portal the selected pack must be installed on the server as well as the camera.
+Auto previews use the camera's reported daily choice, never a separate choice on the server.
+Keep the camera online with ZeroTTS enabled and wait for its next heartbeat. Reports older
+than three minutes or from the previous camera-local day require a new heartbeat. If the
+chosen pack is missing on the server, the preview reports an error without substituting a voice.
+
 Presets: `maichi`, `baotrang`, `kimoanh`, `hamy`, `giahuy`, `huuduc`, `quangminh`, `tiendat`.
 English greetings keep the configured macOS voice. The speed setting applies only to macOS.
 Existing installations keep macOS as their default engine.
+
+The **ZeroTTS voice** dropdown lists the presets and packs found directly under the
+configured **Custom voice folder** (`<name>/voice.npz`). Save a changed folder to refresh
+the list. On the remote portal, voices installed only on the camera computer appear after
+its next heartbeat and a page reload. The current selection is kept even if its pack is missing.
+On the remote portal, server-only custom packs are marked **awaiting camera confirmation**
+and cannot be selected or saved until the camera reports them. Downloadable presets remain
+selectable. Upload and camera acknowledgment continue to use the existing transfer flow.
+
+Choose **Auto · change voice every day** to rotate alphabetically through installed voices,
+including custom packs. One voice is kept for the whole local calendar day in the configured
+time zone and remembered across restarts. The next day that speech or status is requested,
+the next voice is selected. Adding a pack keeps today's choice; removing the chosen pack
+selects another available voice. With one pack, Auto keeps that voice. English keeps its
+configured macOS voice. `auto` is reserved and cannot be used as a new custom pack name.
 
 The model is loaded once on first use with two CPU inference threads and reused.
 Generation and playback are serialized with test requests. Audio is generated as a complete
@@ -69,8 +95,11 @@ The [official workflow](https://github.com/zeroweight-ai/ZeroTTS/blob/main/docs/
 uses https://platform.zeroweight.ai/audio to create and download the pack. Creating the pack
 there uploads the recording; speaking with the downloaded pack happens locally.
 
-Unpack the downloaded ZIP on your computer. In **Settings → Greeting → Upload a custom
-voice folder**, choose the folder containing `voice.npz`, then press **Upload and use voice**.
+Unpack the downloaded ZIP on your computer. In **Settings → Greeting → Upload voice.npz**,
+enter a new **Voice name**, choose `voice.npz` inside the voice folder, then press
+**Upload and use voice**. No ZIP is needed; the file is limited to 128 KB.
+Alternatively, expand **Or upload an entire voice folder**, choose the folder containing
+`voice.npz`, then press its **Upload and use voice** button.
 The folder name becomes the voice name (spaces are converted to underscores). The app checks
 the pack, stores its `voice.npz` in `data/voices`, and selects it automatically. Existing names
 are protected: rename the folder if that name is already installed. Other files in the folder,

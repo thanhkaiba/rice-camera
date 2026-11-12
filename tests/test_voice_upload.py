@@ -158,3 +158,31 @@ def test_failed_camera_installation_keeps_the_previous_voice(live, tmp_path):
     assert previous.read_bytes() == original
     assert any(action == 'installed voice' and 'office: failed:' in detail
                for _, _, action, detail in app.store.audit())
+
+
+@pytest.mark.parametrize('remote', [False, True])
+def test_direct_npz_upload_uses_the_name_and_existing_activation_flow(upload, remote):
+    app, client = upload
+    app.photos_read_elsewhere = remote
+    response = client.post('/settings/greeting/voice', data={
+        'voice_name': 'adam-tiktok', 'voice_file': (io.BytesIO(pack()), 'voice.npz')},
+        headers={'X-Requested-With': 'fetch'})
+    assert response.status_code == 200 and response.json['ok']
+    assert app.cfg.path('data/voices/adam-tiktok/voice.npz').is_file()
+    assert app.cfg.greeting.zerotts_voice == ('maichi' if remote else 'adam-tiktok')
+    if remote:
+        assert app.store.edge_jobs()[0]['payload']['voice'] == 'adam-tiktok'
+    page = client.get('/settings').text
+    assert 'name="voice_file"' in page and 'id="voice-file-upload"' in page
+    assert 'webkitdirectory' in page
+
+
+@pytest.mark.parametrize('name,data', [('', None), ('../escape', None), ('auto', None), ('office', b'bad npz')])
+def test_direct_npz_upload_validates_name_and_content(upload, name, data):
+    app, client = upload
+    response = client.post('/settings/greeting/voice', data={
+        'voice_name': name, 'voice_file': (io.BytesIO(pack() if data is None else data), 'voice.npz')},
+        headers={'X-Requested-With': 'fetch'})
+    assert response.status_code == 400
+    assert not list(app.cfg.path('data/voices').glob('*/voice.npz'))
+    assert app.cfg.greeting.zerotts_voice == 'maichi'

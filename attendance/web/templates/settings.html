@@ -206,9 +206,26 @@
         </select>
         <span class="hint">ZeroTTS runs on the camera computer. English keeps its macOS voice.</span>{{ src('greeting.engine') }}
       </label>
-      {{ field('greeting', 'zerotts_voice', 'ZeroTTS voice', 'maichi, baotrang, kimoanh, hamy, giahuy, huuduc, quangminh, tiendat, or your custom pack name') }}
+      <label class="field grow">ZeroTTS voice
+        <select name="greeting.zerotts_voice">
+          <option value="auto" {{ 'selected' if s.greeting.zerotts_voice == 'auto' }}>Auto · change voice every day</option>
+          {% for name in zerotts_voices %}<option value="{{ name }}" {{ 'selected' if s.greeting.zerotts_voice == name }} {{ 'disabled' if name in unavailable_voices }}>{{ name }}{{ ' · awaiting camera confirmation' if name in unavailable_voices }}</option>{% endfor %}
+        </select>
+        <span class="hint">Presets and packs in the custom voice folder. On the remote portal, custom voices can be selected after the camera confirms them. Auto keeps one installed voice all day and rotates the next day; with one voice it keeps that voice.</span>{{ src('greeting.zerotts_voice') }}
+      </label>
     </div>
-    {{ field('greeting', 'zerotts_voices_dir', 'Custom voice folder', 'Optional folder on the camera computer, e.g. data/voices, containing <voice name>/voice.npz. Unpack your voice ZIP here, then enter its name above.', cls='grow') }}
+    {{ field('greeting', 'zerotts_voices_dir', 'Custom voice folder', 'Optional folder on the camera computer, e.g. data/voices, containing <voice name>/voice.npz. Save a changed folder and reload to refresh the voice list. Remote camera voices appear after its next heartbeat.', cls='grow') }}
+    <div class="form-row">
+      <label class="field">Voice name
+        <input name="voice_name" form="voice-file-upload" placeholder="adam-hot-tiktok" required maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*">
+      </label>
+      <label class="field grow">Upload voice.npz
+        <input type="file" name="voice_file" form="voice-file-upload" accept=".npz" required>
+        <span class="hint">Choose the voice.npz inside your voice folder and enter a new voice name. No ZIP needed. Maximum 128 KB; existing voices are kept.</span>
+      </label>
+      <button type="submit" form="voice-file-upload">{{ icon('upload') }}Upload and use voice</button>
+    </div>
+    <details><summary>Or upload an entire voice folder</summary>
     <div class="form-row">
       <label class="field grow">Upload a custom voice folder
         <input type="file" name="voice_files" form="voice-upload" webkitdirectory multiple required>
@@ -216,6 +233,15 @@
       </label>
       <button type="submit" form="voice-upload">{{ icon('upload') }}Upload and use voice</button>
     </div>
+    </details>
+    <h3>Try any text with ZeroTTS</h3>
+    <label class="field">Text to read
+      <textarea name="text" form="voice-text-test" rows="3" maxlength="500" required placeholder="Nhập nội dung bạn muốn giọng đọc thử…"></textarea>
+      <span class="hint">Uses the voice selected above without saving settings. On the remote portal, Auto uses the camera's daily choice and needs a fresh heartbeat with ZeroTTS enabled. Up to 500 characters and 20 seconds of audio. Plays in this browser. The model and voice pack must be on this computer/server; first use may download models.</span>
+    </label>
+    <button type="submit" form="voice-text-test" id="voice-text-button">Generate audio</button>
+    <p class="hint" id="voice-text-status" role="status" aria-live="polite"></p>
+    <audio id="voice-text-audio" controls preload="none" hidden aria-label="Listen to your text"></audio>
     <h3>Create a voice from a recording</h3>
     <p class="hint">Use a clean recording of your own voice, or a speaker who has agreed to its use. The recording is processed on this computer/server, without an external voice service. Listen to the result before choosing it.</p>
     <div class="form-row">
@@ -536,6 +562,8 @@
 {% for k in api_keys() %}<form method="post" action="{{ url_for('api_key_revoke', key_id=k.id) }}" id="api-revoke-{{ k.id }}" data-confirm="Revoke the key for {{ k.name }}? That system stops getting data at once." hidden></form>{% endfor %}
 <form method="post" action="{{ url_for('late_background') }}" enctype="multipart/form-data" id="late-bg" hidden></form>
 <form method="post" action="{{ url_for('greeting_voice_upload') }}" enctype="multipart/form-data" id="voice-upload" hidden></form>
+<form method="post" action="{{ url_for('greeting_voice_upload') }}" enctype="multipart/form-data" id="voice-file-upload" hidden></form>
+<form method="post" action="{{ url_for('greeting_preview_text') }}" id="voice-text-test" hidden></form>
 <form method="post" action="{{ url_for('greeting_voice_create') }}" enctype="multipart/form-data" id="voice-create" hidden></form>
 <form method="post" action="{{ url_for('greeting_creation_use') }}" id="voice-use" hidden><input type="hidden" name="job_id" id="voice-creation-id"></form>
 <form method="post" action="{{ url_for('choose_late_background') }}" id="late-bg-choose" hidden></form>
@@ -569,6 +597,35 @@
     document.getElementById('dirty').textContent = 'Unsaved changes';
     document.querySelector('.savebar').classList.add('dirty');
   });
+
+  const textForm = document.getElementById('voice-text-test');
+  const textButton = document.getElementById('voice-text-button');
+  const textStatus = document.getElementById('voice-text-status');
+  const textAudio = document.getElementById('voice-text-audio');
+  let textAudioUrl;
+  textForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (textButton.disabled) return;
+    const data = new FormData(textForm);
+    data.set('voice', document.querySelector('[name="greeting.zerotts_voice"]').value);
+    textButton.disabled = true;
+    textStatus.textContent = 'Generating audio… First model download or load may take several minutes.';
+    try {
+      const response = await fetch(textForm.action, {method: 'POST', body: data});
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.message || 'Could not generate audio. Please try again.');
+      }
+      const blob = await response.blob();
+      if (textAudioUrl) URL.revokeObjectURL(textAudioUrl);
+      textAudioUrl = URL.createObjectURL(blob);
+      textAudio.src = textAudioUrl;
+      textAudio.hidden = false;
+      textStatus.textContent = 'Audio ready. Press Play to listen.';
+    } catch (error) { textStatus.textContent = error.message; }
+    finally { textButton.disabled = false; }
+  });
+  window.addEventListener('pagehide', () => { if (textAudioUrl) URL.revokeObjectURL(textAudioUrl); });
 
   const creationForm = document.getElementById('voice-create');
   const creationButton = document.getElementById('voice-create-button');

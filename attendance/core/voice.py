@@ -13,7 +13,26 @@ import numpy as np
 MAX_VOICE_BYTES = 128 * 1024
 
 
+def preset_names() -> set[str]:
+    from .voice_models import FILES
+
+    return {name.split("/")[1] for name in FILES if name.startswith("voices/") and name.endswith("/voice.npz")}
+
+
+def voice_names(cfg, *, presets: bool = False) -> list[str]:
+    """Discover packs on this computer; include downloadable presets for the picker."""
+    folders = [cfg.path("models/ZeroTTS/voices")]
+    if cfg.greeting.zerotts_voices_dir:
+        folders.append(cfg.path(cfg.greeting.zerotts_voices_dir))
+    names = {path.parent.name for folder in folders for path in folder.glob("*/voice.npz") if path.is_file()}
+    if presets:
+        names.update(preset_names())
+    return sorted(name for name in names if name != "auto" and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", name))
+
+
 def check_voice_name(name: str) -> None:
+    if name == "auto":
+        raise ValueError("The name auto is reserved for daily voice rotation. Choose another voice name.")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", name):
         raise ValueError("Use a folder name with letters, numbers, _, - or . (at most 100 characters).")
 

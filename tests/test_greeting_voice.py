@@ -82,6 +82,15 @@ def test_english_keeps_the_macos_voice(speech, monkeypatch):
     assert not any(c[0] == "load" for c in calls)
 
 
+def test_auto_synthesizes_with_an_installed_voice_name(speech):
+    app, g, calls = speech
+    app.cfg.greeting.zerotts_voice = 'auto'
+    g._say('Xin chào')
+    generated = [c for c in calls if c[0] == 'synthesize']
+    assert generated[0][2]['voice'] == 'maichi'
+    assert g.voice_ready()
+
+
 def test_custom_voice_directory_and_readiness(speech):
     app, g, calls = speech
     app.cfg.greeting.zerotts_voice = "office"
@@ -171,3 +180,25 @@ def test_greeting_settings_keep_upstream_unknown_and_custom_voice_fields(core):
     page = create_app(app).test_client().get('/settings')
     assert page.status_code == 200
     assert all(f'name="greeting.{name}"' in page.text for name in fields)
+
+
+def test_text_preview_uses_unsaved_voice_and_returns_wav_without_speaker(speech):
+    import io
+    import soundfile as sf
+    app, g, calls = speech
+    folder = app.cfg.path('data/voices/office')
+    folder.mkdir(parents=True)
+    (folder / 'voice.npz').touch()
+    app.cfg.greeting.zerotts_voices_dir = 'data/voices'
+    data = g.render_text('Một câu chuyện khác, không phải lời chào.', 'office')
+    audio, rate = sf.read(io.BytesIO(data))
+    assert rate == 48000 and audio.size == 4800
+    assert ('voices', app.cfg.path('data/voices')) in calls
+    generated = [c for c in calls if c[0] == 'synthesize']
+    assert generated[0][1] == 'Một câu chuyện khác, không phải lời chào.'
+    assert generated[0][2]['voice'] == 'office'
+    assert app.cfg.greeting.zerotts_voice == 'maichi'
+    assert not any(c[0] == 'play' for c in calls)
+    assert g.render_text('Đọc tiếp.', 'auto').startswith(b'RIFF')
+    with pytest.raises(ValueError, match='not installed'):
+        g.render_text('Đọc thử.', 'missing')

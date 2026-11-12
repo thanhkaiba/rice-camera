@@ -68,8 +68,21 @@ def _greeting_status(value) -> dict | None:
     if not isinstance(value, dict):
         return None
     error = value.get("error")
-    return {"enabled": bool(value.get("enabled")), "ready": int(value.get("ready") or 0), "voice": bool(value.get("voice")),
+    result = {"enabled": bool(value.get("enabled")), "ready": int(value.get("ready") or 0), "voice": bool(value.get("voice")),
             "spoken": int(value.get("spoken") or 0), "error": str(error)[:300] if error else None}
+    if isinstance(value.get("voices"), list):
+        result["voices"] = sorted({name for name in value["voices"][:1000]
+                                   if isinstance(name, str) and name != "auto"
+                                   and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", name)})
+    daily = value.get("daily_voice")
+    if isinstance(daily, dict) and daily.get("name") in result.get("voices", []):
+        try:
+            at = dt.datetime.fromisoformat(daily.get("at", ""))
+            if at.tzinfo is not None:
+                result["daily_voice"] = {"name": daily["name"], "at": at.isoformat()}
+        except (TypeError, ValueError):
+            pass
+    return result
 
 
 def heartbeat(store) -> dict | None:
