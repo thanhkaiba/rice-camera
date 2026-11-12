@@ -45,6 +45,7 @@
 
   // Forms: a confirmation when asked for, then a spinner on the button so nothing is sent twice.
   document.addEventListener('submit', e => {
+    if (e.defaultPrevented) return;
     const form = e.target;
     if (form.dataset.confirm && !confirm(form.dataset.confirm)) { e.preventDefault(); return; }
     const btn = e.submitter || $('button:not([type="button"])', form);

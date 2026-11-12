@@ -93,6 +93,12 @@ class App:
         self.edge.on_rules = self.greeter.set_rules
         self.edge.on_arrived = self.service.set_arrived
         self.edge.on_say = self.greeter.say_test
+        from .voice import install_voice
+
+        self.edge.add_voice = lambda name, data: install_voice(cfg.path("data/voices"), name, data)
+        from .voice_creation import VoiceCreator
+
+        self.voice_creator = VoiceCreator(cfg, self.store, self.greeter)
         if not self.edge.enabled:  # on its own: the day's leave and holidays are here
             from .greeting import rules_for
 

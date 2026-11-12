@@ -4,6 +4,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import os
+import re
 import string
 import sys
 from dataclasses import dataclass, field
@@ -300,6 +301,9 @@ class GreetingConfig:
     enabled: bool = False
     key: str = field(default="", repr=False)  # Claude API key; empty: plain built-in greetings
     model: str = "claude-opus-5-5"
+    engine: str = "macos"  # Vietnamese speech: macos or zerotts; English keeps the macOS voice
+    zerotts_voice: str = "maichi"
+    zerotts_voices_dir: str = ""  # optional local directory containing custom <name>/voice.npz packs
     voice: str = "Linh"  # a macOS voice that speaks Vietnamese
     voice_en: str = "Samantha"  # the macOS voice for people greeted in English
     rate: int = 180  # words per minute
@@ -422,6 +426,13 @@ class Config:
         if not 0.2 <= c.fps <= 30:
             raise ValueError("collect.fps must be between 0.2 and 30")
         g = self.greeting
+        g.engine = g.engine.strip().lower()
+        if g.engine not in ("macos", "zerotts"):
+            raise ValueError("greeting.engine must be macos or zerotts")
+        g.zerotts_voice = g.zerotts_voice.strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", g.zerotts_voice):
+            raise ValueError("greeting.zerotts_voice must be a voice name (letters, numbers, _, - or .)")
+        g.zerotts_voices_dir = g.zerotts_voices_dir.strip()
         g.key = g.key.strip()
         g.model, g.voice, g.style = g.model.strip() or "claude-opus-5-5", g.voice.strip() or "Linh", g.style.strip()[:300]
         g.voice_en = g.voice_en.strip() or "Samantha"

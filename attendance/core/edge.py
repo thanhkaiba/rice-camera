@@ -57,6 +57,7 @@ class EdgeClient:
         self.on_gallery = lambda: None
         self.on_config = lambda config: None
         self.add_photo = None
+        self.add_voice = None
         self.camera_address = lambda: {}
         self.on_rules = lambda rules: None
         self.on_arrived = lambda arrived: None
@@ -238,9 +239,14 @@ class EdgeClient:
         if status != 200:
             raise ConnectionError(f"file answered HTTP {status}")
         try:
+            if payload.get("voice"):
+                if self.add_voice is None:
+                    raise ValueError("Voice installation is not available on this camera computer.")
+                self.add_voice(payload["voice"], data)
+                return {"ok": True, "message": f"Voice {payload['voice']} installed"}
             added = self.add_photo(payload["employee_id"], data, payload.get("source", "upload"))
             return {"ok": added.ok, "message": added.message, "warnings": list(added.warnings)}
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             return {"ok": False, "message": str(exc), "warnings": []}
 
     def _loop(self) -> None:
