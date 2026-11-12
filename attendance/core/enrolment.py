@@ -235,7 +235,7 @@ class DoorEnrolment:
                 self._note = "More than one face in view; nothing is kept until only one person is in the picture."
                 return False
             face, candidates = faces[0]
-            if not face.size_ok:
+            if not face.size_ok or face.size < self._cfg.min_face_px:  # small faces vote, but are no reference
                 self._note = "The face is too small or unclear; come closer."
                 return False
             if face.sharpness < self._cfg.min_sharpness:

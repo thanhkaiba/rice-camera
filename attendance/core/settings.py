@@ -20,10 +20,11 @@ EDITABLE: dict[str, list[str]] = {
     "schedule": ["window_start", "late_after", "window_end", "work_days"],
     "camera": ["url", "more", "process_fps", "decode_threads", "enhance_low_light", "area"],
     "tracking": ["mode", "person_conf", "full_frame_every"],
-    "recognition": ["accept_score", "min_margin", "votes_required", "min_face_px", "min_det_score",
+    "recognition": ["accept_score", "min_margin", "votes_required", "min_face_px", "small_face_px", "min_det_score",
                     "min_sharpness", "max_yaw", "max_pitch", "auto_pose", "unknown_min_frames",
                     "learn_corrections", "learn_per_group", "group_days", "seen_again_score", "suggest_score",
-                    "same_face_score", "blurry_score"],
+                    "same_face_score", "blurry_score", "auto_delete_blurry",
+                    "auto_delete_photos_below"],
     "google_chat": ["webhook_url", "system_webhook_url", "mention_people", "notify_late_arrivals", "late_time_list", "daily_summary",
                     "unknown_batch_minutes", "names"],
     "camera_api": ["url", "key", "send_at"],
@@ -34,7 +35,7 @@ EDITABLE: dict[str, list[str]] = {
     "updates": ["enabled"],
     "backup": ["folder", "time", "keep_days", "include_photos"],
     "collect": ["enabled", "start", "end", "min_score", "per_day", "enough", "fps", "review_per_day"],
-    "greeting": ["enabled", "key", "model", "voice", "voice_en", "rate", "style", "location"],
+    "greeting": ["enabled", "key", "model", "voice", "voice_en", "rate", "style", "location", "unknown"],
     "": ["retention_days", "late_evidence_days", "healthcheck_url", "base_api_key"],
 }
 

@@ -114,6 +114,9 @@ class RecognitionConfig:
     cpu_threads: int = 0
     # Quality gate: frames failing it never vote, they can only end up as "unknown".
     min_face_px: int = 60
+    # A smaller face (down to this size) still votes when it clearly matches one person (see
+    # tracker.clear_match): at the door faces are often 40-60 px before the person comes closer.
+    small_face_px: int = 40
     # Detector confidence for a frame to vote for a person. Faces from the detector's own cut-off (0.5,
     # or min_det_score if lower) are followed anyway and sent for review when nobody is recognised:
     # masks and side views score 0.5-0.65, and they make faces of different people look alike.
@@ -149,6 +152,12 @@ class RecognitionConfig:
     # Review lists camera faces below this Image score (0-100) apart, after the others, as blurry or
     # too small: most are unusable, but some are still someone arriving, so they are never dropped.
     blurry_score: int = 10
+    # Housekeeping at midnight, where this program is in charge (the server, or a computer on its own):
+    # Review cards of earlier days whose photos are all blurry (see blurry_score) are removed, and
+    # reference photos with an Image score below this are deleted (0 = keep all). Never someone's
+    # last MIN_REFERENCES photos: a poor photo recognises better than none.
+    auto_delete_blurry: bool = True
+    auto_delete_photos_below: int = 25
 
     def model_files(self) -> tuple[str, str]:
         default_det, default_rec = DEFAULT_MODELS.get(self.backend, ("", ""))
@@ -296,6 +305,7 @@ class GreetingConfig:
     rate: int = 180  # words per minute
     style: str = ""  # extra wishes for the sentences, e.g. "mention the weather" (any language)
     location: str = ""  # the office, for the morning weather: a place ("Hà Nội") or "21.03,105.85"; empty: no weather
+    unknown: bool = True  # a short hello without a name for a face the camera cannot name (at most one every 2 minutes)
 
 
 @dataclass
@@ -357,6 +367,8 @@ class Config:
             raise ValueError("accept_score, min_margin and min_det_score must be between 0 and 1")
         if r.votes_required < 1 or r.unknown_min_frames < 1 or r.min_face_px < 1:
             raise ValueError("votes_required, unknown_min_frames and min_face_px must be at least 1")
+        if not 20 <= r.small_face_px <= r.min_face_px:
+            raise ValueError("small_face_px must be between 20 and min_face_px")
         if r.learn_per_group < 1 or r.group_days < 1:
             raise ValueError("learn_per_group and group_days must be at least 1")
         if not 0 <= r.seen_again_score < 1:
@@ -367,6 +379,8 @@ class Config:
             raise ValueError("same_face_score must be between 0 and 1")
         if not 0 <= r.blurry_score <= 100:
             raise ValueError("blurry_score must be between 0 and 100")
+        if not 0 <= r.auto_delete_photos_below <= 100:
+            raise ValueError("auto_delete_photos_below must be between 0 and 100")
         if not 0 < self.camera.process_fps <= 30:
             raise ValueError("process_fps must be between 0 and 30")
         if not 0 <= self.camera.decode_threads <= 32:

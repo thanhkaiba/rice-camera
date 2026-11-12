@@ -59,6 +59,7 @@ class EdgeClient:
         self.add_photo = None
         self.camera_address = lambda: {}
         self.on_rules = lambda rules: None
+        self.on_arrived = lambda arrived: None
         self.on_say = lambda: {"ok": False, "message": "no greetings on this computer"}
 
     @property
@@ -212,6 +213,8 @@ class EdgeClient:
         self.store.put(FOLLOW_KEY, json.dumps(versions))
         if "greeting" in answer:
             self.on_rules(answer["greeting"])
+        if "arrived" in answer:
+            self.on_arrived(answer["arrived"])
         for job in answer.get("jobs", []):
             self._do_job(job)
 

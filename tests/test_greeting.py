@@ -389,3 +389,61 @@ def test_claude_is_told_what_is_special_today(core):
     assert g.write_if_due() and sorted(asked[-1]) == ["A", "B", "C"]
     g.set_rules({"day": DAY.isoformat(), "workday": True, "people": {}, "notes": {"B": "their first day at the company"}})
     assert g.write_if_due() and sorted(asked[-1]) == ["A", "B"]  # their note changed: new sentences
+
+
+def test_a_face_nobody_can_name_gets_a_hello_at_most_every_two_minutes(core, monkeypatch):
+    app, clock, g, said, _ = make(core)
+    clock.t = at(8, 40)
+    app.service.on_unknown(at(8, 40), None, None, "A", 0.4, None, 0.1)
+    assert g.speak_next(timeout=0) and said[0] in greeting.HELLO_VI
+    app.service.on_unknown(at(8, 41), None, None, "A", 0.4, None, 0.1)
+    assert not g.speak_next(timeout=0) and len(said) == 1  # too soon after the last one
+    real = time.monotonic
+    monkeypatch.setattr(greeting.time, "monotonic", lambda: real() + greeting.UNKNOWN_GAP_S + 1)
+    g.arrived("A", at(8, 43))
+    g.unknown(at(8, 43))
+    g.speak_next(timeout=0)
+    assert said[-1].startswith("Chào Alice") and len(said) == 2  # a named greeting wins over the hello
+
+
+def test_no_hello_outside_camera_hours_or_when_switched_off(core):
+    app, clock, g, said, _ = make(core)
+    g.unknown(at(14, 0))
+    app.cfg.greeting.unknown = False
+    g.unknown(at(8, 40))
+    assert not g.speak_next(timeout=0) and said == []
+
+
+def test_a_small_face_votes_only_on_a_clear_match():
+    from types import SimpleNamespace as P
+    from attendance.vision.tracker import vote_for
+
+    params = P(accept_score=0.35, min_margin=0.08)
+    clear, close = [("N", 0.59), ("B", 0.41)], [("N", 0.45), ("B", 0.40)]
+    assert vote_for(clear, False, True, params) == "N"  # small face (size_ok, not quality_ok)
+    assert vote_for(close, False, True, params) is None
+    assert vote_for(clear, False, False, params) is None  # below small_face_px
+
+
+def test_a_foreign_name_is_respelled_for_the_vietnamese_voice_only_when_spoken(core, caplog):
+    import datetime as dt
+    import logging
+
+    app, clock, g, said, _ = make(core, written={
+        "A": {"say_as": "Bờ rai ần", "on_time": ["Chào anh Brian, Brian đến sớm quá!"], "late": ["Anh Brian đến rồi!"]},
+        "B": {"say_as": "Brian", "on_time": ["Good morning, Brian!"], "late": ["Brian is here!"]}})
+    caplog.set_level(logging.INFO, logger="attendance.core.greeting")
+    with app.store._db:
+        app.store._db.execute("UPDATE employees SET email = 'brian@example.com' WHERE id = 'A'")
+        app.store._db.execute("UPDATE employees SET email = 'brian.b@example.com' WHERE id = 'B'")
+    app.store.set_greetings({"A": {"honorific": "anh"}, "B": {"language": "en"}})
+    app.cfg.greeting.key = "k"
+    clock.t = at(8, 30)
+    assert g.write_if_due()
+    app.service.on_identified("A", at(8, 40), 0.9, None)
+    assert g.speak_next(timeout=0)
+    app.service.on_identified("B", at(8, 41), 0.9, None)
+    assert g.speak_next(timeout=0)
+    assert said == ["Chào anh Bờ rai ần, Bờ rai ần đến sớm quá!", ("en", "Good morning, Brian!")]
+    assert any("Chào anh Brian, Brian đến sớm quá! (said as: Chào anh Bờ rai ần" in r.getMessage() for r in caplog.records)
+    assert "Brian" in g.heard("A", DAY + dt.timedelta(days=1))[0]  # remembered as written

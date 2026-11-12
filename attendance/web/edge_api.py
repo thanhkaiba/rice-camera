@@ -202,6 +202,8 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
             from ..core.greeting import rules_for
 
             answer["greeting"] = rules_for(service, service.now().date())
+        today = service.now().date()  # also the arrivals an admin recorded here: the Mac only knows its own
+        answer["arrived"] = {"day": today.isoformat(), "people": sorted(store.checkins(today))}
         return jsonify(answer)
 
     @app.post("/api/edge/sync/embeddings")

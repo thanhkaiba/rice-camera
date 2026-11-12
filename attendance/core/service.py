@@ -40,6 +40,7 @@ CAMERA_ALERT_AFTER = dt.timedelta(minutes=2)  # a camera down this long during t
 CAMERA_ALERT_KEY = "camera_alert"  # set while a "camera not working" alert is out, so it is sent once
 ALIVE_SAVE_EVERY = dt.timedelta(seconds=10)
 FLUSH_EVERY = dt.timedelta(seconds=30)
+MIN_REFERENCES = 3  # reference photos the midnight housekeeping always leaves someone, however poor
 SOURCES = {"camera": "Camera", "admin": "Admin confirmed photo", "manual": "Entered by admin",
            "corrected": "Corrected by admin"}
 
@@ -162,6 +163,7 @@ class AttendanceService:
         self._last_alive = dt.datetime.fromisoformat(saved) if saved else None
         self._last_alive_saved = self._last_alive
         self._last_flush: dt.datetime | None = None
+        self._arrived_elsewhere: tuple[str, frozenset] = ("", frozenset())  # (day, people in on the server)
         self._unknown_rows: dict[int, int] = {}  # face track -> its Review row, for a track that continues it
         self._camera_seen_day: dt.date | None = None
         self._bad_since: dt.datetime | None = None  # when the camera stopped working, in this run
@@ -470,12 +472,24 @@ class AttendanceService:
                                            self.model_id if vector is not None else None, vector, sha256)
         log.info("Identified %s at %s (score %.2f): %s", employee_id, ts.strftime("%H:%M:%S"), score, result)
         if result == "new":
-            if self.greeter is not None:
+            if employee_id in self.arrived_elsewhere(ts.date()):
+                log.info("%s already has an arrival on the server today; no greeting", employee_id)
+            elif self.greeter is not None:
                 try:
                     self.greeter.arrived(employee_id, ts)
                 except Exception:  # a greeting never stops the camera
                     log.exception("Greeting not queued")
             self._announce(employee_id, ts)
+
+    def set_arrived(self, arrived: dict | None) -> None:
+        """From the server, where it is in charge: who has an arrival today, however it was recorded.
+        A face named on its Review page is an arrival this computer never recorded itself."""
+        if arrived and arrived.get("day"):
+            self._arrived_elsewhere = (str(arrived["day"]), frozenset(arrived.get("people") or ()))
+
+    def arrived_elsewhere(self, day: dt.date) -> frozenset:
+        known_day, people = self._arrived_elsewhere
+        return people if known_day == day.isoformat() else frozenset()
 
     def on_unknown(self, ts: dt.datetime, image: str | None, vector: np.ndarray | None,
                    guess_id: str | None, guess_score: float | None, sha256: str | None = None,
@@ -511,6 +525,11 @@ class AttendanceService:
                      guess_score or 0, group_id or "new", seen)
         row = self.store.add_unknown(ts.date(), ts, image, self.model_id, vector, guess_id, guess_score,
                                      group_id, ignored=ignored, sha256=sha256, quality=quality)
+        if self.greeter is not None and not ignored and continued is None:  # a new face at the door, not the same walk
+            try:
+                self.greeter.unknown(ts)
+            except Exception:  # a greeting never stops the camera
+                log.exception("Greeting not queued")
         if track is not None and not ignored:
             self._unknown_rows[track] = row
             while len(self._unknown_rows) > 50:
@@ -535,7 +554,7 @@ class AttendanceService:
         floor = max(r.seen_again_score, r.accept_score)
         if not (r.seen_again_score and guess_id and guess_score is not None and guess_score >= floor):
             return None
-        checked = self.store.checkins(day)
+        checked = set(self.store.checkins(day)) | self.arrived_elsewhere(day)
         if guess_id not in checked:
             return None
         if vector is None:
@@ -1001,6 +1020,8 @@ class AttendanceService:
             if self.store.get("cleanup_day") != day.isoformat():
                 self.cleanup(day)
                 self.store.put("cleanup_day", day.isoformat())
+            if self.backup is not None and self.backup.due(now):  # its own data is still this computer's to keep safe
+                self.backup.start()
             return
         if self.is_workday(day):
             w = self.window(day)
@@ -1052,12 +1073,61 @@ class AttendanceService:
             self.cleanup(day)
             self.store.put("cleanup_day", day.isoformat())
 
+        if self.store.get("tidy_day") != day.isoformat():  # the first tick after midnight
+            self.store.put("tidy_day", day.isoformat())
+            try:
+                self.tidy(day)
+            except Exception:
+                log.exception("Midnight housekeeping failed")
+
         if self.backup is not None and self.backup.due(now):
             self.backup.start()
 
         if self._last_flush is None or now - self._last_flush >= FLUSH_EVERY:
             self.chat.kick(now)
             self._last_flush = now
+
+    def blurry_card(self, members: list) -> bool:
+        """A camera Review card on which every photo is poor (below blurry_score). Photos from before
+        the score was kept never count as poor."""
+        below = self.cfg.recognition.blurry_score / 100
+        scores = [u.quality for u in members if u.quality is not None]
+        return bool(members) and members[-1].source == "camera" and len(scores) == len(members) and max(scores) < below
+
+    def tidy(self, today: dt.date) -> tuple[int, int]:
+        """Midnight housekeeping: (blurry Review cards of earlier days removed, poor reference photos deleted)."""
+        r = self.cfg.recognition
+        cards = 0
+        if r.auto_delete_blurry and r.blurry_score:
+            for members in self.store.pending_groups():
+                if self.blurry_card(members) and all(self._local(u.ts).date() < today for u in members):
+                    self.store.resolve_group(members[0].group_id, "discarded", None, photo_ids=[u.id for u in members])
+                    cards += 1
+            if cards:
+                self.store.log(self.now(), "system", "delete review", f"{cards} blurry card(s) of earlier days removed")
+        photos = 0
+        if r.auto_delete_photos_below and self.library is not None:
+            emails = {e.id: e.email for e in self.store.all_employees()}
+            by_person: dict[str, list] = {}
+            for ref in self.store.references(self.model_id):
+                by_person.setdefault(ref.employee_id, []).append(ref)
+            for employee_id, refs in by_person.items():
+                poor = sorted((x for x in refs if x.image_score is not None and x.image_score < r.auto_delete_photos_below),
+                              key=lambda x: x.image_score)
+                for ref in poor[:max(0, len(refs) - MIN_REFERENCES)]:
+                    if ref.image:
+                        self.library.delete_photo(ref.image)
+                    else:
+                        self.store.delete_reference(ref.id)
+                    self.store.log(self.now(), "system", "delete photo",
+                                   f"{emails.get(employee_id, employee_id)} {ref.image or f'#{ref.id}'} (score {ref.image_score})")
+                    photos += 1
+            if photos:
+                self.library.reload()
+        if cards or photos:
+            log.info("Housekeeping: %d blurry Review card(s) removed, %d reference photo(s) below %d deleted",
+                     cards, photos, r.auto_delete_photos_below)
+        return cards, photos
 
     def cleanup(self, today: dt.date) -> int:
         """Delete camera snapshots and unknown faces older than the retention period. Snapshots of

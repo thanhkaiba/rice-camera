@@ -249,3 +249,19 @@ def test_a_continued_track_still_knows_which_it_continues_after_three_segments()
     out += frames(tr, lambda i: [obs(noisy(C), x=800)], 4, start=T0 + dt.timedelta(seconds=6))
     out += tr.flush()
     assert [d.follows for d in out] == [None, out[0].track, out[1].track]
+
+
+def test_an_unknown_track_says_what_each_frame_looked_like_and_why_it_did_not_vote():
+    tr = tracker()
+    low = Observation((100, 100, 180, 180), noisy(A), [("A", 0.40), ("B", 0.1)], True, 0.5, detail="80px")
+    close = Observation((100, 100, 180, 180), noisy(A), [("A", 0.60), ("B", 0.57)], True, 0.5, detail="81px")
+    turned = Observation((100, 100, 180, 180), noisy(A), [("A", 0.50), ("B", 0.1)], False, 0.5, detail="82px")
+    out = []
+    for i, o in enumerate([low, close, turned]):
+        out += tr.update([o], T0 + dt.timedelta(seconds=i * 0.2))
+    out += tr.update([], T0 + dt.timedelta(seconds=20))
+    assert [d.kind for d in out] == ["unknown"]
+    notes = out[0].trace.split(" | ")
+    assert notes[0] == "80px A 0.40 +0.30 low score"
+    assert notes[1] == "81px A 0.60 +0.03 close second"
+    assert notes[2] == "82px A 0.50 +0.40 small, blurred or turned and not a clear match"

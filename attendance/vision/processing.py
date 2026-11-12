@@ -99,7 +99,8 @@ class FrameProcessor:
         owners = assign_faces([f.bbox for f in faces], people) if people else [None] * len(faces)
         matched = [(f, self.app.gallery.match(f.embedding), pid) for f, pid in zip(faces, owners)]
         for f, c, _ in matched:  # clear matches teach how this camera sees faces
-            if f.size_ok and f.raw_pitch is not None and clear_match(c, self.cfg.recognition):
+            if (f.size_ok and f.size >= self.cfg.recognition.min_face_px and f.raw_pitch is not None
+                    and clear_match(c, self.cfg.recognition)):  # landmarks of a small face are too rough for a pose
                 self.app.pose.add(f.raw_yaw, f.raw_pitch)
         decisions = []
         if record:
@@ -107,7 +108,9 @@ class FrameProcessor:
             scene_frame = whole_frame if raw is None else raw
             observations = [Observation(f.bbox, f.embedding, c, f.quality_ok, f.quality, crop_face(frame, f.bbox), pid,
                                         f.size_ok, crop_body(whole_frame, _shift(f.bbox, offset)),
-                                        (scene_frame, _shift(f.bbox, offset)))
+                                        (scene_frame, _shift(f.bbox, offset)),
+                                        f"{f.size:.0f}px det{f.det_score:.2f} sharp{f.sharpness:.0f} "
+                                        f"yaw{f.yaw:+.0f} pitch{f.pitch:+.0f}")
                             for f, c, pid in matched]
             # Capture timestamps are separated by the previous frame's processing time.
             # Frames are paced from the start of the previous one: they are max(processing, 1/fps)

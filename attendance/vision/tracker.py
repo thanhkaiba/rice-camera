@@ -48,6 +48,28 @@ def clear_match(candidates, params) -> bool:
     return top >= params.accept_score + STRONG_MATCH and margin >= 2 * params.min_margin
 
 
+TRACE_FRAMES = 20  # frames of a track described in the log when nobody was named
+
+
+def _frame_note(obs, voted: str | None, params) -> str:
+    """One frame of a track for the log: the face, its best match, and why it did not vote."""
+    if not obs.candidates:
+        return f"{obs.detail} no match"
+    person, top = obs.candidates[0]
+    margin = top - (obs.candidates[1][1] if len(obs.candidates) > 1 else -1.0)
+    if voted is not None:
+        why = "vote"
+    elif top < params.accept_score:
+        why = "low score"
+    elif margin < params.min_margin:
+        why = "close second"
+    elif not obs.size_ok:
+        why = "too small or unclear"
+    else:
+        why = "small, blurred or turned and not a clear match"
+    return f"{obs.detail} {person[:6]} {top:.2f} +{min(margin, 9.99):.2f} {why}"
+
+
 def vote_for(candidates, quality_ok: bool, size_ok: bool, params) -> str | None:
     """The person this face votes for, or None: a clear match on a usable face."""
     if not candidates:
@@ -73,6 +95,7 @@ class Observation:
     size_ok: bool = True  # big and clearly detected (see vote_for)
     body: Any = None  # the person below the face, shown on the review page
     scene: Any = None  # (whole camera frame, face box in it): the evidence picture
+    detail: str = ""  # size, detector score, sharpness and pose of the face, for the log of a track nobody was named in
 
 
 @dataclass
@@ -91,6 +114,7 @@ class Decision:
     camera: int | None = None  # which camera, when there are several (set by the camera loop)
     frames: int = 0  # frames the track was seen in
     votes: int = 0  # of those, votes for `employee_id` (the decision, or the unknown's closest person)
+    trace: str = ""  # for an unknown: what each frame of the track looked like and why it did not vote
 
 
 @dataclass
@@ -107,6 +131,7 @@ class _Track:
     best: Observation | None = None
     decided: str | None = None
     person_id: int | None = None
+    trace: list = field(default_factory=list)
 
 
 def iou(a, b) -> float:
@@ -187,6 +212,8 @@ class FaceTracker:
         person = vote_for(obs.candidates, obs.quality_ok, obs.size_ok, self.p)
         if person is not None:
             t.votes[person] += 1
+        if len(t.trace) < TRACE_FRAMES:
+            t.trace.append(_frame_note(obs, person, self.p))
 
         if t.decided or not t.votes:
             return None
@@ -233,7 +260,7 @@ class FaceTracker:
                 decisions.append(Decision("unknown", t.first_ts, person, score, t.best.crop, t.best.embedding,
                                           t.best.body, t.best.scene, t.best.quality, track=t.id,
                                           follows=self._continues(t), frames=t.frames,
-                                          votes=t.votes.get(person, 0)))
+                                          votes=t.votes.get(person, 0), trace=" | ".join(t.trace)))
                 self._reported = (self._reported + [t])[-REPORTED_KEPT:]
         self._ended = waiting
         return decisions

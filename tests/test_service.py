@@ -344,3 +344,54 @@ def test_unknown_role_is_refused(env):
     with pytest.raises(ValueError):
         store.update_employee("C", "Carol", True, role="boss")
     assert store.employee("C").role == "employee"
+
+
+def test_someone_named_on_the_server_counts_as_in_and_is_not_greeted_again(env):
+    service, store, clock, sent = env
+    greeted = []
+    service.greeter = type("G", (), {"arrived": lambda self, e, ts: greeted.append(e), "unknown": lambda self, ts: None})()
+    service.gallery.replace([("A", person_vector(1)), ("B", person_vector(2))])
+    service.cfg.recognition.seen_again_score = 0.45
+    assert service.on_unknown(at(9, 5), "x.jpg", person_vector(1), "A", 0.9) is not None  # A is not in: a card
+    service.set_arrived({"day": DAY.isoformat(), "people": ["A"]})  # an admin named that card on the server
+    assert service.on_unknown(at(9, 6), "y.jpg", person_vector(1), "A", 0.9) is None  # A passing again: no card
+    service.on_identified("A", at(9, 7), 0.8, None)
+    service.on_identified("B", at(9, 8), 0.8, None)
+    assert greeted == ["B"]
+    service.set_arrived({"day": "2000-01-01", "people": ["B"]})  # another day's list says nothing about today
+    assert service.arrived_elsewhere(DAY) == frozenset()
+
+
+def test_backup_still_runs_while_the_server_is_in_charge(env):
+    service, store, clock, sent = env
+    started = []
+    service.edge = type("E", (), {"following": True, "unknown": lambda *a, **k: None, "identified": lambda *a, **k: None})()
+    service.backup = type("B", (), {"due": lambda self, now: True, "start": lambda self: started.append(1)})()
+    service.tick()
+    assert started == [1]
+
+
+def test_midnight_housekeeping_removes_blurry_cards_of_earlier_days_and_poor_photos(env):
+    service, store, clock, sent = env
+    yesterday = at(9, 0) - dt.timedelta(days=1)
+    old_blurry = service.on_unknown(yesterday, "a.jpg", person_vector(31), None, None, quality=0.04)
+    old_clear = service.on_unknown(yesterday, "b.jpg", person_vector(32), None, None, quality=0.5)
+    today_blurry = service.on_unknown(at(9, 1), "c.jpg", person_vector(33), None, None, quality=0.04)
+    for n, score in enumerate([0.1, 0.15, 0.2, 0.6]):  # A: three poor photos and a good one
+        store.add_embedding(service.model_id, "A", person_vector(40 + n), "admin", at(8, 0), None, True, score)
+    for n, score in enumerate([0.1, 0.2]):  # B: only poor ones, all kept
+        store.add_embedding(service.model_id, "B", person_vector(50 + n), "admin", at(8, 0), None, True, score)
+    service.library = type("L", (), {"delete_photo": lambda self, image: None, "reload": lambda self: None})()
+    before = {e: len(store.references(service.model_id, e)) for e in "AB"}
+    cards, photos = service.tidy(DAY)
+    assert cards == 1 and photos >= 1
+    assert store.unknown(old_blurry).status == "discarded"
+    assert store.unknown(old_clear).status == "pending" and store.unknown(today_blurry).status == "pending"
+    for e in "AB":  # nobody is left with fewer than three photos, and the poorest go first
+        left = [r.image_score for r in store.references(service.model_id, e)]
+        poor = [x for x in left if x is not None and x < 25]
+        assert len(left) >= min(before[e], 3) and (not poor or len(left) == min(before[e], 3))
+    assert 10 not in [r.image_score for r in store.references(service.model_id, "A")]
+    service.cfg.recognition.auto_delete_blurry = False
+    service.cfg.recognition.auto_delete_photos_below = 0
+    assert service.tidy(DAY + dt.timedelta(days=1)) == (0, 0)

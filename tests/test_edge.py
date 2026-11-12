@@ -602,3 +602,29 @@ def test_a_second_job_is_done_even_when_the_server_gives_the_same_id(live, tmp_p
     edge.follow()  # a result the server did not get is sent again, not done twice
     assert said == [1, 1] and "said: sent before" in c.get("/audit", headers=admin()).get_data(as_text=True)
     assert json.loads(mac.get("edge_jobs_unsent")) == {}
+
+
+def test_the_mac_hears_who_has_an_arrival_on_the_server(live, tmp_path):
+    _, core, _ = live
+    mac, edge = follower(live, tmp_path)
+    heard = []
+    edge.on_arrived = heard.append
+    edge.follow()
+    assert heard[-1] == {"day": at(10, 30).date().isoformat(), "people": []}
+    core.service.set_arrival(at(10, 30).date(), "A", at(9, 0).time(), "admin")
+    edge.follow()
+    assert heard[-1]["people"] == ["A"]
+
+
+def test_evidence_label_is_written_without_accents():
+    from attendance.core import pipeline
+
+    seen = {}
+    import cv2
+    real = cv2.putText
+    try:
+        cv2.putText = lambda img, text, *a, **k: seen.setdefault("text", text) and img
+        pipeline.render_scene(np.zeros((90, 160, 3), dtype=np.uint8), (10, 10, 40, 40), "Hồ Thị Hằng Đỗ  match 0.54")
+    finally:
+        cv2.putText = real
+    assert seen["text"] == "Ho Thi Hang Do  match 0.54"

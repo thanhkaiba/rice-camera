@@ -187,7 +187,6 @@ def register(app: Flask, core: "App") -> None:
     @app.get("/unknowns")
     def unknowns():
         labels = _review_labels(store.all_employees())
-        blurry_below = cfg.recognition.blurry_score / 100
         arrivals: dict = {}  # day -> employee id -> arrival time, for "in at 08:52" next to a suggestion
 
         def arrived(day):
@@ -198,9 +197,8 @@ def register(app: Flask, core: "App") -> None:
         groups = []
         for members in store.pending_groups():
             best, maybe = service.review_suggestions(members)
-            scores = [u.quality for u in members if u.quality is not None]
             # Every photo on the card is poor (photos from before the score was kept never count as poor).
-            blurry = members[-1].source == "camera" and len(scores) == len(members) and max(scores) < blurry_below
+            blurry = service.blurry_card(members)
             camera_day = members[-1].ts.astimezone(service.tz).date() if members[-1].source == "camera" else None
             email = store.get(f"seed_review_email:{members[-1].id}") if members[-1].source == "seed" else None
             person = store.employee_by_email(email) if email else None

@@ -299,8 +299,10 @@ class FaceRecognizer:
             raw_yaw, raw_pitch = head_pose(landmarks)
             yaw, pitch = raw_yaw - pose_offset[0], raw_pitch - pose_offset[1]
             sharp = sharpness(frame, bbox)
-            size_ok = size >= c.min_face_px and det >= c.min_det_score
-            ok = size_ok and sharp >= c.min_sharpness and abs(yaw) <= c.max_yaw and abs(pitch) <= c.max_pitch
+            # size_ok: big enough to vote on a clear match; a usable frame (ok) needs the full size
+            size_ok = size >= min(c.small_face_px, c.min_face_px) and det >= c.min_det_score
+            ok = (size >= c.min_face_px and size_ok and sharp >= c.min_sharpness
+                  and abs(yaw) <= c.max_yaw and abs(pitch) <= c.max_pitch)
             quality = (det * min(1.0, size / 112) * min(1.0, sharp / 150)
                        * math.cos(math.radians(min(abs(yaw), 89))) * math.cos(math.radians(min(abs(pitch), 89))))
             try:

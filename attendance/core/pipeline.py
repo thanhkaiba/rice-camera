@@ -91,6 +91,7 @@ class App:
 
         self.greeter = Greeter(cfg, self.store, self.service.now, lambda d: self.service.window(d).late_from)
         self.edge.on_rules = self.greeter.set_rules
+        self.edge.on_arrived = self.service.set_arrived
         self.edge.on_say = self.greeter.say_test
         if not self.edge.enabled:  # on its own: the day's leave and holidays are here
             from .greeting import rules_for
@@ -170,10 +171,15 @@ def report_collected(app: App, face, frame, ts: dt.datetime, candidates) -> None
 def render_scene(frame, bbox, label: str, max_width: int = 1280) -> bytes:
     """The whole camera picture with the face boxed and `label` (time, name) burned in, so the
     picture is evidence on its own, without the database."""
+    import unicodedata
+
     import cv2
 
     from ..vision.faces import encode_jpeg
 
+    # OpenCV's built-in font only has ASCII: "Hồ Thị Hằng" came out as "H??? Th??? H???ng".
+    label = "".join(ch for ch in unicodedata.normalize("NFD", label.replace("Đ", "D").replace("đ", "d"))
+                    if not unicodedata.combining(ch)).encode("ascii", "replace").decode()
     canvas = frame.copy()
     h, w = canvas.shape[:2]
     scale = min(1.0, max_width / w)
@@ -397,6 +403,8 @@ def run(cfg: Config) -> None:
                                    track=None if d.track is None else (slot.index, d.track),
                                    follows=None if d.follows is None else (slot.index, d.follows),
                                    frames=d.frames, votes=d.votes)
+                if d.trace:  # why nobody was named: one entry per frame
+                    log.info("Frames of the unknown face at %s: %s", ts.strftime("%H:%M:%S"), d.trace)
 
     def watch(slot: _CameraSlot, fps: float, in_window: bool, enrolling: bool, collecting: bool) -> bool:
         """Open the camera if needed and analyse its newest frame when one is due. True if a frame

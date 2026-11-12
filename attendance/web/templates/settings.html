@@ -190,6 +190,7 @@
       Claude writes everyone's sentences once in the morning, so nothing waits for the network at the door; the camera never waits for the greeting.</p>
     <div class="stack">
       {{ check('greeting', 'enabled', 'Greet people at the door', 'Off: silent, as before') }}
+      {{ check('greeting', 'unknown', 'Say hello to faces the camera cannot name', '“Xin chào!” without a name, at most once every 2 minutes; the person is still greeted by name once recognised') }}
     </div>
     <div class="form-row" style="margin-top:12px">
       <label class="field grow">Claude API key<input name="greeting.key" type="password" autocomplete="off"
@@ -443,6 +444,7 @@
           {{ field('recognition', 'min_margin', 'Margin over 2nd best', type='number', step='0.01') }}
           {{ field('recognition', 'unknown_min_frames', 'Frames before "to review"', type='number') }}
           {{ field('recognition', 'min_face_px', 'Min face size (px)', type='number') }}
+          {{ field('recognition', 'small_face_px', 'Small face, clear match only (px)', 'A smaller face still counts when it matches one person far ahead of everyone else', type='number') }}
           {{ field('recognition', 'min_det_score', 'Min detection score', type='number', step='0.01') }}
           {{ field('recognition', 'min_sharpness', 'Min sharpness', type='number', step='1') }}
           {{ field('recognition', 'max_yaw', 'Max head turn (°)', type='number', step='1') }}
@@ -462,7 +464,9 @@
             {{ field('recognition', 'suggest_score', 'Review "Maybe" from', 'People this similar are offered as choices on Review; never recorded by themselves', type='number', step='0.01') }}
             {{ field('recognition', 'same_face_score', 'Same face score', 'After a confirmation, other cards from that day this similar to the confirmed face are offered as the same person · 0 = off', type='number', step='0.01') }}
             {{ field('recognition', 'blurry_score', 'Review "blurry" below', 'Camera faces under this Image score are listed last on Review, apart · 0 = list all together', type='number', step='1') }}
+            {{ field('recognition', 'auto_delete_photos_below', 'Delete reference photos below', 'At midnight, reference photos under this Image score are deleted; each person keeps at least 3 · 0 = keep all', type='number', step='1') }}
           </div>
+          {{ check('recognition', 'auto_delete_blurry', 'Remove blurry Review cards at midnight', 'Cards of earlier days whose photos are all under the "blurry" score; no attendance is recorded for them') }}
         </div>
       </div>
     </details>
