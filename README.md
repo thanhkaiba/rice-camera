@@ -42,7 +42,15 @@ CHECKIN_OFFICE_URL=http://<mac>:8000 \
 gunicorn -w 1 --threads 8 -b 127.0.0.1:8000 attendance.server:application
 ```
 
-`CHECKIN_HOME` holds `config.yaml`, the database and photos; keep it out of the web root. **Update:** upload the new code and restart.
+`CHECKIN_HOME` holds `config.yaml`, the database and photos; keep it out of the web root.
+**Update:** upload the new code, install `requirements.txt` with the same Python environment
+that runs Gunicorn, then restart the service. Updating code alone does not install new libraries.
+For a `.venv` deployment, run from the project directory:
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -c "import soundfile, scipy, sounddevice, zerotts; print('Audio dependencies OK')"
+```
 
 ## Office Mac
 

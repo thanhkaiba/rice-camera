@@ -15,6 +15,9 @@ dependencies = [
     "PyYAML>=6.0",
     "anthropic>=2.8",  # the greeting at the door: Claude writes the sentences
     "zerotts==0.1.5",  # local Vietnamese speech (no API key)
+    "soundfile>=0.12.1",  # recordings and WAV previews
+    "scipy>=1.10.0",  # recording resampling
+    "sounddevice>=0.5.2",  # camera speaker playback
     "tzdata; sys_platform == 'win32'",
 ]
 

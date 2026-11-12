@@ -5,4 +5,7 @@ Flask>=3.1  # request.max_content_length per upload (seed import)
 PyYAML>=6.0
 anthropic>=2.8  # the greeting at the door: Claude writes the sentences
 zerotts==0.1.5  # local Vietnamese greetings; model files live in models/ZeroTTS
+soundfile>=0.12.1  # read recordings and return WAV previews on the server
+scipy>=1.10.0  # resample recordings for voice creation
+sounddevice>=0.5.2  # play greetings on the camera computer
 tzdata; sys_platform == "win32"
