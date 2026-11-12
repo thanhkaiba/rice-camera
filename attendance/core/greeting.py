@@ -22,6 +22,7 @@ import threading
 import time
 
 from ..store import Employee
+from .voice_models import ensure as ensure_voice_models
 
 log = logging.getLogger(__name__)
 
@@ -266,6 +267,9 @@ class Greeter:
         self.error: str | None = None
         self.spoken: dict[str, int] = {}
         self._voices: set[str] | None = None
+        self._speech_lock = threading.Lock()  # the test button and arrival worker share one speaker/model
+        self._tts = None
+        self._tts_key = None
         self._weather: dict = {}
         self._place: tuple | None = None
         self.local_rules = None  # day -> rules, where no server sends them (the camera computer on its own)
@@ -495,9 +499,28 @@ class Greeter:
     # speaking ---------------------------------------------------------------------------------
 
     def voice_for(self, language: str) -> str:
+        if language != "en" and self.settings.engine == "zerotts":
+            return self.settings.zerotts_voice
         return self.settings.voice_en if language == "en" else self.settings.voice
 
     def voice_ready(self, language: str = "vi") -> bool:
+        if language != "en" and self.settings.engine == "zerotts":
+            root = self.cfg.path("models/ZeroTTS")
+            required = ("config.json", "tokenizer.json", "null_voice_emb.npy", "onnx/text_encoder.onnx",
+                        "onnx/prefix_step.onnx", "onnx/local_frame_decode.onnx",
+                        "onnx/codec/codec_browser_onnx_meta.json",
+                        "onnx/codec/moss_audio_tokenizer_decode_full.onnx",
+                        "onnx/codec/moss_audio_tokenizer_decode_step.onnx",
+                        "onnx/codec/moss_audio_tokenizer_decode_shared.data")
+            if not all((root / name).is_file() for name in required):
+                return False
+            voices = [root / "voices"]
+            if self.settings.zerotts_voices_dir:
+                custom = self.cfg.path(self.settings.zerotts_voices_dir)
+                if not custom.is_dir():
+                    return False
+                voices.insert(0, custom)
+            return any((folder / self.settings.zerotts_voice / "voice.npz").is_file() for folder in voices)
         if not shutil.which("say"):
             return False
         if self._voices is None:
@@ -509,11 +532,47 @@ class Greeter:
         return self.voice_for(language) in self._voices
 
     def _say(self, text: str, language: str = "vi") -> None:
-        voice = self.voice_for(language)
-        if not self.voice_ready(language):
-            raise RuntimeError(f"the voice {voice} is not on this computer")
-        subprocess.run(["say", "-v", voice, "-r", str(self.settings.rate), text],
-                       timeout=SAY_TIMEOUT_S, check=True, capture_output=True)
+        with self._speech_lock:
+            voice = self.voice_for(language)
+            if language != "en" and self.settings.engine == "zerotts":
+                ensure_voice_models(self.cfg)
+            if not self.voice_ready(language):
+                engine = "ZeroTTS model or" if language != "en" and self.settings.engine == "zerotts" else "the"
+                raise RuntimeError(f"{engine} voice {voice} is not on this computer")
+            if language != "en" and self.settings.engine == "zerotts":
+                import sounddevice as sd
+                custom = self.settings.zerotts_voices_dir
+                self._zerotts_model()
+                if custom:
+                    self._tts.add_voices(self.cfg.path(custom))
+                audio = self._tts.synthesize(text, voice=voice, max_frames=int(SAY_TIMEOUT_S * self._tts.frame_rate))
+                if not audio.size:
+                    raise RuntimeError("ZeroTTS returned no audio")
+                sd.play(audio.reshape(-1), self._tts.sample_rate, blocking=True)
+            else:
+                subprocess.run(["say", "-v", voice, "-r", str(self.settings.rate), text],
+                               timeout=SAY_TIMEOUT_S, check=True, capture_output=True)
+
+    def _zerotts_model(self):
+        """Caller holds _speech_lock: arrival speech and draft previews share one model."""
+        from zerotts import ZeroTTS
+
+        ensure_voice_models(self.cfg)
+        root = self.cfg.path("models/ZeroTTS")
+        key = (root, self.settings.zerotts_voices_dir)
+        if self._tts is None or self._tts_key != key:
+            self._tts = ZeroTTS.from_pretrained(root, local_files_only=True, intra_op_num_threads=2)
+            self._tts_key = key
+        return self._tts
+
+    def render_voice(self, emb, path) -> None:
+        """Create a browser preview without playing through the office speaker or asking Claude."""
+        with self._speech_lock:
+            model = self._zerotts_model()
+            audio = model.synthesize(TEST_TEXT, voice=emb, max_frames=int(SAY_TIMEOUT_S * model.frame_rate))
+            if not audio.size:
+                raise RuntimeError("ZeroTTS returned no audio")
+            model.save_audio(audio, path)
 
     def say_test(self) -> dict:
         """Asked from the server's Settings page: a fixed sentence, then, with a key, Claude is asked right
@@ -649,6 +708,12 @@ class Greeter:
     # threads ----------------------------------------------------------------------------------
 
     def _speak_loop(self) -> None:
+        if self.settings.engine == "zerotts":
+            try:
+                ensure_voice_models(self.cfg)
+            except Exception as exc:
+                self.error = f"Could not download ZeroTTS: {str(exc)[:200]}"
+                log.exception("ZeroTTS download failed; will retry when speech is requested")
         while True:
             try:
                 self.speak_next()

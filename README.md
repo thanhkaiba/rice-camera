@@ -2,6 +2,8 @@
 
 The door camera records who arrives and when. Faces are recognised on a computer in the office; the portal on a server shows attendance, posts to Google Chat who is late or missing, and takes holidays and leave from the HR system (Base).
 
+Local Vietnamese speech and custom voice packs: [ZeroTTS setup](docs/voice.md).
+
 ```mermaid
 flowchart LR
   cam[Door camera<br>RTSP] --> mac[Office Mac<br>recognises faces<br>greets at the door]

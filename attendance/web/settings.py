@@ -1,13 +1,17 @@
 """Routes for live camera view (/live), system settings (/settings), and first-run setup (/setup)."""
 from __future__ import annotations
 
+import io
 import json
+import uuid
+from pathlib import PurePosixPath
 import sys
 import threading
 import time
 from typing import TYPE_CHECKING
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file, send_from_directory, url_for
+from werkzeug.utils import secure_filename
 
 from .. import __version__
 from ..cli import updater
@@ -16,6 +20,7 @@ from ..integrations import base_timeoff, camera_api, chat_api
 from ..vision.faces import decode_image, encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
 from .edge_api import heartbeat as edge_heartbeat
+from .attendance import wants_json
 
 if TYPE_CHECKING:
     from ..core.pipeline import App
@@ -129,6 +134,29 @@ def register(app: Flask, core: "App") -> None:
 
     # settings ---------------------------------------------------------------------
 
+    def creation_status() -> dict:
+        status = core.voice_creator.status()
+        if status.get("state") in ("ready", "used"):
+            status["preview_url"] = url_for("greeting_creation_preview", job_id=status["id"])
+        return status
+
+    def activate_voice(name: str, data: bytes) -> str:
+        from ..core.voice import install_voice
+
+        target = install_voice(cfg.path("data/voices"), name, data)
+        if core.photos_read_elsewhere:
+            folder = core.data_dir / "uploads"
+            folder.mkdir(parents=True, exist_ok=True)
+            rel = f"uploads/{uuid.uuid4().hex}"
+            (core.data_dir / rel).write_bytes(target.read_bytes())
+            store.edge_job_add("add_voice", {"voice": name, "image": rel}, service.now())
+        else:
+            settings.save(cfg, store, {"greeting": {"engine": "zerotts", "zerotts_voice": name,
+                                                   "zerotts_voices_dir": "data/voices"}})
+        store.log(service.now(), current_user(cfg), "uploaded voice", name)
+        return (f"Voice {name} uploaded. It will be selected after the office computer confirms installation."
+                if core.photos_read_elsewhere else f"Voice {name} installed and selected. You can test it now.")
+
     @app.get("/settings")
     def settings_page():
         return render_template("settings.html", s=settings.current(cfg), cfg=cfg, leave=leave_status(core),
@@ -141,7 +169,84 @@ def register(app: Flask, core: "App") -> None:
                                upcoming=occasions.upcoming(service.now().date()),
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
                                update=updater.read_status(core.data_dir), backup=core.backup.status(),
-                               versions=versions(), base_kinds=base_timeoff.KINDS, edge_beat=edge_heartbeat(store))
+                               versions=versions(), base_kinds=base_timeoff.KINDS, edge_beat=edge_heartbeat(store),
+                               voice_creation=creation_status())
+
+    @app.post("/settings/greeting/create")
+    def greeting_voice_create():
+        from ..core.voice_creation import MAX_REFERENCE_BYTES
+
+        request.max_content_length = MAX_REFERENCE_BYTES
+        request.max_form_parts = 4
+        # Keep raw recordings in RAM, including multipart uploads larger than Werkzeug's spool threshold.
+        request._get_file_stream = lambda *args, **kwargs: io.BytesIO()
+        try:
+            upload = request.files.get("reference")
+            if upload is None or not upload.filename:
+                raise ValueError("Choose a WAV recording first.")
+            status = core.voice_creator.start(request.form.get("voice_name", "").strip(),
+                                              upload.read(MAX_REFERENCE_BYTES + 1))
+            store.log(service.now(), current_user(cfg), "create voice", status["name"])
+        except BlockingIOError as exc:
+            if wants_json():
+                return jsonify(ok=False, message=str(exc)), 409
+            return failed(str(exc), "settings_page", _anchor="greeting")
+        except (ValueError, OSError) as exc:
+            if wants_json():
+                return jsonify(ok=False, message=str(exc)), 400
+            return failed(str(exc), "settings_page", _anchor="greeting")
+        if wants_json():
+            return jsonify(ok=True, **status), 202
+        return done("Creating the voice locally. Wait for the sample below before selecting it.",
+                    "settings_page", _anchor="greeting")
+
+    @app.get("/settings/greeting/creation")
+    def greeting_creation_status():
+        response = jsonify(creation_status())
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
+    @app.get("/settings/greeting/creation/<job_id>/preview.wav")
+    def greeting_creation_preview(job_id):
+        status = core.voice_creator.status()
+        if job_id != status.get("id") or status.get("state") not in ("ready", "used"):
+            abort(404)
+        response = send_file(core.voice_creator.root / job_id / "preview.wav", mimetype="audio/wav", conditional=True)
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
+    @app.post("/settings/greeting/creation/use")
+    def greeting_creation_use():
+        try:
+            message = core.voice_creator.use(request.form.get("job_id", ""), activate_voice)
+        except (ValueError, OSError) as exc:
+            return failed(f"Voice not selected: {exc}", "settings_page", _anchor="greeting")
+        return done(message, "settings_page", _anchor="greeting")
+
+    @app.post("/settings/greeting/voice")
+    def greeting_voice_upload():
+        from ..core.voice import MAX_VOICE_BYTES
+
+        request.max_content_length = 10 * 1024 * 1024
+        request.max_form_parts = 32
+        message, ok = "", False
+        try:
+            files = request.files.getlist("voice_files")
+            names = [PurePosixPath((f.filename or "").replace("\\", "/")) for f in files]
+            if any(p.is_absolute() or ".." in p.parts for p in names):
+                raise ValueError("The folder contains an unsafe file path.")
+            voices = [(f, p) for f, p in zip(files, names) if p.name == "voice.npz"]
+            if len(voices) != 1 or len(voices[0][1].parts) != 2:
+                raise ValueError("Choose one voice folder containing voice.npz directly inside it.")
+            upload, rel = voices[0]
+            name = secure_filename(rel.parent.name)
+            message = activate_voice(name, upload.read(MAX_VOICE_BYTES + 1))
+            ok = True
+        except (ValueError, OSError) as exc:
+            message = f"Voice not installed: {exc}"
+        if wants_json():
+            return jsonify(ok=ok, message=message), (200 if ok else 400)
+        return (done if ok else failed)(message, "settings_page", _anchor="greeting")
 
     @app.post("/settings/greeting/test")
     def greeting_test():

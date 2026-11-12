@@ -199,9 +199,64 @@
       {{ field('greeting', 'model', 'Model', 'claude-opus-5-5, or claude-haiku-5-5 for a cheaper one') }}
     </div>
     <div class="form-row">
-      {{ field('greeting', 'voice', 'Vietnamese voice', 'A macOS voice: Linh') }}
+      <label class="field">Vietnamese speech engine
+        <select name="greeting.engine">
+          <option value="macos" {{ 'selected' if s.greeting.engine == 'macos' }}>macOS</option>
+          <option value="zerotts" {{ 'selected' if s.greeting.engine == 'zerotts' }}>ZeroTTS · local model</option>
+        </select>
+        <span class="hint">ZeroTTS runs on the camera computer. English keeps its macOS voice.</span>{{ src('greeting.engine') }}
+      </label>
+      {{ field('greeting', 'zerotts_voice', 'ZeroTTS voice', 'maichi, baotrang, kimoanh, hamy, giahuy, huuduc, quangminh, tiendat, or your custom pack name') }}
+    </div>
+    {{ field('greeting', 'zerotts_voices_dir', 'Custom voice folder', 'Optional folder on the camera computer, e.g. data/voices, containing <voice name>/voice.npz. Unpack your voice ZIP here, then enter its name above.', cls='grow') }}
+    <div class="form-row">
+      <label class="field grow">Upload a custom voice folder
+        <input type="file" name="voice_files" form="voice-upload" webkitdirectory multiple required>
+        <span class="hint">Choose one unpacked voice pack containing voice.npz. Its folder name becomes the voice name. Upload installs and selects it; existing voices are kept. Maximum 10 MB per folder.</span>
+      </label>
+      <button type="submit" form="voice-upload">{{ icon('upload') }}Upload and use voice</button>
+    </div>
+    <h3>Create a voice from a recording</h3>
+    <p class="hint">Use a clean recording of your own voice, or a speaker who has agreed to its use. The recording is processed on this computer/server, without an external voice service. Listen to the result before choosing it.</p>
+    <div class="form-row">
+      <label class="field">New voice name
+        <input name="voice_name" form="voice-create" placeholder="giong-vinh" required maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*">
+        <span class="hint">Letters, numbers, underscores, dots or hyphens. Choose a name not already installed.</span>
+      </label>
+    </div>
+    <label class="field">Vietnamese reading sample
+      <select id="voice-reading">
+        <option value="0">Morning greeting</option>
+        <option value="1">A calm story</option>
+        <option value="2">Everyday conversation</option>
+      </select>
+    </label>
+    <blockquote lang="vi" id="voice-reading-text"></blockquote>
+    <p class="hint">Read just one passage in your natural voice, at a steady distance from the microphone. Aim for 10–20 seconds; recording stops automatically at 30 seconds. No music or other speakers.</p>
+    <div class="form-row">
+      <label class="field grow">Microphone<select id="voice-microphone"><option value="">System default microphone</option></select></label>
+      <button type="button" id="voice-record">Start recording</button>
+      <output id="voice-record-duration" aria-live="off">0.0 / 30 s</output>
+    </div>
+    <p class="hint" id="voice-record-status" role="status" aria-live="polite"></p>
+    <audio id="voice-record-preview" controls preload="none" hidden aria-label="Listen to your microphone recording"></audio>
+    <details>
+      <summary>Or choose an existing WAV file</summary>
+      <label class="field">Reference recording
+        <input type="file" id="voice-reference-file" name="reference" form="voice-create" accept=".wav,audio/wav,audio/x-wav">
+        <span class="hint">WAV, 3–30 seconds, mono or stereo, at most 25 MB.</span>
+      </label>
+    </details>
+    <p class="hint">Your microphone recording stays in this tab until you press Create voice. It is then sent to this app for local processing; no external voice service is used.</p>
+    <button type="submit" form="voice-create" id="voice-create-button">Create voice</button>
+    <p class="hint" id="voice-creation-status" role="status" aria-live="polite"></p>
+    <audio id="voice-creation-preview" controls preload="none" hidden></audio>
+    <button type="submit" form="voice-use" id="voice-use-button" hidden>Use this voice</button>
+    <p class="hint">Missing ZeroTTS models download automatically on first use (about 1 GB; Internet required). The first test may take several minutes. Save changes before testing. Audio plays through the camera computer’s speaker.</p>
+    <div class="form-row">
+      {{ field('greeting', 'voice', 'macOS Vietnamese voice', 'Used when the engine is macOS: Linh') }}
       {{ field('greeting', 'voice_en', 'English voice', 'For people greeted in English: Samantha, Daniel, Karen…') }}
-      {{ field('greeting', 'rate', 'Speed (words/min)', '180 is calm; 90–360', type='number') }}
+      {{ field('greeting', 'rate', 'macOS speed (words/min)', '180 is calm; 90–360. ZeroTTS uses its natural pace.', type='number') }}
     </div>
     <div class="form-row">
       {{ field('greeting', 'location', 'Office location, for the weather', 'A city, e.g. "Hà Nội", or latitude,longitude "21.03,105.85" · the morning forecast from open-meteo.com · empty: no weather', cls='grow') }}
@@ -210,7 +265,7 @@
     {% set gs = (edge_beat or {}).get('greeting') %}
     <div class="row between" style="margin-top:14px">
       <span class="hint">{% if gs %}Office computer: {{ 'on' if gs.enabled else 'off' }} ·
-        {% if gs.voice %}voice ready{% else %}<strong>voice {{ s.greeting.voice }} not found</strong>{% endif %} ·
+        {% if gs.voice %}voices ready{% else %}<strong>Check {{ s.greeting.zerotts_voice if s.greeting.engine == 'zerotts' else s.greeting.voice }} ({{ s.greeting.engine }}) and {{ s.greeting.voice_en }} (macOS) on the office computer</strong>{% endif %} ·
         sentences for {{ gs.ready }} people today · {{ gs.spoken }} greeted today
         {% if gs.error %}<br><span class="badge bad">Problem</span> {{ gs.error }}{% endif %}
         {% elif edge_beat is not none %}Office computer: no greeting yet (it needs version 1.1.48 or later){% else %}Greets on the computer with the camera{% endif %}</span>
@@ -480,6 +535,9 @@
 <form method="post" action="{{ url_for('api_key_create') }}" id="api-key-new" hidden></form>
 {% for k in api_keys() %}<form method="post" action="{{ url_for('api_key_revoke', key_id=k.id) }}" id="api-revoke-{{ k.id }}" data-confirm="Revoke the key for {{ k.name }}? That system stops getting data at once." hidden></form>{% endfor %}
 <form method="post" action="{{ url_for('late_background') }}" enctype="multipart/form-data" id="late-bg" hidden></form>
+<form method="post" action="{{ url_for('greeting_voice_upload') }}" enctype="multipart/form-data" id="voice-upload" hidden></form>
+<form method="post" action="{{ url_for('greeting_voice_create') }}" enctype="multipart/form-data" id="voice-create" hidden></form>
+<form method="post" action="{{ url_for('greeting_creation_use') }}" id="voice-use" hidden><input type="hidden" name="job_id" id="voice-creation-id"></form>
 <form method="post" action="{{ url_for('choose_late_background') }}" id="late-bg-choose" hidden></form>
 <form method="post" action="{{ url_for('google_client') }}" enctype="multipart/form-data" id="google-client" hidden></form>
 <form method="post" action="{{ url_for('google_connect') }}" id="google-connect" hidden></form>
@@ -488,6 +546,7 @@
 <form method="post" action="{{ url_for('google_disconnect') }}" id="google-disconnect" hidden data-confirm="Sign out? The late message is then posted with the webhook, its picture as a link."></form>
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='voice-recorder.js', v=asset_version) }}"></script>
 <script>
   // One section at a time; the address keeps the open tab (#hr etc.), so links and reloads land on it.
   const ALIAS = {chat: 'notify', late: 'notify', access: 'admin'};
@@ -505,9 +564,113 @@
 
   // A field with a wrong value may sit on a hidden tab: open that tab so the browser can point at it.
   document.getElementById('settings').addEventListener('invalid', e => showTab(e.target.closest('.tab').id), true);
-  document.getElementById('settings').addEventListener('input', () => {
+  document.getElementById('settings').addEventListener('input', event => {
+    if (event.target.form !== event.currentTarget || !event.target.name) return;
     document.getElementById('dirty').textContent = 'Unsaved changes';
     document.querySelector('.savebar').classList.add('dirty');
   });
+
+  const creationForm = document.getElementById('voice-create');
+  const creationButton = document.getElementById('voice-create-button');
+  const creationStatus = document.getElementById('voice-creation-status');
+  const creationAudio = document.getElementById('voice-creation-preview');
+  const referenceFile = document.getElementById('voice-reference-file');
+  const recordButton = document.getElementById('voice-record');
+  const microphone = document.getElementById('voice-microphone');
+  const recordAudio = document.getElementById('voice-record-preview');
+  const recordStatus = document.getElementById('voice-record-status');
+  let creatingVoice = false;
+  const recorder = new VoiceRecorder(recording => {
+    if (recordStatus.textContent !== recording.message) recordStatus.textContent = recording.message;
+    document.getElementById('voice-record-duration').textContent = recording.seconds.toFixed(1) + ' / 30 s';
+    recordButton.textContent = recording.state === 'recording' ? 'Stop recording' : 'Start recording';
+    recordButton.disabled = creatingVoice || (recording.busy && recording.state !== 'recording');
+    microphone.disabled = recording.busy || creatingVoice;
+    referenceFile.disabled = recording.busy || creatingVoice;
+    creationButton.disabled = recording.busy || creatingVoice;
+    if (recording.state === 'recording') referenceFile.value = '';
+    recordAudio.hidden = !recording.url;
+    if (recording.url && recordAudio.getAttribute('src') !== recording.url) recordAudio.src = recording.url;
+    else if (!recording.url) { recordAudio.pause(); recordAudio.removeAttribute('src'); }
+  });
+  const readings = [
+    'Xin chào mọi người, chúc cả nhà một buổi sáng tốt lành. Hôm nay tôi bắt đầu công việc với tinh thần vui vẻ, bình tĩnh và tập trung. Mong rằng chúng ta sẽ cùng nhau có một ngày làm việc thật hiệu quả.',
+    'Buổi chiều, nắng nhẹ trải trên con đường nhỏ. Tôi mở cửa sổ, hít một hơi thật sâu và nghe tiếng lá xào xạc ngoài vườn. Một tách trà ấm cùng vài phút nghỉ ngơi khiến mọi thứ trở nên dễ chịu hơn.',
+    'Ngày mai, tôi sẽ đến văn phòng sớm để chuẩn bị cuộc họp. Bạn có muốn cùng tôi uống một ly cà phê không? Chúng ta có thể trao đổi công việc, chia sẻ ý tưởng mới và lên kế hoạch cho tuần tới.'
+  ];
+  const reading = document.getElementById('voice-reading');
+  const showReading = () => { document.getElementById('voice-reading-text').textContent = readings[Number(reading.value)]; };
+  reading.addEventListener('change', showReading); showReading();
+  async function refreshMicrophones() {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const selected = microphone.value;
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter(device => device.kind === 'audioinput');
+      microphone.replaceChildren(new Option('System default microphone', ''));
+      devices.forEach((device, index) => microphone.add(new Option(device.label || 'Microphone ' + (index + 1), device.deviceId)));
+      if ([...microphone.options].some(option => option.value === selected)) microphone.value = selected;
+    } catch { /* The browser can withhold device names until microphone permission is granted. */ }
+  }
+  recordButton.addEventListener('click', async () => {
+    recordAudio.pause(); creationAudio.pause();
+    if (recorder.state === 'recording') recorder.stop();
+    else { await recorder.start(microphone.value); refreshMicrophones(); }
+  });
+  referenceFile.addEventListener('change', () => recorder.clear());
+  window.addEventListener('pagehide', () => recorder.destroy());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) recorder.stop(); });
+  refreshMicrophones();
+  recorder.onChange(recorder);
+  let creationTimer;
+  function showCreation(status) {
+    creationStatus.textContent = status.message || 'Create a voice, listen to the sample, then choose Use this voice.';
+    creatingVoice = status.state === 'working';
+    recorder.onChange(recorder);
+    creationAudio.hidden = !status.preview_url;
+    if (status.preview_url && creationAudio.dataset.job !== status.id) {
+      creationAudio.src = status.preview_url;
+      creationAudio.dataset.job = status.id;
+    } else if (!status.preview_url) {
+      creationAudio.pause();
+    }
+    document.getElementById('voice-use-button').hidden = status.state !== 'ready';
+    document.getElementById('voice-creation-id').value = status.id || '';
+    clearTimeout(creationTimer);
+    if (status.state === 'working') creationTimer = setTimeout(refreshCreation, 1500);
+  }
+  async function refreshCreation() {
+    try {
+      const response = await fetch({{ url_for('greeting_creation_status')|tojson }});
+      if (!response.ok) throw new Error('Could not read voice creation status. Reload this page to retry.');
+      showCreation(await response.json());
+    } catch (error) {
+      creationStatus.textContent = error.message;
+      creationTimer = setTimeout(refreshCreation, 5000);
+    }
+  }
+  creationForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (recorder.busy || creatingVoice) return;
+    const data = new FormData(creationForm);
+    if (recorder.blob) data.set('reference', recorder.blob, 'microphone.wav');
+    if (!data.get('reference')?.size) {
+      creationStatus.textContent = 'Record your voice first, or choose a WAV file.';
+      return;
+    }
+    creationButton.disabled = true;
+    creatingVoice = true; recorder.onChange(recorder);
+    creationStatus.textContent = 'Sending and checking the recording…';
+    try {
+      const response = await fetch(creationForm.action, {method: 'POST', body: data,
+        headers: {'X-Requested-With': 'fetch'}});
+      const status = await response.json().catch(() => ({message: 'Upload failed. Choose a WAV under 25 MB and try again.'}));
+      if (!response.ok) throw new Error(status.message);
+      showCreation(status);
+    } catch (error) {
+      creatingVoice = false; recorder.onChange(recorder);
+      creationStatus.textContent = error.message;
+    }
+  });
+  showCreation({{ voice_creation|tojson }});
 </script>
 {% endblock %}

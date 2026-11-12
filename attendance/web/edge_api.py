@@ -234,6 +234,14 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
             return jsonify(ok=True)
         if UPLOAD_PATH.fullmatch(payload.get("image", "")):
             (core.data_dir / payload["image"]).unlink(missing_ok=True)
+        if payload.get("voice"):
+            if result.get("ok"):
+                settings.save(core.cfg, store, {"greeting": {"engine": "zerotts", "zerotts_voice": payload["voice"],
+                                                            "zerotts_voices_dir": "data/voices"}})
+            store.log(service.now(), "office computer", "installed voice",
+                      f"{payload['voice']}: " + ("installed" if result.get("ok") else
+                                                f"failed: {str(result.get('message', ''))[:300]}"))
+            return jsonify(ok=True)
         person = store.employee(payload.get("employee_id", ""))
         who = person.email if person else payload.get("employee_id", "")
         name = payload.get("filename", "photo")
