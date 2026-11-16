@@ -260,7 +260,7 @@ class AttendanceService:
 
     def late_people(self, day: dt.date) -> list[Arrival]:
         """Late arrivals of the day (people on leave who came in anyway are left out)."""
-        if not self.is_workday(day):
+        if not self.cfg.late_message.include_late or not self.is_workday(day):
             return []
         on_leave = self.store.leaves_on(day)
         return [a for a in self.report(day).late if a.employee_id not in on_leave]
@@ -1071,7 +1071,7 @@ class AttendanceService:
 
             lm = self.cfg.late_message
             send_at = dt.datetime.combine(day, parse_clock(lm.send_at), tzinfo=self.tz) if lm.send_at else w.end
-            if (lm.enabled and lm.auto_send and now >= send_at
+            if (lm.enabled and lm.auto_send and send_at <= now < send_at + dt.timedelta(minutes=1)
                     and not self.store.notice_sent(day, "late_message")
                     and not self.store.notice_sent(day, "late_message_skipped")):
                 self.send_late_message(day, auto=True)

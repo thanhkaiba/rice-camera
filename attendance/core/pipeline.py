@@ -228,7 +228,7 @@ def _leave_sync_loop(app: App) -> None:
         except Exception:
             log.exception("Leave data update crashed")
         try:
-            app.camera_sync.sync()
+            app.camera_sync.sync(auto=True)
         except Exception as exc:
             log.error("Camera API sync failed (%s)", type(exc).__name__)
         time.sleep(30)

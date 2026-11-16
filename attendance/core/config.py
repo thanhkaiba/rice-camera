@@ -214,6 +214,7 @@ class PendingReminderConfig:
 class LateMessageConfig:
     """One daily Google Chat message mentioning late arrivals and people not seen."""
     enabled: bool = True
+    include_late: bool = True
     include_not_seen: bool = True
     intro: str = "Morning, coming late today:"
     # Placeholders: {mention}, {name}, {time}, {minutes}, {registered} (", registered 9:00-09:20" when
@@ -237,7 +238,14 @@ class LateMessageConfig:
 class CameraApiConfig:
     url: str = ""  # Apps Script web app /exec URL; empty disables reporting
     key: str = field(default="", repr=False)  # CAMERA_SECRET, sent as secret in the JSON body
-    send_at: str = ""  # empty: camera window_end; otherwise start reporting at this local time
+    include_late: bool = True
+    include_not_seen: bool = True
+    send_at: str = ""  # automatic reports only during this minute; empty uses camera window_end
+    mode: str = "daily"
+    days_back: int = 3  # previous calendar days; 0 means today only
+    interval_seconds: int = 30
+    interval_start: str = ""  # empty uses the first late minute
+    interval_end: str = ""  # empty uses camera window_end
 
 
 @dataclass
@@ -471,6 +479,25 @@ class Config:
             raise ValueError("unknown_batch_minutes must not be negative")
         self.camera_api.url = self.camera_api.url.strip()
         self.camera_api.key = self.camera_api.key.strip()
+        if self.camera_api.mode not in ("daily", "interval"):
+            raise ValueError("camera_api.mode must be daily or interval")
+        if type(self.camera_api.days_back) is not int or not 0 <= self.camera_api.days_back <= 3:
+            raise ValueError("camera_api.days_back must be an integer between 0 and 3")
+        interval = self.camera_api.interval_seconds
+        if type(interval) is not int or not 30 <= interval <= 86400 or interval % 30:
+            raise ValueError("camera_api.interval_seconds must be a multiple of 30 between 30 and 86400")
+        for name in ("interval_start", "interval_end"):
+            value = getattr(self.camera_api, name)
+            try:
+                setattr(self.camera_api, name, parse_clock(value).strftime("%H:%M") if str(value).strip() else "")
+            except (TypeError, ValueError):
+                raise ValueError(f"camera_api.{name} must be HH:MM") from None
+        if self.camera_api.mode == "interval":
+            interval_start = (parse_clock(self.camera_api.interval_start) if self.camera_api.interval_start else
+                              (dt.datetime.combine(dt.date.min, late) + dt.timedelta(minutes=1)).time())
+            interval_end = parse_clock(self.camera_api.interval_end) if self.camera_api.interval_end else end
+            if not late < interval_start < interval_end:
+                raise ValueError("camera_api interval must start after On time through and end after its start on the same day")
         if str(self.camera_api.send_at).strip():
             try:
                 send_time = parse_clock(self.camera_api.send_at)

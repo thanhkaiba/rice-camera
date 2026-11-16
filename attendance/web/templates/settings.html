@@ -124,6 +124,7 @@
     <h2 class="row">{{ icon('send') }}Daily late message</h2>
     <p class="hint" style="margin-top:0">Groups late arrivals and people not seen, with a count and one person per line. Leave and exemptions are excluded. Mentions need each person's Chat ID (People page).</p>
     <div class="stack">{{ check('late_message', 'enabled', 'Post the daily late message') }}
+      {{ check('late_message', 'include_late', 'Include late arrivals', 'Applies to automatic messages, preview, picture and Send.') }}
       {{ check('late_message', 'include_not_seen', 'Include not seen employees', 'Off: only late arrivals are listed. Applies to automatic messages, preview and Send.') }}</div>
     <div class="form-row">
       <label class="field grow">Intro<input name="late_message.intro" value="{{ s.late_message.intro }}">{{ src('late_message.intro') }}</label>
@@ -133,7 +134,7 @@
     <div class="form-row" style="margin-top:14px; align-items:center">
       {{ check('late_message', 'auto_send', 'Send automatically at') }}
       {{ time24('late_message', 'send_at', '', required=false) }}
-      <span class="hint">Empty = when the camera stops · must be after the late time</span>
+      <span class="hint">Empty = when the camera stops · must be after the late time. Sends only during the scheduled minute; after that, use Send on Today.</span>
     </div>
     <div class="stack" style="margin-top:14px">{{ check('late_message', 'photo', 'Attach a picture of the late people: their camera photos as cards with name tags, on a cheerful background') }}
       {{ check('late_message', 'occasions', 'Holiday backgrounds', 'Tết, Valentine, 8/3, Easter, Giỗ Tổ, 30/4–1/5, 1/6, 2/9, Trung thu, 20/10, Halloween, 20/11, Christmas, New Year: from 5 days before to 5 after, 10 for the big ones') }}</div>
@@ -476,21 +477,46 @@
       {% if leave.enabled %}<button formaction="{{ url_for('leave_sync') }}">{{ icon('refresh') }}Load now</button>{% endif %}
     </div>
     <h3 style="margin:22px 0 8px">Camera API · Late fines</h3>
-    <p class="hint">Reports late arrivals from the send time below, using the same attendance and Base leave rules as Today.
-      Creates fines on the server. Retries the last 7 days every 30 seconds; weekends are excluded.
+    <p class="hint">Reports selected late arrivals and not seen employees using the same attendance and Base leave rules as Today.
+      Missing reports are skipped on days without camera data.
+      Creates fines on the server. Automatic sending stops outside the selected schedule; weekends are excluded.
       Empty URL disables reporting. Each field can override config.yaml separately.</p>
+    <div class="stack">
+      {{ check('camera_api', 'include_late', 'Include late arrivals', 'Send camera.late. Applies to scheduled delivery and Send now.') }}
+      {{ check('camera_api', 'include_not_seen', 'Include not seen employees', 'Send camera.missing with email and date only. Select either or both; leave both off to disable reporting.') }}
+    </div>
     <div class="form-row">
       {{ field('camera_api', 'url', 'Server URL', 'Apps Script web app URL ending in /exec', type='url', cls='grow', placeholder='https://script.google.com/macros/s/DEPLOYMENT_ID/exec') }}
       <label class="field">Camera key<input name="camera_api.key" type="password" autocomplete="off"
         placeholder="{{ 'saved · leave empty to keep' if s.camera_api.key else 'CAMERA_SECRET from the receiving app' }}">{{ src('camera_api.key') }}</label>
       <button formaction="{{ url_for('test_camera_api') }}" formnovalidate>Test connection</button>
       <button formaction="{{ url_for('send_camera_api') }}" formnovalidate
-              onclick="return confirm('Send unsent late arrivals for today and the previous 7 days using saved settings? This can create real fines.')">Send now</button>
+              onclick="return confirm('Send selected unsent reports for today and up to {{ s.camera_api.days_back }} previous days using saved settings? This can create real fines.')">Send now</button>
     </div>
     <div class="form-row">
-      {{ time24('camera_api', 'send_at', 'Send at', 'Leave empty to use Camera stops (' ~ s.schedule.window_end ~ '). Must be after On time through. Can be before the camera stops.', required=false) }}
+      <label class="field">Sending mode
+        <select name="camera_api.mode">
+          <option value="daily" {{ 'selected' if s.camera_api.mode == 'daily' }}>Once a day</option>
+          <option value="interval" {{ 'selected' if s.camera_api.mode == 'interval' }}>Every interval</option>
+        </select>{{ src('camera_api.mode') }}
+      </label>
+      <label class="field">Previous days to retry
+        <input name="camera_api.days_back" type="number" min="0" max="3" step="1" value="{{ s.camera_api.days_back }}">
+        <span class="hint">0 = today only; maximum 3 previous calendar days. Applies to automatic delivery and Send now.</span>{{ src('camera_api.days_back') }}
+      </label>
     </div>
-    <p class="hint">Save the URL, key and send time before sending. Send now checks unsent reports immediately; the saved send time, HR leave checks and duplicate protection still apply. New late arrivals after that time are sent on the next check.</p>
+    <div class="form-row" data-camera-api-mode="daily" {{ 'hidden' if s.camera_api.mode != 'daily' }}>
+      {{ time24('camera_api', 'send_at', 'Once a day · Send at', 'Leave empty to use Camera stops (' ~ s.schedule.window_end ~ '). One attempt during this minute, including retries for selected previous days. No automatic retry later that day.', required=false) }}
+    </div>
+    <div class="form-row" data-camera-api-mode="interval" {{ 'hidden' if s.camera_api.mode != 'interval' }}>
+      {{ time24('camera_api', 'interval_start', 'Interval · Start', 'Empty = first late minute. Must be after On time through.', required=false) }}
+      {{ time24('camera_api', 'interval_end', 'Interval · Stop', 'Empty = Camera stops (' ~ s.schedule.window_end ~ '). No automatic requests at or after this time. Must be later than Start on the same day.', required=false) }}
+      <label class="field">Interval · Seconds
+        <input name="camera_api.interval_seconds" type="number" min="30" max="86400" step="30" value="{{ s.camera_api.interval_seconds }}">
+        <span class="hint">Multiples of 30 seconds. Runs from Start, e.g. 300 = every 5 minutes. Missed intervals are skipped.</span>{{ src('camera_api.interval_seconds') }}
+      </label>
+    </div>
+    <p class="hint">Save settings first. Saving does not trigger sending. Send now works at any time within the selected retry-day limit; HR leave checks and duplicate protection still apply. Automatic attempts are remembered across restarts.</p>
     {% if camera_api_status %}<p class="hint">{{ camera_api_status.at }} ·
       {{ 'OK' if camera_api_status.ok else 'Needs attention' }} · {{ camera_api_status.message }}</p>{% endif %}
     <p class="hint">Rejected events are listed in Audit. Correct their data to retry. Successful fines cannot be undone here; cancel them on the server.</p>
@@ -589,6 +615,16 @@
   }
   document.querySelectorAll('#tabs [data-tab]').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
   showTab(location.hash.slice(1), false);
+
+  const cameraApiMode = document.querySelector('[name="camera_api.mode"]');
+  function showCameraApiMode() {
+    document.querySelectorAll('[data-camera-api-mode]').forEach(group => {
+      group.hidden = group.dataset.cameraApiMode !== cameraApiMode.value;
+      group.querySelectorAll('input, button').forEach(field => { field.disabled = group.hidden; });
+    });
+  }
+  cameraApiMode.addEventListener('change', showCameraApiMode);
+  showCameraApiMode();
 
   // A field with a wrong value may sit on a hidden tab: open that tab so the browser can point at it.
   document.getElementById('settings').addEventListener('invalid', e => showTab(e.target.closest('.tab').id), true);

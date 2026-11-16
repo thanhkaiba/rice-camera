@@ -77,6 +77,43 @@ def test_disabled_or_manual_only(core):
     assert sent[-1].startswith("Morning, coming late today:\nLate arrivals (1):\n• @Bob")
 
 
+@pytest.mark.parametrize('toggle', ['enabled', 'auto_send'])
+@pytest.mark.parametrize('send_at', ['', '10:30'])
+def test_enabling_late_message_after_send_time_does_not_send_until_next_day(core, toggle, send_at):
+    app, clock, sent = core
+    client = create_app(app).test_client()
+    setattr(app.cfg.late_message, toggle, False)
+    late(app, 'B', 10, 20)
+    clock.t = at(11, 1)
+    response = client.post('/settings', data={
+        'late_message.enabled': 'on', 'late_message.auto_send': 'on', 'late_message.include_late': 'on',
+        'late_message.include_not_seen': 'on', 'late_message.send_at': send_at,
+        'schedule.work_days': ['0', '1', '2', '3', '4']})
+    assert response.status_code == 302
+    assert app.cfg.late_message.enabled and app.cfg.late_message.auto_send
+    app.service.tick()
+    assert not app.store.notice_sent(DAY, 'late_message')
+    assert not any(text.startswith('Morning') for text in sent)
+    # Missing today's scheduled time must not disable tomorrow's schedule.
+    clock.t = at(10, 30, day=D) if send_at else at(11, 0, day=D)
+    app.service.tick()
+    assert app.store.notice_sent(D, 'late_message')
+    assert client.post(f'/day/{DAY}/late-message').status_code == 302
+    assert app.store.notice_sent(DAY, 'late_message')
+
+
+@pytest.mark.parametrize('seconds,expected', [(0, True), (30, True), (59, True), (60, False), (3600, False)])
+def test_late_message_only_auto_sends_during_scheduled_minute(core, seconds, expected):
+    app, clock, _ = core
+    app.cfg.late_message.send_at = '10:30'
+    late(app, 'B', 10, 20)
+    clock.t = at(10, 30) + dt.timedelta(seconds=seconds)
+    app.service.tick()
+    assert app.store.notice_sent(DAY, 'late_message') is expected
+    if not expected:
+        assert app.service.send_late_message(DAY, user='hr')
+
+
 def test_alerts_mention_people_unless_switched_off(core):
     app, clock, sent = core
     app.store.update_employee("B", "Bob", True, "999")
@@ -659,7 +696,7 @@ def test_notifications_can_turn_not_seen_off_and_restore_default(core):
     client = create_app(app).test_client()
     page = client.get('/settings').get_data(as_text=True)
     assert 'name="late_message.include_not_seen"' in page
-    client.post('/settings', data={'late_message.enabled': 'on', 'late_message.auto_send': 'on',
+    client.post('/settings', data={'late_message.enabled': 'on', 'late_message.auto_send': 'on', 'late_message.include_late': 'on',
                                    'schedule.work_days': ['0', '1', '2', '3', '4']})
     assert app.service.late_text(DAY) == 'Morning, coming late today:\nLate arrivals (1):\n• <users/123456> (10:15)'
     assert not late_message_status(app, DAY)['missing_chat']
@@ -790,3 +827,62 @@ def test_the_preview_keeps_the_line_breaks_of_the_message():
 
     css = (pathlib.Path(__file__).parents[1] / "attendance/web/static/app.css").read_text()
     assert "white-space: pre-line" in re.search(r"\.preview-box \{[^}]*\}", css).group(0)
+
+
+@pytest.mark.parametrize('include_late,include_not_seen', [(True, False), (False, True), (True, True), (False, False)])
+def test_saved_chat_selection_controls_preview_manual_and_scheduled_send(core, include_late, include_not_seen):
+    from attendance.core import settings
+    from attendance.core.config import Config
+    from attendance.web import late_message_status
+
+    app, clock, sent = core
+    late(app, 'B', 10, 20)
+    clock.t = at(11, 1)
+    client = create_app(app).test_client()
+    data = {'late_message.enabled': 'on', 'late_message.auto_send': 'on',
+            'schedule.work_days': ['0', '1', '2', '3', '4']}
+    if include_late:
+        data['late_message.include_late'] = 'on'
+    if include_not_seen:
+        data['late_message.include_not_seen'] = 'on'
+    client.post('/settings', data=data)
+    saved = Config()
+    settings.load(saved, app.store)
+    assert saved.late_message.include_late is include_late
+    assert saved.late_message.include_not_seen is include_not_seen
+    app.service.tick()
+    assert not app.store.notice_sent(DAY, 'late_message')
+    preview = late_message_status(app, DAY)['preview'] or ''
+    assert ('Late arrivals' in preview) is include_late
+    assert ('Not seen' in preview) is include_not_seen
+    sent.clear()
+    client.post(f'/day/{DAY}/late-message')
+    assert bool(sent) is (include_late or include_not_seen)
+    if sent:
+        assert ('Late arrivals' in sent[-1]) is include_late
+        assert ('Not seen' in sent[-1]) is include_not_seen
+    clock.t = at(10, 20, day=D)
+    late(app, 'B', 10, 20, day=D)
+    clock.t = at(11, 0, day=D)
+    app.service.tick()
+    assert app.store.notice_sent(D, 'late_message') is (include_late or include_not_seen)
+
+
+@pytest.mark.parametrize('include_late,include_not_seen', [(True, False), (False, True), (True, True), (False, False)])
+def test_chat_picture_uses_selected_groups(core, monkeypatch, include_late, include_not_seen):
+    app, clock, _ = core
+    late(app, 'B', 10, 20)
+    clock.t = at(10, 40)
+    app.cfg.late_message.include_late = include_late
+    app.cfg.late_message.include_not_seen = include_not_seen
+    monkeypatch.setattr(app.service, 'best_reference_photo', lambda employee_id: app.data_dir / 'reference.jpg')
+    pictures = []
+
+    def write(data_dir, day, people, *args):
+        pictures.extend(people)
+        return f'late/{day}.jpg'
+
+    monkeypatch.setattr('attendance.core.latephoto.write', write)
+    app.service.late_photo(DAY)
+    assert [person.name for person in pictures if not person.not_seen] == (['Bob'] if include_late else [])
+    assert [person.name for person in pictures if person.not_seen] == (['Alice', 'Carol'] if include_not_seen else [])

@@ -1,4 +1,4 @@
-"""Report confirmed late arrivals; local attendance and delivery notices survive restarts."""
+"""Report late arrivals and missing employees; delivery notices survive restarts."""
 from __future__ import annotations
 
 import datetime as dt
@@ -58,15 +58,15 @@ class CameraSync:
             log.warning('Camera API: %s', message)
         return status
 
-    def sync(self) -> dict:
+    def sync(self, auto: bool = False) -> dict:
         if not self._syncing.acquire(blocking=False):
             return {'ok': False, 'message': 'A Camera API delivery is already running. Try again shortly.'}
         try:
-            return self._sync()
+            return self._sync(auto)
         finally:
             self._syncing.release()
 
-    def _sync(self) -> dict:
+    def _sync(self, auto: bool) -> dict:
         api = self.cfg.camera_api
         if not api.url or not api.key:
             return {'ok': False, 'message': 'Save the Camera API URL and key in Settings first.'}
@@ -74,13 +74,35 @@ class CameraSync:
         today = now.astimezone(VN).date()
         send_at = api.send_at or self.cfg.schedule.window_end
         send_time = parse_clock(send_at)
+        scheduled = dt.datetime.combine(now.date(), send_time, self.service.tz)
+        if not api.include_late and not api.include_not_seen:
+            return {'ok': True, 'message': 'Late and missing reporting are both disabled.'}
+        deadline = scheduled + dt.timedelta(minutes=1)
+        if auto:
+            if api.mode == 'daily':
+                if not scheduled <= now < deadline:
+                    return {'ok': True, 'message': f'Automatic reports run once during scheduled minute {send_at}; use Send now for manual delivery.'}
+                if not self.store.mark_notice(now.date(), 'camera_api_daily', now):
+                    return {'ok': True, 'message': 'Today\'s automatic report was already attempted; use Send now to retry.'}
+            else:
+                start = (dt.datetime.combine(now.date(), parse_clock(api.interval_start), self.service.tz)
+                         if api.interval_start else self.service.window(now.date()).late_from)
+                deadline = (dt.datetime.combine(now.date(), parse_clock(api.interval_end), self.service.tz)
+                            if api.interval_end else self.service.window(now.date()).end)
+                if not start <= now < deadline:
+                    return {'ok': True, 'message': 'Outside the automatic interval window; use Send now for manual delivery.'}
+                elapsed = (now - start).total_seconds()
+                slot = start + dt.timedelta(seconds=int(elapsed // api.interval_seconds) * api.interval_seconds)
+                slot_key = slot.isoformat()
+                if (now - slot).total_seconds() >= 30 or self.store.get('camera_api_interval_slot') == slot_key:
+                    return {'ok': True, 'message': 'Waiting for the next automatic interval.'}
+                self.store.put('camera_api_interval_slot', slot_key)
         emails = self.store.employee_emails()
         pending = []
         issues = []
-        for offset in range(7, -1, -1):
+        for offset in range(api.days_back, -1, -1):
             day = today - dt.timedelta(days=offset)
-            if (day.weekday() >= 5 or now < dt.datetime.combine(day, send_time, self.service.tz)
-                    or not self.service.is_workday(day)):
+            if day.weekday() >= 5 or not self.service.is_workday(day):
                 continue
             # Check freshness before building a report; a concurrent refresh must not bless provisional fines.
             if self.cfg.base_api_key:
@@ -90,7 +112,7 @@ class CameraSync:
                 ready = not leave_api.warning(self.cfg, self.store, now)
             report = self.service.report(day)
             day_pending = []
-            for arrival in report.late:
+            for arrival in (report.late if api.include_late else []):
                 email = emails.get(arrival.employee_id, '').strip().lower()
                 if not email:
                     message = f'{day}: A late employee has no email; update People to send their report.'
@@ -99,7 +121,7 @@ class CameraSync:
                     continue
                 ts = arrival.ts.astimezone(VN)
                 event = {'email': email, 'date': ts.date().isoformat(), 'arrivedAt': ts.strftime('%H:%M')}
-                if not today - dt.timedelta(days=7) <= ts.date() <= today or ts.weekday() >= 5:
+                if not today - dt.timedelta(days=api.days_back) <= ts.date() <= today or ts.weekday() >= 5:
                     continue
                 minutes = minutes_late(arrival, report.window)
                 if 0 <= minutes <= 720:
@@ -107,7 +129,18 @@ class CameraSync:
                 done = f'camera_api:{email}'
                 rejected = done + ':' + hashlib.sha256(json.dumps(event, sort_keys=True).encode()).hexdigest()
                 if not self.store.notice_sent(day, done) and not self.store.notice_sent(day, rejected):
-                    day_pending.append((day, done, rejected, event))
+                    day_pending.append((day, done, rejected, event, 'camera.late'))
+            if api.include_not_seen and not report.no_camera_data:
+                for employee_id, _ in report.not_seen:
+                    email = emails.get(employee_id, '').strip().lower()
+                    if not email:
+                        issues.append(f'{day}: A missing employee has no email; update People to send their report.')
+                        continue
+                    event = {'email': email, 'date': day.isoformat()}
+                    done = f'camera_api:missing:{email}'
+                    rejected = done + ':' + hashlib.sha256(json.dumps(event, sort_keys=True).encode()).hexdigest()
+                    if not self.store.notice_sent(day, done) and not self.store.notice_sent(day, rejected):
+                        day_pending.append((day, done, rejected, event, 'camera.missing'))
             if not day_pending:
                 continue
             if not ready:
@@ -119,15 +152,19 @@ class CameraSync:
         if not pending:
             if issues:
                 return {'ok': False, 'message': ' '.join(dict.fromkeys(issues))}
-            if self.service.is_workday(today) and now < dt.datetime.combine(today, send_time, self.service.tz):
-                return {'ok': False, 'message': f'No past reports to send. Today is available after scheduled send time {send_at}.'}
-            return {'ok': True, 'message': 'No unsent late arrivals eligible for reporting in the last 7 days and today.'}
+            return {'ok': True, 'message': f'No unsent late arrivals or missing employees eligible for reporting in the previous {api.days_back} days and today.'}
         rejected_count = 0
         processed_count = 0
-        for start in range(0, len(pending), 200):
-            batch = pending[start:start + 200]
+        batches = []
+        for action in ('camera.late', 'camera.missing'):
+            rows = [row[:4] for row in pending if row[4] == action]
+            for start in range(0, len(rows), 200):
+                batches.append((action, rows[start:start + 200]))
+        for action, batch in batches:
+            if auto and self.service.now() >= deadline:
+                return self._status(now, False, 'Automatic sending window ended; remaining reports were not sent. Use Send now to retry.')
             try:
-                response = post(api.url, {'action': 'camera.late', 'secret': api.key,
+                response = post(api.url, {'action': action, 'secret': api.key,
                                           'events': [row[3] for row in batch]})
                 if response.get('ok') is not True:
                     if response.get('permanent') is True:
@@ -146,14 +183,14 @@ class CameraSync:
                         raise ValueError()
             except Exception:
                 # Do not log exception/response text: the server or URL may echo the secret.
-                return self._status(now, False, 'Delivery failed; check URL, key and server. Will retry in 30 seconds.')
+                return self._status(now, False, 'Delivery failed; check URL, key and server. Will retry at the next allowed interval, or use Send now.')
             for (day, done, rejected, _), result in zip(batch, results):
                 failed = result['status'] == 'rejected'
                 rejected_count += failed
                 processed_count += not failed
                 self.store.mark_notice(day, rejected if failed else done, now)
                 if failed:
-                    self.store.log(now, 'system', 'camera API rejected', f'{day}: {result["email"]}; correct employee/attendance data')
+                    self.store.log(now, 'system', 'camera API rejected', f'{action} {day}: {result["email"]}; correct employee/attendance data')
             message = f'{processed_count} processed, {rejected_count} rejected. Check Audit for rejected employees.'
             if issues:
                 message += ' ' + ' '.join(dict.fromkeys(issues))
