@@ -70,7 +70,8 @@ def _greeting_status(value) -> dict | None:
         return None
     error = value.get("error")
     result = {"enabled": bool(value.get("enabled")), "ready": int(value.get("ready") or 0), "voice": bool(value.get("voice")),
-            "spoken": int(value.get("spoken") or 0), "error": str(error)[:300] if error else None}
+            "spoken": int(value.get("spoken") or 0), "audio": int(value.get("audio") or 0),
+            "error": str(error)[:300] if error else None}
     if isinstance(value.get("voices"), list):
         result["voices"] = sorted({name for name in value["voices"][:1000]
                                    if isinstance(name, str) and name != "auto"

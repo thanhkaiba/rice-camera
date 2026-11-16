@@ -111,3 +111,79 @@ def test_live_page_script_keeps_the_camera_index_apart_from_the_camera_badge(cor
     assert "?cam=' + camIndex, {cache" in script and "?cam=' + camIndex + '&t='" in script
     for wrong in ("'?cam=' + cam,", "'?cam=' + cam +", "'?cam=' + cam;"):
         assert wrong not in script
+
+
+def test_frames_that_arrive_in_a_burst_keep_the_times_they_were_taken():
+    from attendance.vision.camera import StreamClock
+
+    clock, gap = StreamClock(), 1 / 15
+    # 15 frames a second arriving evenly, 60 ms after they were taken.
+    even = [clock.at(1000.06 + i * gap, i * gap) for i in range(15)]
+    assert all(abs(t - (1000.06 + i * gap)) < 0.01 for i, t in enumerate(even))
+    # The link stalls for a second: its 15 frames all arrive within 30 ms of each other.
+    burst = [clock.at(1002.06 + n * 0.002, (15 + n) * gap) for n in range(15)]
+    assert all(abs(t - (1000.06 + (15 + n) * gap)) < 0.02 for n, t in enumerate(burst))  # a second of video
+    assert burst == sorted(burst) and burst[-1] <= 1002.06 + 14 * 0.002  # in order, never after arrival
+    # A stream without usable times (always 0): when each frame arrived.
+    plain = StreamClock()
+    assert [plain.at(5.0, 0.0), plain.at(5.1, 0.0), plain.at(5.2, None)] == [5.0, 5.1, 5.2]
+    # The stream's clock jumps (the camera restarted its count): start again from the arrival.
+    assert clock.at(1010.0, 2.5) == 1010.0
+
+
+def test_a_burst_of_frames_is_analysed_in_turn_not_only_its_newest_frame():
+    from attendance.core.pipeline import frame_due
+    from attendance.vision.camera import pick
+
+    gap = 1 / 15
+    frames = [(object(), 100 + i * gap) for i in range(8)]  # what a 4K camera's buffer holds: 0.5 s
+    last_processed = last_chosen = 100 - 0.2
+    analysed = []
+    while True:
+        picked = pick(frames, last_chosen, lambda t: frame_due(t, last_processed, 5, 15))
+        if picked is None:
+            break
+        _, last_chosen, last_processed = picked
+        analysed.append(round(last_chosen - 100, 2))
+    assert analysed == [0.0, 0.2, 0.4]  # 5 a second through the burst; only 0.47 was analysed before
+
+
+def test_the_buffer_holds_fewer_frames_of_a_bigger_picture():
+    import numpy as np
+
+    from attendance.vision.camera import buffer_frames
+
+    assert buffer_frames(np.zeros((2160, 3840, 3), np.uint8)) == 8  # 25 MB each
+    assert buffer_frames(np.zeros((1080, 1920, 3), np.uint8)) == 16
+    assert buffer_frames(np.zeros((4320, 7680, 3), np.uint8)) == 6
+
+
+def test_brightness_is_judged_the_same_from_every_8th_pixel():
+    import numpy as np
+
+    from attendance.vision.recognizer import enhance_low_light
+
+    rng = np.random.default_rng(3)
+    bright = rng.integers(120, 200, (360, 640, 3), dtype=np.uint8)
+    dark = rng.integers(10, 60, (360, 640, 3), dtype=np.uint8)
+    assert enhance_low_light(bright) is bright
+    out = enhance_low_light(dark)
+    assert out is not dark and out.shape == dark.shape and out.mean() > dark.mean()
+
+
+def test_a_long_burst_is_thinned_evenly_and_old_frames_are_dropped():
+    from collections import deque
+
+    from attendance.vision.camera import BACKLOG_S, trim
+
+    gap = 1 / 15
+    frames = deque()
+    for i in range(24):  # 1.6 s of video arriving at once; room for 8
+        frames.append((i, 100 + i * gap))
+        trim(frames, 8)
+    kept = [i for i, _ in frames]
+    assert len(kept) == 8 and kept[0] == 0 and kept[-1] == 23
+    assert max(b - a for a, b in zip(kept, kept[1:])) <= 5  # spread over the burst, no big hole
+    frames.append((99, 100 + 23 * gap + BACKLOG_S + 1))  # the stream stood still, then one new frame
+    trim(frames, 8)
+    assert [i for i, _ in frames] == [99]

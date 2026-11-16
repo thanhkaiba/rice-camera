@@ -301,7 +301,10 @@ class GreetingConfig:
     enabled: bool = False
     key: str = field(default="", repr=False)  # Claude API key; empty: plain built-in greetings
     model: str = "claude-opus-5-5"
-    engine: str = "macos"  # Vietnamese speech: macos or zerotts; English keeps the macOS voice
+    engine: str = "macos"  # Vietnamese speech: macos or zerotts
+    # English speech: macos (voice_en), or zerotts with the same ZeroTTS voice as Vietnamese. ZeroTTS is
+    # built for Vietnamese: it reads English with a Vietnamese accent, in one voice for both languages.
+    engine_en: str = "macos"
     zerotts_voice: str = "maichi"
     zerotts_voices_dir: str = ""  # optional local directory containing custom <name>/voice.npz packs
     voice: str = "Linh"  # a macOS voice that speaks Vietnamese
@@ -429,6 +432,9 @@ class Config:
         g.engine = g.engine.strip().lower()
         if g.engine not in ("macos", "zerotts"):
             raise ValueError("greeting.engine must be macos or zerotts")
+        g.engine_en = g.engine_en.strip().lower()
+        if g.engine_en not in ("macos", "zerotts"):
+            raise ValueError("greeting.engine_en must be macos or zerotts")
         g.zerotts_voice = g.zerotts_voice.strip()
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", g.zerotts_voice):
             raise ValueError("greeting.zerotts_voice must be a voice name (letters, numbers, _, - or .)")

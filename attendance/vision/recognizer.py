@@ -51,7 +51,8 @@ class DetectedFace:
 
 def enhance_low_light(frame: np.ndarray, threshold: float = 90.0) -> np.ndarray:
     """Equalise contrast (CLAHE on the L channel) when the frame is dark."""
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    # Every 8th pixel each way says how bright the frame is; the whole of a 4K frame took 9 ms a frame.
+    gray = cv2.cvtColor(np.ascontiguousarray(frame[::8, ::8]), cv2.COLOR_BGR2GRAY)
     if gray.mean() >= threshold:
         return frame
     lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)

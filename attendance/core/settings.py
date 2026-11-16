@@ -35,7 +35,7 @@ EDITABLE: dict[str, list[str]] = {
     "updates": ["enabled"],
     "backup": ["folder", "time", "keep_days", "include_photos"],
     "collect": ["enabled", "start", "end", "min_score", "per_day", "enough", "fps", "review_per_day"],
-    "greeting": ["enabled", "key", "model", "engine", "zerotts_voice", "zerotts_voices_dir",
+    "greeting": ["enabled", "key", "model", "engine", "engine_en", "zerotts_voice", "zerotts_voices_dir",
                  "voice", "voice_en", "rate", "style", "location", "unknown"],
     "": ["retention_days", "late_evidence_days", "healthcheck_url", "base_api_key"],
 }

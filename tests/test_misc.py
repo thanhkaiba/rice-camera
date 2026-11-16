@@ -166,7 +166,7 @@ def test_sharpest_buffered_frame_is_picked_where_the_faces_are():
 
     import cv2
 
-    from attendance.camera import Camera, focus
+    from attendance.camera import Camera, focus, pick
 
     rng = np.random.default_rng(1)
     sharp = np.zeros((240, 320, 3), np.uint8)
@@ -179,11 +179,18 @@ def test_sharpest_buffered_frame_is_picked_where_the_faces_are():
     now = time.time()
     frames = [(blurred, now - 0.3), (sharp, now - 0.2), (blurred.copy(), now - 0.1)]
     cam._recent.extend(frames)
-    cam._frame, cam._frame_time = frames[-1]
-    frame, t = cam.sharpest(now - 1, face)
-    assert frame is sharp and t == now - 0.2
-    assert cam.sharpest(now - 0.15, face)[1] == now - 0.1   # only frames newer than the last analysed
-    assert cam.sharpest(now - 1, ())[0] is frames[-1][0]    # no faces: just the newest frame
+    assert cam.pending() == []  # no frame has arrived: the stream is down
+    cam._frame, cam._frame_time = frames[-1][0], now
+    assert cam.pending() == frames
+    assert cam.pending(now - 0.25) == frames[1:] and cam.pending() == frames[1:]  # dealt with: let go
+    cam._recent.appendleft(frames[0])
+    newest = lambda t: t >= now - 0.1  # only the newest frame is due
+    frame, t, due = pick(frames, now - 1, newest, face)
+    assert frame is sharp and t == now - 0.2 and due == now - 0.1
+    assert pick(frames, now - 0.15, newest, face)[1] == now - 0.1   # only frames newer than the last analysed
+    assert pick(frames, now - 1, newest, ())[0] is frames[-1][0]    # no faces: just the due frame
+    assert pick(frames, now - 0.1, newest, face) is None            # nothing new
+    assert pick(frames, now - 1, lambda t: False, face) is None     # nothing due yet
 
 
 def test_centering_removes_the_shared_direction_and_needs_enough_people():

@@ -160,7 +160,7 @@ def test_the_heartbeat_carries_the_greeting_state(live, tmp_path):  # noqa: F811
     edge.status = lambda: {"camera_ok": True, "greeting": {"enabled": True, "ready": 3, "voice": True, "spoken": 1, "error": None}}
     edge.heartbeat()
     beat = json.loads(core.store.get("edge_heartbeat"))
-    assert beat["greeting"] == {"enabled": True, "ready": 3, "voice": True, "spoken": 1, "error": None}
+    assert beat["greeting"] == {"enabled": True, "ready": 3, "voice": True, "spoken": 1, "audio": 0, "error": None}
     assert "sentences for 3 people today" in c.get("/settings", headers=admin()).get_data(as_text=True)
 
 

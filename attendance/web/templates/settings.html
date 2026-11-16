@@ -184,119 +184,157 @@
 
   <section class="card tab" id="greeting">
     <h2 class="row">{{ icon('wave') }}Greeting at the door</h2>
-    <p class="hint" style="margin-top:0">The office computer says hello out loud, through its speaker, the first time each day the camera
-      recognises someone: by name, as <em>anh</em> or <em>chị</em>, in Vietnamese or English, or not at all (each person's choice on <a href="{{ url_for('honorifics_page') }}">People → Greetings</a>),
-      and a playful line for whoever comes after the late time (an approved coming-late request on Base counts as on time).
-      Claude writes everyone's sentences once in the morning, so nothing waits for the network at the door; the camera never waits for the greeting.</p>
+    <p class="hint" style="margin-top:0">The office computer says hello through its speaker the first time each day the camera recognises someone.
+      Who is greeted, as <em>anh</em> or <em>chị</em>, and in which language is set per person on <a href="{{ url_for('honorifics_page') }}">People → Greetings</a>.</p>
     <div class="stack">
-      {{ check('greeting', 'enabled', 'Greet people at the door', 'Off: silent, as before') }}
-      {{ check('greeting', 'unknown', 'Say hello to faces the camera cannot name', '“Xin chào!” without a name, at most once every 2 minutes; the person is still greeted by name once recognised') }}
+      {{ check('greeting', 'enabled', 'Greet people at the door', 'Off: silent') }}
+      {{ check('greeting', 'unknown', 'Say hello to faces the camera cannot name', '“Xin chào!” without a name, at most once every 2 minutes') }}
     </div>
-    <div class="form-row" style="margin-top:12px">
-      <label class="field grow">Claude API key<input name="greeting.key" type="password" autocomplete="off"
-        placeholder="{{ 'saved · leave empty to keep' if s.greeting.key else 'none: short built-in greetings' }}">
-        <span class="hint">From console.anthropic.com → API keys. Only names and anh/chị are sent, never photos.</span>{{ src('greeting.key') }}</label>
-      {{ field('greeting', 'model', 'Model', 'claude-opus-5-5, or claude-haiku-5-5 for a cheaper one') }}
-    </div>
+
+    <h3 style="margin-top:18px">Voices</h3>
     <div class="form-row">
-      <label class="field">Vietnamese speech engine
+      <label class="field">Vietnamese is read by
         <select name="greeting.engine">
-          <option value="macos" {{ 'selected' if s.greeting.engine == 'macos' }}>macOS</option>
-          <option value="zerotts" {{ 'selected' if s.greeting.engine == 'zerotts' }}>ZeroTTS · local model</option>
-        </select>
-        <span class="hint">ZeroTTS runs on the camera computer. English keeps its macOS voice.</span>{{ src('greeting.engine') }}
+          <option value="zerotts" {{ 'selected' if s.greeting.engine == 'zerotts' }}>ZeroTTS · natural voice, on the office computer</option>
+          <option value="macos" {{ 'selected' if s.greeting.engine == 'macos' }}>macOS voice ({{ s.greeting.voice }})</option>
+        </select>{{ src('greeting.engine') }}
       </label>
       <label class="field grow">ZeroTTS voice
         <select name="greeting.zerotts_voice">
           <option value="auto" {{ 'selected' if s.greeting.zerotts_voice == 'auto' }}>Auto · change voice every day</option>
           {% for name in zerotts_voices %}<option value="{{ name }}" {{ 'selected' if s.greeting.zerotts_voice == name }} {{ 'disabled' if name in unavailable_voices }}>{{ name }}{{ ' · awaiting camera confirmation' if name in unavailable_voices }}</option>{% endfor %}
         </select>
-        <span class="hint">Presets and packs in the custom voice folder. On the remote portal, custom voices can be selected after the camera confirms them. Auto keeps one installed voice all day and rotates the next day; with one voice it keeps that voice.</span>{{ src('greeting.zerotts_voice') }}
+        <span class="hint">Used wherever ZeroTTS is chosen. Add your own under “Add a voice” below.</span>{{ src('greeting.zerotts_voice') }}
       </label>
     </div>
-    {{ field('greeting', 'zerotts_voices_dir', 'Custom voice folder', 'Optional folder on the camera computer, e.g. data/voices, containing <voice name>/voice.npz. Save a changed folder and reload to refresh the voice list. Remote camera voices appear after its next heartbeat.', cls='grow') }}
     <div class="form-row">
-      <label class="field">Voice name
-        <input name="voice_name" form="voice-file-upload" placeholder="adam-hot-tiktok" required maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*">
+      <label class="field">English is read by
+        <select name="greeting.engine_en">
+          <option value="macos" {{ 'selected' if s.greeting.engine_en == 'macos' }}>macOS voice ({{ s.greeting.voice_en }}) · native English</option>
+          <option value="zerotts" {{ 'selected' if s.greeting.engine_en == 'zerotts' }}>ZeroTTS · the same voice as Vietnamese</option>
+        </select>
+        <span class="hint">ZeroTTS is made for Vietnamese: it reads English with a Vietnamese accent, but in the same voice as the Vietnamese greetings.</span>{{ src('greeting.engine_en') }}
       </label>
-      <label class="field grow">Upload voice.npz
-        <input type="file" name="voice_file" form="voice-file-upload" accept=".npz" required>
-        <span class="hint">Choose the voice.npz inside your voice folder and enter a new voice name. No ZIP needed. Maximum 128 KB; existing voices are kept.</span>
-      </label>
-      <button type="submit" form="voice-file-upload">{{ icon('upload') }}Upload and use voice</button>
+      {{ field('greeting', 'voice_en', 'macOS English voice', 'Samantha, Daniel, Karen… as installed on the office computer') }}
     </div>
-    <details><summary>Or upload an entire voice folder</summary>
-    <div class="form-row">
-      <label class="field grow">Upload a custom voice folder
-        <input type="file" name="voice_files" form="voice-upload" webkitdirectory multiple required>
-        <span class="hint">Choose one unpacked voice pack containing voice.npz. Its folder name becomes the voice name. Upload installs and selects it; existing voices are kept. Maximum 10 MB per folder.</span>
-      </label>
-      <button type="submit" form="voice-upload">{{ icon('upload') }}Upload and use voice</button>
-    </div>
-    </details>
-    <h3>Try any text with ZeroTTS</h3>
-    <label class="field">Text to read
-      <textarea name="text" form="voice-text-test" rows="3" maxlength="500" required placeholder="Nhập nội dung bạn muốn giọng đọc thử…"></textarea>
-      <span class="hint">Uses the voice selected above without saving settings. Up to 500 characters and 20 seconds of audio. Plays in this browser. On the remote portal, audio is generated on the camera computer; Auto uses its daily voice. Keep the camera online. Pickup may take 30 seconds before generation starts.</span>
-    </label>
-    <button type="submit" form="voice-text-test" id="voice-text-button">Generate audio</button>
-    <p class="hint" id="voice-text-status" role="status" aria-live="polite"></p>
-    <audio id="voice-text-audio" controls preload="none" hidden aria-label="Listen to your text"></audio>
-    <h3>Create a voice from a recording</h3>
-    <p class="hint">Use a clean recording of your own voice, or a speaker who has agreed to its use. The recording is processed on the camera computer, without an external voice service. Listen to the result before choosing it.</p>
-    <div class="form-row">
-      <label class="field">New voice name
-        <input name="voice_name" form="voice-create" placeholder="giong-vinh" required maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*">
-        <span class="hint">Letters, numbers, underscores, dots or hyphens. Choose a name not already installed.</span>
-      </label>
-    </div>
-    <label class="field">Vietnamese reading sample
-      <select id="voice-reading">
-        <option value="0">Morning greeting</option>
-        <option value="1">A calm story</option>
-        <option value="2">Everyday conversation</option>
-      </select>
-    </label>
-    <blockquote lang="vi" id="voice-reading-text"></blockquote>
-    <p class="hint">Read just one passage in your natural voice, at a steady distance from the microphone. Aim for 10–20 seconds; recording stops automatically at 30 seconds. No music or other speakers.</p>
-    <div class="form-row">
-      <label class="field grow">Microphone<select id="voice-microphone"><option value="">System default microphone</option></select></label>
-      <button type="button" id="voice-record">Start recording</button>
-      <output id="voice-record-duration" aria-live="off">0.0 / 30 s</output>
-    </div>
-    <p class="hint" id="voice-record-status" role="status" aria-live="polite"></p>
-    <audio id="voice-record-preview" controls preload="none" hidden aria-label="Listen to your microphone recording"></audio>
-    <details>
-      <summary>Or choose an existing WAV file</summary>
-      <label class="field">Reference recording
-        <input type="file" id="voice-reference-file" name="reference" form="voice-create" accept=".wav,audio/wav,audio/x-wav">
-        <span class="hint">WAV, 3–30 seconds, mono or stereo, at most 25 MB.</span>
-      </label>
-    </details>
-    <p class="hint">Your microphone recording stays in this tab until you press Create voice. It is then sent to this app and forwarded to the camera computer for processing; no external voice service is used.</p>
-    <button type="submit" form="voice-create" id="voice-create-button">Create voice</button>
-    <p class="hint" id="voice-creation-status" role="status" aria-live="polite"></p>
-    <audio id="voice-creation-preview" controls preload="none" hidden></audio>
-    <button type="submit" form="voice-use" id="voice-use-button" hidden>Use this voice</button>
-    <p class="hint">Missing ZeroTTS models download on the camera computer on first use (about 1 GB; Internet required). Say a test greeting uses the camera speaker; text tests and creation previews play in this browser.</p>
-    <div class="form-row">
-      {{ field('greeting', 'voice', 'macOS Vietnamese voice', 'Used when the engine is macOS: Linh') }}
-      {{ field('greeting', 'voice_en', 'English voice', 'For people greeted in English: Samantha, Daniel, Karen…') }}
-      {{ field('greeting', 'rate', 'macOS speed (words/min)', '180 is calm; 90–360. ZeroTTS uses its natural pace.', type='number') }}
-    </div>
-    <div class="form-row">
-      {{ field('greeting', 'location', 'Office location, for the weather', 'A city, e.g. "Hà Nội", or latitude,longitude "21.03,105.85" · the morning forecast from open-meteo.com · empty: no weather', cls='grow') }}
-    </div>
-    {{ field('greeting', 'style', 'Extra wishes for the sentences', 'Optional, e.g. "nhắc uống nước", "hài hước hơn"', cls='grow') }}
+
     {% set gs = (edge_beat or {}).get('greeting') %}
-    <div class="row between" style="margin-top:14px">
+    <div class="row between" style="margin:14px 0">
       <span class="hint">{% if gs %}Office computer: {{ 'on' if gs.enabled else 'off' }} ·
-        {% if gs.voice %}voices ready{% else %}<strong>Check {{ s.greeting.zerotts_voice if s.greeting.engine == 'zerotts' else s.greeting.voice }} ({{ s.greeting.engine }}) and {{ s.greeting.voice_en }} (macOS) on the office computer</strong>{% endif %} ·
-        sentences for {{ gs.ready }} people today · {{ gs.spoken }} greeted today
+        {% if gs.voice %}voices ready{% else %}<strong>Check {{ s.greeting.zerotts_voice if s.greeting.engine == 'zerotts' else s.greeting.voice }} ({{ s.greeting.engine }}) and {{ s.greeting.zerotts_voice if s.greeting.engine_en == 'zerotts' else s.greeting.voice_en }} ({{ s.greeting.engine_en }}) on the office computer</strong>{% endif %} ·
+        sentences for {{ gs.ready }} people today{% if gs.audio %} · {{ gs.audio }} read ahead by ZeroTTS{% endif %} · {{ gs.spoken }} greeted today
         {% if gs.error %}<br><span class="badge bad">Problem</span> {{ gs.error }}{% endif %}
         {% elif edge_beat is not none %}Office computer: no greeting yet (it needs version 1.1.48 or later){% else %}Greets on the computer with the camera{% endif %}</span>
       <button formaction="{{ url_for('greeting_test') }}" formnovalidate title="The office computer says a test sentence, then asks Claude for a greeting and says it: checks the key and the model">{{ icon('play') }}Say a test greeting</button>
     </div>
+
+    <details class="panel" {{ 'open' if not s.greeting.key }}>
+      <summary>Sentences · written by Claude ({{ s.greeting.model }}{{ '' if s.greeting.key else ', no API key yet' }})</summary>
+      <div>
+        <p class="hint" style="margin-top:0">Claude writes everyone's sentences once in the morning, so nothing waits for the network at the door.
+          Late arrivals get a playful line (an approved coming-late request on Base counts as on time). Without a key, short built-in greetings are used.</p>
+        <div class="form-row">
+          <label class="field grow">Claude API key<input name="greeting.key" type="password" autocomplete="off"
+            placeholder="{{ 'saved · leave empty to keep' if s.greeting.key else 'none: short built-in greetings' }}">
+            <span class="hint">From console.anthropic.com → API keys. Only names and anh/chị are sent, never photos.</span>{{ src('greeting.key') }}</label>
+          {{ field('greeting', 'model', 'Model', 'claude-opus-5-5, or claude-haiku-5-5 for a cheaper one') }}
+        </div>
+        {{ field('greeting', 'style', 'Extra wishes for the sentences', 'Optional, e.g. "nhắc uống nước", "hài hước hơn"', cls='grow') }}
+        <div class="form-row">
+          {{ field('greeting', 'location', 'Office location, for the weather', 'A city, e.g. "Hà Nội", or latitude,longitude "21.03,105.85" · the morning forecast from open-meteo.com · empty: no weather', cls='grow') }}
+        </div>
+      </div>
+    </details>
+
+    <details class="panel">
+      <summary>Try a voice with your own text</summary>
+      <div>
+        <label class="field">Text to read
+          <textarea name="text" form="voice-text-test" rows="3" maxlength="500" required placeholder="Nhập nội dung bạn muốn giọng đọc thử…"></textarea>
+          <span class="hint">Read by the ZeroTTS voice selected above, without saving settings, and played in this browser. Up to 500 characters and 20 seconds. The audio is made on the office computer, so keep it online; it may take 30 seconds to start.</span>
+        </label>
+        <button type="submit" form="voice-text-test" id="voice-text-button">Generate audio</button>
+        <p class="hint" id="voice-text-status" role="status" aria-live="polite"></p>
+        <audio id="voice-text-audio" controls preload="none" hidden aria-label="Listen to your text"></audio>
+      </div>
+    </details>
+
+    <details class="panel">
+      <summary>Add a voice</summary>
+      <div>
+        <h3 style="margin-top:0">Record a voice here</h3>
+        <p class="hint">Use a clean recording of your own voice, or a speaker who has agreed to its use. It is processed on the office computer, without an external voice service. Listen to the result before choosing it.</p>
+        <div class="form-row">
+          <label class="field">New voice name
+            <input name="voice_name" form="voice-create" placeholder="giong-vinh" required maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*">
+            <span class="hint">Letters, numbers, underscores, dots or hyphens. Choose a name not already installed.</span>
+          </label>
+          <label class="field grow">Vietnamese reading sample
+            <select id="voice-reading">
+              <option value="0">Morning greeting</option>
+              <option value="1">A calm story</option>
+              <option value="2">Everyday conversation</option>
+            </select>
+          </label>
+        </div>
+        <blockquote lang="vi" id="voice-reading-text"></blockquote>
+        <p class="hint">Read just one passage in your natural voice, at a steady distance from the microphone. Aim for 10–20 seconds; recording stops automatically at 30 seconds. No music or other speakers.</p>
+        <div class="form-row">
+          <label class="field grow">Microphone<select id="voice-microphone"><option value="">System default microphone</option></select></label>
+          <button type="button" id="voice-record">Start recording</button>
+          <output id="voice-record-duration" aria-live="off">0.0 / 30 s</output>
+        </div>
+        <p class="hint" id="voice-record-status" role="status" aria-live="polite"></p>
+        <audio id="voice-record-preview" controls preload="none" hidden aria-label="Listen to your microphone recording"></audio>
+        <details class="inline">
+          <summary>Or choose an existing WAV file</summary>
+          <div>
+            <label class="field">Reference recording
+              <input type="file" id="voice-reference-file" name="reference" form="voice-create" accept=".wav,audio/wav,audio/x-wav">
+              <span class="hint">WAV, 3–30 seconds, mono or stereo, at most 25 MB.</span>
+            </label>
+          </div>
+        </details>
+        <p class="hint">Your microphone recording stays in this tab until you press Create voice. It is then sent to this app and forwarded to the office computer for processing; no external voice service is used.</p>
+        <button type="submit" form="voice-create" id="voice-create-button">Create voice</button>
+        <p class="hint" id="voice-creation-status" role="status" aria-live="polite"></p>
+        <audio id="voice-creation-preview" controls preload="none" hidden></audio>
+        <button type="submit" form="voice-use" id="voice-use-button" hidden>Use this voice</button>
+
+        <h3>Upload a ready voice pack</h3>
+        <div class="form-row">
+          <label class="field">Voice name
+            <input name="voice_name" form="voice-file-upload" placeholder="adam-hot-tiktok" required maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*">
+          </label>
+          <label class="field grow">Upload voice.npz
+            <input type="file" name="voice_file" form="voice-file-upload" accept=".npz" required>
+            <span class="hint">Choose the voice.npz inside your voice folder and enter a new voice name. No ZIP needed. Maximum 128 KB; existing voices are kept.</span>
+          </label>
+          <button type="submit" form="voice-file-upload">{{ icon('upload') }}Upload and use voice</button>
+        </div>
+        <details class="inline"><summary>Or upload an entire voice folder</summary>
+        <div class="form-row">
+          <label class="field grow">Upload a custom voice folder
+            <input type="file" name="voice_files" form="voice-upload" webkitdirectory multiple required>
+            <span class="hint">Choose one unpacked voice pack containing voice.npz. Its folder name becomes the voice name. Upload installs and selects it; existing voices are kept. Maximum 10 MB per folder.</span>
+          </label>
+          <button type="submit" form="voice-upload">{{ icon('upload') }}Upload and use voice</button>
+        </div>
+        </details>
+      </div>
+    </details>
+
+    <details class="panel">
+      <summary>Advanced</summary>
+      <div>
+        <div class="form-row">
+          {{ field('greeting', 'voice', 'macOS Vietnamese voice', 'Used when Vietnamese is read by macOS: Linh') }}
+          {{ field('greeting', 'rate', 'macOS speed (words/min)', '180 is calm; 90–360. ZeroTTS uses its natural pace.', type='number') }}
+        </div>
+        {{ field('greeting', 'zerotts_voices_dir', 'Custom voice folder', 'Folder on the office computer, e.g. data/voices, containing <voice name>/voice.npz. Voices added on this page go there by themselves.', cls='grow') }}
+        <p class="hint">Missing ZeroTTS models download on the office computer on first use (about 1 GB; Internet required). “Say a test greeting” uses the office speaker; text tests and new-voice previews play in this browser.</p>
+      </div>
+    </details>
   </section>
 
   <section class="card tab" id="camera">

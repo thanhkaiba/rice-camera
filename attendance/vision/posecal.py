@@ -13,12 +13,22 @@ import statistics
 import threading
 from collections import deque
 from typing import Callable
+from urllib.parse import urlsplit
 
 KEY = "pose_calibration"
+CAMERA_KEY = "pose_calibration_camera"  # which camera the samples were learned from
 WINDOW = 300  # recent clear matches the typical pose is taken from
 MIN_SAMPLES = 30  # before this many, faces are judged against a straight-on view
 LIMIT = 40.0  # never shift the reference further than this (degrees)
 SAVE_EVERY = 20
+
+
+def camera_id(url: str) -> str:
+    """A camera address without its user name and password: enough to tell cameras apart."""
+    if "://" not in url:
+        return url.strip()
+    parts = urlsplit(url.strip())
+    return f"{parts.hostname or ''}:{parts.port or ''}{parts.path}{'?' + parts.query if parts.query else ''}"
 
 
 class PoseCalibration:
@@ -54,6 +64,21 @@ class PoseCalibration:
         with self._lock:
             self._samples.clear()
         self.save()
+
+    def for_camera(self, url: str) -> bool:
+        """Say which camera is watched. What was learned from another camera (another address: it
+        hangs elsewhere and sees faces from another side) is forgotten; True when that happened.
+        Samples from before the camera was remembered are kept: they may well be this camera's."""
+        if self._store is None:
+            return False
+        now, before = camera_id(url), self._store.get(CAMERA_KEY)
+        if now == before:
+            return False
+        self._store.put(CAMERA_KEY, now)
+        if before is None or not self.samples:
+            return False
+        self.reset()
+        return True
 
     @property
     def samples(self) -> int:

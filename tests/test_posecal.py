@@ -96,3 +96,22 @@ def test_only_clear_matches_teach_the_camera_angle(core):
         app.pose.add(2.0, -38.0)
     proc.process(face_image(1), clock())
     assert app._recognizer.offset == (2.0, -38.0)
+
+
+def test_what_was_learned_from_another_camera_is_forgotten(tmp_path):
+    from attendance.posecal import camera_id
+
+    store = Store(tmp_path / "db")
+    assert camera_id("rtsp://admin:secret@192.168.1.10:554/ch1/main") == "192.168.1.10:554/ch1/main"
+    assert camera_id("rtsp://other:pw@192.168.1.10:554/ch1/main") == camera_id("rtsp://192.168.1.10:554/ch1/main")
+    assert camera_id("0") == "0"
+
+    cal = PoseCalibration(store)
+    for _ in range(MIN_SAMPLES):
+        cal.add(-20, 10)
+    assert not cal.for_camera("rtsp://a:b@192.168.1.10/ch1/main")  # first time the camera is remembered: kept
+    assert not cal.for_camera("rtsp://a:new-password@192.168.1.10/ch1/main") and cal.samples == MIN_SAMPLES
+    assert cal.for_camera("rtsp://a:b@192.168.1.210/Streaming/Channels/101") and cal.samples == 0
+    assert PoseCalibration(store).samples == 0  # and stays forgotten after a restart
+    assert not cal.for_camera("rtsp://a:b@192.168.1.210/Streaming/Channels/101")
+    assert not PoseCalibration().for_camera("rtsp://x/1")  # nothing stored: nothing to forget

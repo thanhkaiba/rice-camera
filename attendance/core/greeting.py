@@ -11,6 +11,7 @@ Who counts as late today comes from the server (`rules_for`), which has the appr
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import logging
 import queue
@@ -53,6 +54,8 @@ TOGETHER_VI = ["Chào {names}! Chúc cả nhà một ngày làm việc vui vẻ.
 TOGETHER_EN = ["Good morning, {names}! Have a great day, everyone.",
                "Hello {names}! Great to see you all this morning.",
                "Morning, {names}! Wishing you all a wonderful day."]
+AUDIO_DIR = "greeting-audio"  # under the data folder: <day>/<hash of voice and sentence>.wav, made ahead by ZeroTTS
+RENDER_IDLE_S = 20.0  # how often the audio maker looks for sentences without audio
 UNKNOWN_GAP_S = 120.0  # at most one hello without a name this often
 HELLO_VI = ["Xin chào! Chúc một ngày làm việc vui vẻ.", "Chào buổi sáng! Chúc mọi người một ngày tốt lành.",
             "Xin chào! Chúc bạn một ngày thật tuyệt."]
@@ -268,6 +271,7 @@ class Greeter:
         self.error: str | None = None
         self.spoken: dict[str, int] = {}
         self._voices: set[str] | None = None
+        self._rendering = 0  # sentences read ahead in the run now going on, for the log
         self._speech_lock = threading.Lock()  # the test button and arrival worker share one speaker/model
         self._voice_choice_lock = threading.Lock()
         self._tts = None
@@ -351,7 +355,10 @@ class Greeter:
         late = self.is_late(person, ts)
         entry = self._entry(person, ts.date())
         written = entry.get("late" if late else "on_time") or []
-        return random.choice(written) if written else plain(called(person), person.honorific, late, person.greet_language)
+        if not written:
+            return plain(called(person), person.honorific, late, person.greet_language)
+        ready = [text for text in written if self.audio_ready(text, [person], person.greet_language, ts.date())]
+        return random.choice(ready or written)  # the one ZeroTTS has already read aloud, when there is one
 
     def _entry(self, person, day: dt.date) -> dict:
         """Today's written sentences for someone, unless written for another language, address or note than they now
@@ -500,8 +507,12 @@ class Greeter:
 
     # speaking ---------------------------------------------------------------------------------
 
+    def uses_zerotts(self, language: str) -> bool:
+        """Whether `language` is spoken by the local ZeroTTS model rather than a macOS voice."""
+        return (self.settings.engine_en if language == "en" else self.settings.engine) == "zerotts"
+
     def voice_for(self, language: str) -> str:
-        if language != "en" and self.settings.engine == "zerotts":
+        if self.uses_zerotts(language):
             return self.zerotts_voice()
         return self.settings.voice_en if language == "en" else self.settings.voice
 
@@ -524,7 +535,7 @@ class Greeter:
         return name
 
     def voice_ready(self, language: str = "vi") -> bool:
-        if language != "en" and self.settings.engine == "zerotts":
+        if self.uses_zerotts(language):
             root = self.cfg.path("models/ZeroTTS")
             required = ("config.json", "tokenizer.json", "null_voice_emb.npy", "onnx/text_encoder.onnx",
                         "onnx/prefix_step.onnx", "onnx/local_frame_decode.onnx",
@@ -554,25 +565,123 @@ class Greeter:
 
     def _say(self, text: str, language: str = "vi") -> None:
         with self._speech_lock:
-            if language != "en" and self.settings.engine == "zerotts":
+            if self.uses_zerotts(language):
                 ensure_voice_models(self.cfg)
             voice = self.voice_for(language)
             if not self.voice_ready(language):
-                engine = "ZeroTTS model or" if language != "en" and self.settings.engine == "zerotts" else "the"
+                engine = "ZeroTTS model or" if self.uses_zerotts(language) else "the"
                 raise RuntimeError(f"{engine} voice {voice} is not on this computer")
-            if language != "en" and self.settings.engine == "zerotts":
+            if self.uses_zerotts(language):
                 import sounddevice as sd
-                custom = self.settings.zerotts_voices_dir
-                self._zerotts_model()
-                if custom:
-                    self._tts.add_voices(self.cfg.path(custom))
-                audio = self._tts.synthesize(text, voice=voice, max_frames=int(SAY_TIMEOUT_S * self._tts.frame_rate))
-                if not audio.size:
-                    raise RuntimeError("ZeroTTS returned no audio")
-                sd.play(audio.reshape(-1), self._tts.sample_rate, blocking=True)
+
+                audio, rate = self._audio(text, voice, self.now().date())
+                sd.play(audio, rate, blocking=True)
             else:
                 subprocess.run(["say", "-v", voice, "-r", str(self.settings.rate), text],
                                timeout=SAY_TIMEOUT_S, check=True, capture_output=True)
+
+    # audio made ahead --------------------------------------------------------------------------
+    # ZeroTTS needs 3-7 s to read a sentence on the office computer, and nothing is heard until it has
+    # finished: too late for someone walking in. The day's sentences are known hours before, so they
+    # are read into files as soon as they are written, and the door only plays a file.
+
+    def audio_path(self, said: str, voice: str, day: dt.date):
+        key = hashlib.sha1(f"{voice}\n{said}".encode()).hexdigest()[:24]
+        return self.cfg.path(self.cfg.data_dir) / AUDIO_DIR / day.isoformat() / f"{key}.wav"
+
+    def audio_ready(self, text: str, people: list, language: str, day: dt.date) -> bool:
+        """Whether `text` for `people` has been read into a file already (always False for a macOS voice)."""
+        if not self.uses_zerotts(language):
+            return False
+        voice = self.voice_for(language)
+        return bool(voice) and self.audio_path(self.voiced(text, people, language, day), voice, day).is_file()
+
+    def _synthesize(self, text: str, voice: str):
+        """(samples, sample rate) from ZeroTTS. Caller holds _speech_lock."""
+        model = self._zerotts_model()
+        if self.settings.zerotts_voices_dir:
+            model.add_voices(self.cfg.path(self.settings.zerotts_voices_dir))
+        audio = model.synthesize(text, voice=voice, max_frames=int(SAY_TIMEOUT_S * model.frame_rate))
+        if not audio.size:
+            raise RuntimeError("ZeroTTS returned no audio")
+        return audio.reshape(-1), model.sample_rate
+
+    def _audio(self, said: str, voice: str, day: dt.date):
+        """(samples, sample rate) of `said` in `voice`: from the file made ahead, else made now and kept.
+        Caller holds _speech_lock."""
+        import soundfile as sf
+
+        path = self.audio_path(said, voice, day)
+        if path.is_file():
+            try:
+                audio, rate = sf.read(path, dtype="float32")
+                if audio.size:
+                    return audio, rate
+            except Exception:
+                log.warning("Greeting audio %s could not be read; making it again", path.name)
+        audio, rate = self._synthesize(said, voice)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            part = path.with_suffix(".part")
+            sf.write(part, audio, rate, format="WAV", subtype="PCM_16")
+            part.replace(path)
+        except OSError:
+            log.exception("Greeting audio could not be kept")
+        return audio, rate
+
+    def _wanted_audio(self, day: dt.date) -> list[tuple[str, str]]:
+        """(sentence as said, voice) still without a file, most urgent first: the hello for unnamed faces,
+        then everyone's on-time greeting, then their late one; people already in today are done with."""
+        wanted, arrived = [], self.store.checkins(day)
+        if self.settings.unknown and self.uses_zerotts("vi") and self.voice_ready("vi"):
+            voice = self.voice_for("vi")
+            wanted += [(text, voice) for text in HELLO_VI[:1] if not self.audio_path(text, voice, day).is_file()]
+        people = [p for p in self.store.all_employees()
+                  if p.active and p.greet and p.id not in arrived and self.uses_zerotts(p.greet_language)]
+        for kind in ("on_time", "late"):
+            for person in people:
+                lines = self._entry(person, day).get(kind) or []
+                language = person.greet_language
+                if not lines or not self.voice_ready(language):
+                    continue
+                if any(self.audio_ready(text, [person], language, day) for text in lines):
+                    continue  # one sentence of each kind is enough: sentence() picks the one with audio
+                wanted.append((self.voiced(lines[0], [person], language, day), self.voice_for(language)))
+        return wanted
+
+    def render_next(self) -> bool:
+        """Read one more sentence of today into a file. True if one was made. Arrivals go first: nothing is
+        made while someone is waiting to be greeted."""
+        if not self.settings.enabled or not self._queue.empty():
+            return False
+        now = self.now()
+        start, _, end = self.cfg.schedule.clocks()
+        day = now.date()
+        if not dt.datetime.combine(day, start, now.tzinfo) - EARLY <= now < dt.datetime.combine(day, end, now.tzinfo):
+            return False
+        root = self.cfg.path(self.cfg.data_dir) / AUDIO_DIR
+        if root.is_dir():
+            for folder in root.iterdir():  # yesterday's sentences are never said again
+                if folder.is_dir() and folder.name != day.isoformat():
+                    shutil.rmtree(folder, ignore_errors=True)
+        wanted = self._wanted_audio(day)
+        if not wanted:
+            if self._rendering:
+                log.info("Greeting audio ready: %d sentences read ahead today", self._rendering)
+                self._rendering = 0
+            return False
+        said, voice = wanted[0]
+        with self._speech_lock:
+            ensure_voice_models(self.cfg)
+            self._audio(said, voice, day)
+        if not self._rendering:
+            log.info("Greeting audio: reading %d sentences ahead with ZeroTTS (%s)", len(wanted), voice)
+        self._rendering += 1
+        return True
+
+    def audio_count(self, day: dt.date) -> int:
+        folder = self.cfg.path(self.cfg.data_dir) / AUDIO_DIR / day.isoformat()
+        return len(list(folder.glob("*.wav"))) if folder.is_dir() else 0
 
     def _zerotts_model(self):
         """Caller holds _speech_lock: arrival speech and draft previews share one model."""
@@ -720,7 +829,8 @@ class Greeter:
         if not fresh or now - self._last_said < UNKNOWN_GAP_S:
             return False
         ts = fresh[0][0]
-        text = random.choice(HELLO_VI)
+        ready = [line for line in HELLO_VI if self.audio_ready(line, [], "vi", ts.date())]
+        text = random.choice(ready or HELLO_VI)
         try:
             self._speak(text, "vi")
         except Exception as exc:
@@ -751,7 +861,7 @@ class Greeter:
     # threads ----------------------------------------------------------------------------------
 
     def _speak_loop(self) -> None:
-        if self.settings.engine == "zerotts":
+        if "zerotts" in (self.settings.engine, self.settings.engine_en):
             try:
                 ensure_voice_models(self.cfg)
             except Exception as exc:
@@ -771,12 +881,24 @@ class Greeter:
                 log.exception("Writing the greetings failed")
             self._sleep(WRITE_EVERY_S)
 
+    def _render_loop(self) -> None:
+        while True:
+            try:
+                made = self.render_next()
+            except Exception as exc:
+                made = False
+                log.warning("Greeting audio could not be made ahead (%s: %s); greetings are read at the door instead",
+                            type(exc).__name__, str(exc)[:200])
+                self._sleep(RETRY_S)
+            self._sleep(0.2 if made else RENDER_IDLE_S)
+
     def start(self) -> None:
         threading.Thread(target=self._speak_loop, name="greeting-speak", daemon=True).start()
         threading.Thread(target=self._write_loop, name="greeting-write", daemon=True).start()
+        threading.Thread(target=self._render_loop, name="greeting-render", daemon=True).start()
 
     def status(self) -> dict:
         day = self.now().date()
         return {"enabled": self.settings.enabled, "ready": len(self.lines(day)),
                 "voice": self.voice_ready("vi") and self.voice_ready("en"),
-                "spoken": self.spoken.get(day.isoformat(), 0), "error": self.error}
+                "spoken": self.spoken.get(day.isoformat(), 0), "audio": self.audio_count(day), "error": self.error}

@@ -101,7 +101,8 @@ leave_api:
 
 # Optional local Vietnamese speech; ZeroTTS models download automatically on first use.
 greeting:
-  engine: macos  # macos or zerotts; English still uses the macOS voice
+  engine: macos  # Vietnamese: macos or zerotts
+  engine_en: macos  # English: macos (voice_en) or zerotts (the Vietnamese ZeroTTS voice, with its accent)
   zerotts_voice: maichi  # or auto: rotate installed voices daily, including custom packs
   zerotts_voices_dir: ""  # e.g. data/voices containing office/voice.npz; select office above
 

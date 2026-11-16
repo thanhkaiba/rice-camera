@@ -202,3 +202,58 @@ def test_text_preview_uses_unsaved_voice_and_returns_wav_without_speaker(speech)
     assert g.render_text('Đọc tiếp.', 'auto').startswith(b'RIFF')
     with pytest.raises(ValueError, match='not installed'):
         g.render_text('Đọc thử.', 'missing')
+
+
+def test_english_can_be_read_by_zerotts_with_the_vietnamese_voice(tmp_path):
+    from types import SimpleNamespace
+
+    from attendance.core.config import Config
+    from attendance.core.greeting import Greeter
+
+    cfg = Config()
+    cfg.base_dir = tmp_path
+    cfg.greeting.zerotts_voice = "maichi"
+    g = Greeter(cfg, SimpleNamespace(get=lambda key: None, put=lambda key, value: None), lambda: None, lambda day: None)
+    assert not g.uses_zerotts("vi") and not g.uses_zerotts("en") and g.voice_for("en") == "Samantha"
+    cfg.greeting.engine_en = "zerotts"
+    assert g.uses_zerotts("en") and not g.uses_zerotts("vi")
+    assert g.voice_for("en") == "maichi" and g.voice_for("vi") == "Linh"
+    cfg.greeting.engine_en = "siri"
+    import pytest
+    with pytest.raises(ValueError, match="engine_en"):
+        cfg.validate()
+
+
+def test_zerotts_reads_the_days_sentences_ahead_and_the_door_plays_the_file(core, tmp_path):
+    import numpy as np
+    from attendance.core.greeting import Greeter
+    from conftest import at
+
+    app, clock, _ = core
+    cfg = app.cfg
+    cfg.greeting.enabled, cfg.greeting.key, cfg.greeting.engine, cfg.greeting.unknown = True, "k", "zerotts", False
+    cfg.greeting.zerotts_voice = "maichi"
+    written = lambda people, day: {p.id: {"say_as": "", "on_time": [f"Chào {p.name} một!", f"Chào {p.name} hai!"],
+                                          "late": [f"{p.name} đến rồi!"]} for p in people}
+    g = Greeter(cfg, app.store, clock, lambda d: app.service.window(d).late_from, write=written, sleep=lambda s: None)
+    made = []
+    g.voice_ready = lambda language="vi": True
+    g._synthesize = lambda text, voice: (made.append((text, voice)) or np.full(480, 0.1, dtype=np.float32), 48000)
+    import attendance.core.greeting as greeting
+    greeting.ensure_voice_models = lambda cfg, **kw: None
+    clock.t = at(7, 0)
+    assert not g.render_next()  # nothing written yet
+    assert g.write_if_due()
+    app.service.on_identified("C", at(7, 1), 0.9, None)  # already in: no audio needed for them
+    while g.render_next():
+        pass
+    assert [text for text, _ in made] == ["Chào Alice một!", "Chào Bob một!", "Alice đến rồi!", "Bob đến rồi!"]
+    assert g.audio_count(at(7, 0).date()) == 4 and g.status()["audio"] == 4
+    person = app.store.employee("A")
+    assert {g.sentence(person, at(8, 30)) for _ in range(20)} == {"Chào Alice một!"}  # the variant that has a file
+    audio, rate = g._audio("Chào Alice một!", "maichi", at(7, 0).date())
+    assert rate == 48000 and len(audio) == 480 and len(made) == 4  # played from the file, not made again
+    g._audio("Chào cả nhà!", "maichi", at(7, 0).date())  # a sentence nobody expected is made on the spot, and kept
+    assert len(made) == 5 and g.audio_count(at(7, 0).date()) == 5
+    g.arrived("A", at(8, 30))
+    assert not g.render_next()  # someone is waiting to be greeted: the speaker comes first

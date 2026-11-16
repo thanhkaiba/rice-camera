@@ -129,7 +129,7 @@ class App:
         from .voice import voice_names
 
         greeting = {**self.greeter.status(), "voices": voice_names(self.cfg)}
-        if self.cfg.greeting.engine == "zerotts" and greeting["voices"]:
+        if "zerotts" in (self.cfg.greeting.engine, self.cfg.greeting.engine_en) and greeting["voices"]:
             greeting["daily_voice"] = {"name": self.greeter.zerotts_voice("auto"),
                                        "at": self.service.now().isoformat()}
         return {"camera_ok": self.live.camera_state == "ok", "camera_state": self.live.camera_state, "version": __version__,
@@ -361,7 +361,7 @@ def frame_due(frame_time: float, last_processed: float, fps: float, source_fps: 
 
 
 def run(cfg: Config) -> None:
-    from ..vision.camera import Camera
+    from ..vision.camera import Camera, pick
     from ..vision.recognizer import enhance_low_light
 
     app = App(cfg)
@@ -432,15 +432,18 @@ def run(cfg: Config) -> None:
                 cam.stop(wait_s=1.0)  # do not let a hung reader hold up the loop
             slot.camera = cam = Camera(slot.url, cfg.camera.decode_threads, name=slot.label(len(slots))).start()
             slot.state = "connecting"
-        frame, frame_time = cam.latest()
-        slot.ok = frame is not None
-        if frame is None:
+        slot.ok = cam.latest()[0] is not None
+        frames = cam.pending(slot.last_chosen) if slot.ok else []
+        if not slot.ok:
             slot.state = "no picture (reconnecting)" if cam.started_for() > 10 else "connecting"
             return False
-        if not frame_due(frame_time, slot.last_processed, fps, cam.received_fps()):
+        source_fps = cam.received_fps()
+        picked = pick(frames, slot.last_chosen, lambda t: frame_due(t, slot.last_processed, fps, source_fps),
+                      slot.face_regions)
+        if picked is None:
             return False
-        slot.last_processed = frame_time  # paces the analysis on the newest frame
-        frame, frame_time = cam.sharpest(slot.last_chosen, slot.face_regions)
+        # The due frame paces the analysis; the one analysed is the sharpest up to it.
+        frame, frame_time, slot.last_processed = picked
         slot.last_chosen = frame_time
         problem = slot.health.update(frame, frame_time)
         slot.ok = problem is None
@@ -509,6 +512,8 @@ def run(cfg: Config) -> None:
                     if slot.camera is not None:
                         slot.camera.stop(wait_s=1.0)
                 slots = [_CameraSlot(i, url, app) for i, url in enumerate(urls)]
+                if app.pose.for_camera(urls[0]):
+                    log.info("The camera is another one: how it sees faces is learned again")
                 if len(slots) > 1:
                     log.info("Watching %d cameras", len(slots))
             # The camera that has waited longest goes first, so none of them starves the others.
