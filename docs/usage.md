@@ -36,26 +36,40 @@ Several cameras (a second door) can be watched at once: list the extra addresses
 The automatic Google Chat late message includes both late arrivals (with arrival times) and a
 separate **Not seen** list, excluding leave and exempt employees. Configure **Settings → Notifications
 → Daily late message → Send automatically at**; an empty time uses the end of camera hours.
-Turn **Include not seen employees** off to list only late arrivals. The Today preview and Send button
-use the same option. Only late arrivals appear in the attached picture.
+Use **Include late arrivals** and **Include not seen employees** to select either group or both;
+leave both off to send neither. The Today preview, picture and Send button use the same selection.
+Automatic delivery runs only during the scheduled minute. Enabling it, saving settings or restarting
+after that minute does not send a catch-up message; use **Send** on Today to send it manually.
 
 ## HR system
 
 `GET <url>?from=…&to=…` with a bearer token, returning holidays, make-up work days and leave as JSON; refreshed every 15 minutes. Format and options: [docs/hr-api.md](hr-api.md). Other formats: change `parse()` in `attendance/integrations/leave_api.py`.
 
-To report late arrivals to the fine server, set `camera_api.url` (HTTPS web app `/exec` URL) and
+To report late arrivals and not seen employees to the fine server, set `camera_api.url` (HTTPS web app `/exec` URL) and
 `camera_api.key` (`CAMERA_SECRET`) in `config.yaml`. Settings → HR system → **Camera API · Late fines**
 can override either value independently, apply changes immediately, and reset each value with **Use config.yaml**.
 A blank key in the form keeps the current key; a blank URL disables delivery. **Test connection** uses
 `camera.ping`, which creates no fine. Protocol: [docs/CAMERA-API.md](CAMERA-API.md).
 
-Delivery runs in the background after camera hours, in batches of at most 200. Enabling it also sends
-unsent late arrivals from the previous 7 days; older arrivals and weekends are excluded. Reports use
+Select **Include late arrivals** and/or **Include not seen employees** separately from the Chat settings.
+Choose **Once a day** for one automatic attempt during the **Send at** minute (camera stop time when empty),
+or **Every interval** to send/retry between a separate Start and Stop time on the same day.
+Interval seconds must be a multiple of 30 (30–86400); intervals are anchored to Start, and missed slots are skipped.
+Empty Start uses the first late minute; empty Stop uses Camera stops. No new automatic requests start at or after Stop.
+An in-flight request may finish after Stop. Each request has at most 200 events per action.
+It sends `camera.late` for late arrivals and `camera.missing` with only email and date for not seen employees.
+Missing reports require camera data that day and are independent of Google Chat notification settings.
+Saving settings does not trigger a separate send. Automatic attempts are remembered across restarts.
+**Previous days to retry** selects 0–3 previous calendar days in addition to today, for automatic delivery and **Send now**.
+**Send now** works at any time; older reports and weekends are excluded. Reports use
 the Today attendance rules, including exemptions and Base permissions, and wait when configured HR
-data is unavailable. Network/server failures retry every 30 seconds and survive restarts. Successful,
+data is unavailable. Daily mode makes one attempt even on failure or missing HR data; use **Send now** to retry.
+Interval mode retries on the next allowed slot within its window. Delivery records survive restarts. Successful,
 duplicate and skipped events are remembered; rejected events appear in Audit and retry only after
 local event data changes. Settings shows delivery status. Local attendance corrections do not cancel
 fines already created: an administrator must cancel those on the server.
+Missing and late reports have separate delivery records: a person reported missing can later be reported late,
+without withdrawing the missing report. Deploy support for `camera.missing` on the receiving server first.
 
 ## Accuracy and licence
 

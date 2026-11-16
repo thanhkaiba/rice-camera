@@ -30,20 +30,115 @@ def result(status='created', email='alice@example.com'):
     return {'ok': True, 'results': [{'email': email, 'date': DAY.isoformat(), 'status': status}]}
 
 
+def test_camera_missing_payload_retry_restart_and_later_arrival(core, monkeypatch):
+    from attendance.integrations.camera_api import CameraSync
+
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [OSError('offline'), result(), result()])
+    app.store.update_employee('B', 'Bob', True, exempt=True)
+    app.store.update_employee('C', 'Carol', True, exempt=True)
+    app.store.mark_notice(DAY, 'camera_ok', at(9, 0))
+    clock.t = at(10, 59)
+    app.camera_sync.sync(auto=True)
+    assert not calls
+    clock.t = at(11, 0)
+    assert app.camera_sync.sync()['ok'] is False
+    restarted = CameraSync(app.cfg, app.store, app.service)
+    assert restarted.sync()['ok'] is True
+    restarted.sync()
+    assert len(calls) == 2
+    assert calls[0][1] == calls[1][1] == {
+        'action': 'camera.missing', 'secret': 'camera-test-secret',
+        'events': [{'email': 'alice@example.com', 'date': DAY.isoformat()}]}
+    app.service.on_identified('A', at(10, 5), .9, None)
+    restarted.sync()
+    assert calls[-1][1]['action'] == 'camera.late'
+    assert len(calls) == 3
+
+
+def test_camera_missing_waits_for_hr_and_excludes_leave(core, monkeypatch):
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [result()])
+    app.store.update_employee('B', 'Bob', True, exempt=True)
+    app.store.add_leave('C', DAY, DAY, 'sick')
+    app.store.mark_notice(DAY, 'camera_ok', at(9, 0))
+    clock.t = at(11, 0)
+    app.cfg.base_api_key = 'base-test-key'
+    assert app.camera_sync.sync()['ok'] is False
+    assert not calls
+    app.cfg.base_api_key = ''
+    assert app.camera_sync.sync()['ok'] is True
+    assert calls[0][1]['events'] == [{'email': 'alice@example.com', 'date': DAY.isoformat()}]
+
+
+@pytest.mark.parametrize('status', ['created', 'duplicate', 'skipped', 'rejected'])
+def test_camera_missing_batches_separately_and_remembers_terminal_results(core, monkeypatch, status):
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [result(), result(status, email='bob@example.com')])
+    app.service.on_identified('A', at(10, 5), .9, None)
+    app.store.update_employee('C', 'Carol', True, exempt=True)
+    app.store.mark_notice(DAY, 'camera_ok', at(9, 0))
+    # A previously sent late event must not suppress a missing event.
+    app.store.mark_notice(DAY, 'camera_api:bob@example.com', at(10, 0))
+    clock.t = at(11, 0)
+    outcome = app.camera_sync.sync()
+    assert [payload['action'] for _, payload in calls] == ['camera.late', 'camera.missing']
+    assert calls[1][1]['events'] == [{'email': 'bob@example.com', 'date': DAY.isoformat()}]
+    assert outcome['ok'] is (status != 'rejected')
+    app.camera_sync.sync()
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize('offset,camera_data,expected', [(0, False, False), (2, True, True), (4, True, False),
+                                                       (3, True, False)])  # DAY + 3 is Saturday.
+def test_camera_missing_requires_camera_data_and_respects_backfill_window(core, monkeypatch, offset, camera_data, expected):
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [result()])
+    app.store.update_employee('B', 'Bob', True, exempt=True)
+    app.store.update_employee('C', 'Carol', True, exempt=True)
+    day = DAY + dt.timedelta(days=3) if offset == 3 else DAY
+    if camera_data:
+        app.store.mark_notice(day, 'camera_ok', at(9, 0, day=day))
+    clock.t = at(11, 0, day=DAY + dt.timedelta(days=offset))
+    app.camera_sync.sync()
+    assert bool(calls) is expected
+
+
+def test_camera_missing_batch_limit(core, monkeypatch):
+    from attendance.integrations import camera_api
+
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [])
+    for i in range(198):
+        app.store.add_employee(f'person{i}@example.com', f'Person {i}')
+    app.store.mark_notice(DAY, 'camera_ok', at(9, 0))
+
+    def post(url, payload):
+        calls.append((url, payload))
+        return {'ok': True, 'results': [dict(event, status='created') for event in payload['events']]}
+
+    monkeypatch.setattr(camera_api, 'post', post)
+    clock.t = at(11, 0)
+    assert app.camera_sync.sync()['ok'] is True
+    app.camera_sync.sync()
+    assert [len(payload['events']) for _, payload in calls] == [200, 1]
+    assert all(payload['action'] == 'camera.missing' for _, payload in calls)
+
+
 def test_camera_api_waits_until_end_and_remembers_delivery(core, monkeypatch):
     app, clock, _ = core
     assert hasattr(app.cfg, 'camera_api')
     calls = connect(app, monkeypatch, [result()])
     app.service.on_identified('A', at(10, 12), .9, None)
     clock.t = at(10, 59)
-    app.camera_sync.sync()
+    app.camera_sync.sync(auto=True)
     assert not calls
     clock.t = at(11, 0)
-    app.camera_sync.sync()
+    app.camera_sync.sync(auto=True)
     assert calls[0][1] == {'action': 'camera.late', 'secret': 'camera-test-secret', 'events': [
         {'email': 'alice@example.com', 'date': DAY.isoformat(), 'arrivedAt': '10:12', 'lateMinutes': 12}]}
     from attendance.integrations.camera_api import CameraSync
-    CameraSync(app.cfg, app.store, app.service).sync()
+    CameraSync(app.cfg, app.store, app.service).sync(auto=True)
     assert len(calls) == 1
 
 
@@ -54,12 +149,12 @@ def test_camera_api_uses_its_own_send_time_before_or_after_camera_end(core, monk
     settings.save(app.cfg, app.store, {'camera_api': {'send_at': f'{hour:02d}:{minute:02d}'}})
     app.service.on_identified('A', at(10, 12), .9, None)
     clock.t = at(hour, minute) - dt.timedelta(seconds=1)
-    waiting = app.camera_sync.sync()
+    waiting = app.camera_sync.sync(auto=True)
     assert not calls
     assert f'{hour:02d}:{minute:02d}' in waiting['message']
     clock.t = at(hour, minute)
-    assert app.camera_sync.sync()['ok'] is True
-    app.camera_sync.sync()
+    assert app.camera_sync.sync(auto=True)['ok'] is True
+    app.camera_sync.sync(auto=True)
     assert len(calls) == 1
 
 
@@ -87,7 +182,7 @@ def test_camera_api_send_time_saved_on_page_survives_restart_and_can_follow_came
     assert app.cfg.camera_api.send_at == ''
 
 
-def test_manual_camera_api_honors_saved_send_time(core, monkeypatch):
+def test_manual_camera_api_can_send_before_saved_send_time(core, monkeypatch):
     app, clock, _ = core
     calls = connect(app, monkeypatch, [result()])
     settings.save(app.cfg, app.store, {'camera_api': {'send_at': '12:30'}})
@@ -95,8 +190,8 @@ def test_manual_camera_api_honors_saved_send_time(core, monkeypatch):
     client = create_app(app).test_client()
     clock.t = at(11, 0)
     response = client.post('/settings/send-camera-api', follow_redirects=True)
-    assert '12:30' in response.get_data(as_text=True)
-    assert not calls
+    assert '1 processed' in response.get_data(as_text=True)
+    assert len(calls) == 1
     clock.t = at(12, 30)
     client.post('/settings/send-camera-api')
     assert len(calls) == 1
@@ -140,7 +235,7 @@ def test_camera_api_backfills_only_allowed_days_and_excludes_exempt(core, monkey
     app.service.on_identified('B', at(9, 0), .9, None)
     app.store.update_employee('C', 'Carol', True, exempt=True)
     app.service.on_identified('C', at(10, 15), .9, None)
-    clock.t = at(11, 0, day=DAY + dt.timedelta(days=7))
+    clock.t = at(11, 0, day=DAY + dt.timedelta(days=3))
     app.camera_sync.sync()
     assert len(calls) == 1 and len(calls[0][1]['events']) == 1
     clock.t += dt.timedelta(days=1)
@@ -309,7 +404,6 @@ def test_manual_camera_api_sends_saved_settings_and_does_not_resend(core, monkey
 
 @pytest.mark.parametrize('state,expected', [
     ('unconfigured', 'Save the Camera API URL and key'),
-    ('before_end', 'after scheduled send time 11:00'),
     ('no_late', 'No unsent late arrivals'),
     ('missing_base', 'Waiting for HR leave data'),
     ('offline', 'Delivery failed'),
@@ -323,8 +417,6 @@ def test_manual_camera_api_explains_why_nothing_was_sent(core, monkeypatch, stat
         app.service.on_identified('A', at(10, 12), .9, None)
     if state == 'unconfigured':
         app.cfg.camera_api.key = ''
-    elif state == 'before_end':
-        clock.t = at(10, 30)
     elif state == 'missing_base':
         app.cfg.base_api_key = 'base-test-key'
     response = create_app(app).test_client().post('/settings/send-camera-api', follow_redirects=True)
@@ -450,3 +542,188 @@ def test_camera_api_never_sends_expired_arrival(core, monkeypatch):
     clock.t = at(11, 0, day=DAY + dt.timedelta(days=8))
     app.camera_sync.sync()
     assert not calls
+
+
+@pytest.mark.parametrize('include_late,include_not_seen,actions', [
+    (True, False, ['camera.late']), (False, True, ['camera.missing']),
+    (True, True, ['camera.late', 'camera.missing']), (False, False, [])])
+def test_camera_api_saved_selection_waits_for_schedule_or_manual_send(core, monkeypatch, include_late, include_not_seen, actions):
+    app, clock, _ = core
+    connect(app, monkeypatch, [])
+    calls = []
+
+    def post(url, payload):
+        calls.append(payload)
+        return {'ok': True, 'results': [dict(event, status='created') for event in payload['events']]}
+
+    monkeypatch.setattr('attendance.integrations.camera_api.post', post)
+    late_day = DAY - dt.timedelta(days=1)
+    app.store.record_checkin(late_day, 'A', at(10, 5, day=late_day), 'camera', .9, None)
+    app.service.on_identified('A', at(10, 5), .9, None)
+    app.store.mark_notice(DAY, 'camera_ok', at(9, 0))
+    client = create_app(app).test_client()
+    data = {'schedule.work_days': ['0', '1', '2', '3', '4']}
+    if include_late:
+        data['camera_api.include_late'] = 'on'
+    if include_not_seen:
+        data['camera_api.include_not_seen'] = 'on'
+    clock.t = at(11, 1)
+    assert client.post('/settings', data=data).status_code == 302
+    page = client.get('/settings').get_data(as_text=True)
+    assert 'name="camera_api.include_late"' in page
+    assert 'name="camera_api.include_not_seen"' in page
+    assert app.cfg.camera_api.include_late is include_late
+    assert app.cfg.camera_api.include_not_seen is include_not_seen
+    from attendance.core.config import Config
+    saved = Config()
+    settings.load(saved, app.store)
+    assert saved.camera_api.include_late is include_late
+    assert saved.camera_api.include_not_seen is include_not_seen
+    app.camera_sync.sync(auto=True)
+    assert not calls
+    # Saving after the schedule and restarting must not cause catch-up delivery.
+    from attendance.integrations.camera_api import CameraSync
+    CameraSync(app.cfg, app.store, app.service).sync(auto=True)
+    assert not calls
+    client.post('/settings/send-camera-api')
+    assert [payload['action'] for payload in calls] == actions
+    calls.clear()
+    clock.t = at(11, 0, day=DAY + dt.timedelta(days=1))
+    app.service.on_identified('A', at(10, 5, day=clock.t.date()), .9, None)
+    app.store.mark_notice(clock.t.date(), 'camera_ok', clock.t)
+    app.camera_sync.sync(auto=True)
+    assert [payload['action'] for payload in calls] == actions
+    assert all(event['date'] == clock.t.date().isoformat() for payload in calls for event in payload['events'])
+
+
+@pytest.mark.parametrize('days_back', [0, 1, 2, 3])
+@pytest.mark.parametrize('auto', [False, True])
+def test_camera_api_configurable_backfill(core, monkeypatch, days_back, auto):
+    app, clock, _ = core
+    connect(app, monkeypatch, [])
+    settings.save(app.cfg, app.store, {'camera_api': {'days_back': days_back}})
+    clock.t = at(11, 0, day=DAY + dt.timedelta(days=2))  # Friday: the previous four days are workdays.
+    calls = []
+    for offset in range(5):
+        day = clock.t.date() - dt.timedelta(days=offset)
+        app.store.record_checkin(day, 'A', at(10, 5, day=day), 'camera', .9, None)
+
+    def post(url, payload):
+        calls.extend(payload['events'])
+        return {'ok': True, 'results': [dict(event, status='created') for event in payload['events']]}
+
+    monkeypatch.setattr('attendance.integrations.camera_api.post', post)
+    app.camera_sync.sync(auto=auto)
+    assert {event['date'] for event in calls} == {
+        (clock.t.date() - dt.timedelta(days=offset)).isoformat() for offset in range(days_back + 1)}
+
+
+@pytest.mark.parametrize('changes', [
+    {'days_back': -1}, {'days_back': 4}, {'mode': 'unknown'},
+    {'interval_seconds': 0}, {'interval_seconds': 29}, {'interval_seconds': 45},
+    {'interval_seconds': 86430}, {'interval_start': '25:00'}, {'interval_end': 'bad'},
+    {'mode': 'interval', 'interval_start': '10:00'},
+    {'mode': 'interval', 'interval_start': '12:00', 'interval_end': '11:00'},
+])
+def test_camera_api_rejects_invalid_delivery_schedule(core, changes):
+    app, _, _ = core
+    before = app.store.get(settings.KEY)
+    with pytest.raises(ValueError, match='camera_api'):
+        settings.save(app.cfg, app.store, {'camera_api': changes})
+    assert app.store.get(settings.KEY) == before
+
+
+@pytest.mark.parametrize('failed', [False, True])
+def test_camera_api_daily_runs_once_even_after_restart_or_save(core, monkeypatch, failed):
+    from attendance.integrations.camera_api import CameraSync
+
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [OSError('offline') if failed else result(), result(email='bob@example.com')])
+    app.service.on_identified('A', at(10, 5), .9, None)
+    clock.t = at(11, 0)
+    app.camera_sync.sync(auto=True)
+    app.service.on_identified('B', at(10, 10), .9, None)
+    clock.t += dt.timedelta(seconds=30)
+    settings.save(app.cfg, app.store, {'camera_api': {'send_at': '11:00'}})
+    CameraSync(app.cfg, app.store, app.service).sync(auto=True)
+    assert len(calls) == 1
+    clock.t = at(11, 1)
+    app.camera_sync.sync(auto=True)
+    assert len(calls) == 1
+
+
+def test_camera_api_interval_retries_only_in_its_window_and_slots(core, monkeypatch):
+    from attendance.integrations.camera_api import CameraSync
+
+    app, clock, _ = core
+    calls = connect(app, monkeypatch, [OSError('offline'), result(), result(email='bob@example.com')])
+    settings.save(app.cfg, app.store, {'camera_api': {
+        'mode': 'interval', 'interval_seconds': 120, 'interval_start': '10:30', 'interval_end': '10:35'}})
+    app.service.on_identified('A', at(10, 5), .9, None)
+    clock.t = at(10, 29)
+    app.camera_sync.sync(auto=True)
+    assert not calls
+    clock.t = at(10, 30)
+    app.camera_sync.sync(auto=True)
+    assert len(calls) == 1
+    clock.t = at(10, 30, 15)
+    CameraSync(app.cfg, app.store, app.service).sync(auto=True)
+    assert len(calls) == 1
+    clock.t = at(10, 31)
+    settings.save(app.cfg, app.store, {'camera_api': {'include_late': True}})
+    CameraSync(app.cfg, app.store, app.service).sync(auto=True)
+    assert len(calls) == 1
+    clock.t = at(10, 32)
+    app.camera_sync.sync(auto=True)
+    assert len(calls) == 2
+    app.service.on_identified('B', at(10, 33), .9, None)
+    clock.t = at(10, 35)
+    app.camera_sync.sync(auto=True)
+    assert len(calls) == 2
+    # An explicit manual send still works outside the automatic window.
+    app.camera_sync.sync()
+    assert len(calls) == 3
+
+
+def test_camera_api_schedule_settings_save_and_reload(core):
+    from attendance.core.config import Config
+
+    app, _, _ = core
+    client = create_app(app).test_client()
+    values = {'mode': 'interval', 'days_back': '2', 'interval_seconds': '300',
+              'interval_start': '10:30', 'interval_end': '18:00'}
+    response = client.post('/settings', data={f'camera_api.{key}': value for key, value in values.items()})
+    assert response.status_code == 302
+    saved = Config()
+    settings.load(saved, app.store)
+    assert saved.camera_api.mode == 'interval'
+    assert saved.camera_api.days_back == 2
+    assert saved.camera_api.interval_seconds == 300
+    assert saved.camera_api.interval_start == '10:30'
+    assert saved.camera_api.interval_end == '18:00'
+    page = client.get('/settings').get_data(as_text=True)
+    assert all(f'name="camera_api.{key}"' in page for key in values)
+
+
+@pytest.mark.parametrize('mode', ['daily', 'interval'])
+def test_camera_api_does_not_start_another_batch_after_window_closes(core, monkeypatch, mode):
+    app, clock, _ = core
+    connect(app, monkeypatch, [])
+    settings.save(app.cfg, app.store, {'camera_api': {
+        'mode': mode, 'interval_start': '10:30', 'interval_end': '11:01'}})
+    for i in range(201):
+        person = app.store.add_employee(f'person{i}@example.com', f'Person {i}')
+        app.store.record_checkin(DAY, person, at(10, 5), 'camera', .9, None)
+    calls = []
+
+    def post(url, payload):
+        calls.append(payload)
+        clock.t = at(11, 1)
+        return {'ok': True, 'results': [dict(event, status='created') for event in payload['events']]}
+
+    monkeypatch.setattr('attendance.integrations.camera_api.post', post)
+    clock.t = at(11, 0)
+    outcome = app.camera_sync.sync(auto=True)
+    assert len(calls) == 1 and len(calls[0]['events']) == 200
+    assert outcome['ok'] is False and 'window ended' in outcome['message']
+    assert sum(not app.store.notice_sent(DAY, f'camera_api:person{i}@example.com') for i in range(201)) == 1
