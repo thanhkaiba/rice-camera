@@ -7,7 +7,7 @@
     <h1>Faces in the picture</h1>
     <p class="subtitle">Choose who each face is and add it as a reference photo. Door-camera pictures are the best references.</p>
   </div>
-  <form method="post" action="{{ url_for('capture') }}" class="actions">
+  <form method="post" action="{{ url_for('capture') }}" class="actions">{% include "_csrf.html" %}
     <button class="primary" title="Freeze the live picture again">{{ icon('camera') }}Capture again</button>
   </form>
 </div>
@@ -26,7 +26,7 @@
     {% if f.added %}
       <span class="badge ok">{{ icon('check') }}Added for {{ names.get(f.added, f.added) }}</span>
     {% else %}
-    <form method="post" action="{{ url_for('capture_add', token=token, index=loop.index0) }}" class="stack" style="gap:8px; margin:0">
+    <form method="post" action="{{ url_for('capture_add', token=token, index=loop.index0) }}" class="stack" style="gap:8px; margin:0">{% include "_csrf.html" %}
       <label class="field">Who is this?
         <select name="employee_id" required>
           <option value="">Choose…</option>

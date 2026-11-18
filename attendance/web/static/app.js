@@ -100,7 +100,8 @@
       box.innerHTML = '<span class="spin"></span><span>Checking the camera… (≤ 10 s)</span>';
       let r;
       try {
-        r = await (await fetch(urls.cameraCheckUrl, { method: 'POST', body: new URLSearchParams({ url }) })).json();
+        r = await (await fetch(urls.cameraCheckUrl, { method: 'POST', body: new URLSearchParams({ url }),
+          headers: {'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content} })).json();
       } catch (e) { r = { level: 'error', message: 'Could not reach the program.' }; }
       if (mine !== seq) return;  // a newer address was typed meanwhile
       box.className = 'cam-status ' + r.level;

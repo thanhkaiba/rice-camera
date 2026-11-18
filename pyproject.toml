@@ -12,6 +12,7 @@ dependencies = [
     "opencv-python-headless>=4.9,<=4.11.0.86",  # Keep FFmpeg; allow older wheels for macOS 12.
     "numpy>=1.26",
     "Flask>=3.1",
+    "google-auth[requests]>=2.0",
     "PyYAML>=6.0",
     "anthropic>=2.8",  # the greeting at the door: Claude writes the sentences
     "zerotts==0.1.5",  # local Vietnamese speech (no API key)

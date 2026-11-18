@@ -48,10 +48,10 @@ def _vector(vector) -> str | None:
 
 
 class EdgeClient:
-    def __init__(self, cfg, store, data_dir: Path, status=lambda: {}, send=None, sleep=time.sleep):
+    def __init__(self, cfg, store, data_dir: Path, status=lambda: {}, send=None, sleep=time.sleep, today=dt.date.today):
         self.cfg, self.store, self.data_dir, self.status = cfg, store, Path(data_dir), status
         self._send = send or self._urlopen
-        self._sleep = sleep
+        self._sleep, self._today = sleep, today
         self.following = store.get(FOLLOWING_KEY) == "1"
         # Set by the app: what to do with what the server sends.
         self.on_gallery = lambda: None
@@ -152,7 +152,7 @@ class EdgeClient:
         if self.store.edge_backlog():
             return
         sent = json.loads(self.store.get(STATE_KEY) or "{}")
-        since = (dt.date.today() - dt.timedelta(days=STATE_DAYS)).isoformat()
+        since = (self._today() - dt.timedelta(days=STATE_DAYS)).isoformat()
         hashes = self.store.edge_day_hashes(since)
         days = sorted((d for d, h in hashes.items() if sent.get("days", {}).get(d) != h), reverse=True)[:MAX_STATE_DAYS]
         employees = self.store.edge_employee_rows()

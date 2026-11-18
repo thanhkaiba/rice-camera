@@ -81,3 +81,21 @@ def icon(name: str, cls: str = "") -> Markup:
     cls_attr = f' class="{cls}"' if cls else ""
     return Markup(f'<svg{cls_attr} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
                   f'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{paths}</svg>')
+
+
+LOGO_OUTLINE = "M210 30L662 30L482 243L662 455L482 668L30 668L210 455L30 243Z"
+LOGO_DOTS = [(100, 243), (165, 243), (230, 243), (295, 243), (359, 243), (424, 243),
+             (266, 455), (330, 455), (394, 455), (459, 455), (523, 455), (588, 455)]
+
+
+def logo(mode: str = "", cls: str = "") -> Markup:
+    """The folded-ribbon logo (docs/LOGO-ANIMATION.md). mode: '' static, 'draw', 'loop' (splash) or 'load'."""
+    load = mode == "load"
+    outline = f'<path class="{"base" if load else "outline"}" d="{LOGO_OUTLINE}" stroke-width="40" pathLength="1"/>'
+    if load:
+        outline += f'<path class="trace" d="{LOGO_OUTLINE}" stroke-width="40" pathLength="1"/>'
+    dots = "".join(f'<path class="dot" style="--i:{i}" d="M{x - 3.5} {y}h7" stroke-width="15"/>'
+                   for i, (x, y) in enumerate(LOGO_DOTS))
+    classes = " ".join(c for c in ("logo", f"logo-{mode}" if mode else "", cls) if c)
+    return Markup(f'<svg class="{classes}" viewBox="0 0 693 698" fill="none" stroke="currentColor" '
+                  f'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{outline}{dots}</svg>')

@@ -23,10 +23,10 @@ if TYPE_CHECKING:
 LOG_TAIL_BYTES = 2_000_000
 DAYS = 30
 HIDDEN = "***"
-SECRET_FIELDS = {"password", "viewer_password", "token", "key", "webhook_url", "system_webhook_url", "healthcheck_url", "base_api_key", "access_token_v2"}
+SECRET_FIELDS = {"password", "viewer_password", "token", "key", "webhook_url", "system_webhook_url", "healthcheck_url", "base_api_key", "access_token_v2", "client_secret", "id_token", "code_verifier", "csrf_token"}
 
 _SECRETS = [
-    (re.compile(r"(?i)\b(key|token|secret|password|access_token|access_token_v2|base_api_key)=([^&\s\"'<>]+)"), rf"\1={HIDDEN}"),
+    (re.compile(r"(?i)\b(key|token|secret|password|access_token|access_token_v2|base_api_key|client_secret|id_token|code|state|code_verifier|csrf_token)=([^&\s\"'<>]+)"), rf"\1={HIDDEN}"),
     (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)([^/\s:@\"']+):([^@\s\"']+)@"), rf"\1\2:{HIDDEN}@"),  # rtsp://user:pass@
     (re.compile(r"(?i)(hc-ping\.com/)[\w-]+"), rf"\1{HIDDEN}"),
     (re.compile(r"(?i)(bearer\s+)[\w.~+/=-]+"), rf"\1{HIDDEN}"),
@@ -45,7 +45,7 @@ def redact_settings(value, name: str = ""):
     if isinstance(value, dict):
         return {k: redact_settings(v, k) for k, v in value.items()}
     if name in SECRET_FIELDS and value:
-        return HIDDEN if name in ("password", "viewer_password", "token", "key", "base_api_key", "access_token_v2") else redact(re.sub(r"\?.*", f"?{HIDDEN}", str(value)))
+        return HIDDEN if name in ("password", "viewer_password", "token", "key", "base_api_key", "access_token_v2", "client_secret", "id_token", "code_verifier", "csrf_token") else redact(re.sub(r"\?.*", f"?{HIDDEN}", str(value)))
     return redact(value) if isinstance(value, str) else value
 
 
@@ -76,13 +76,14 @@ def history(store: "Store", today: dt.date, days: int = DAYS) -> dict:
     return out
 
 
-def build(cfg: "Config", store: "Store", config_path: Path | None = None, status: dict | None = None) -> bytes:
+def build(cfg: "Config", store: "Store", config_path: Path | None = None, status: dict | None = None,
+          now: dt.datetime | None = None) -> bytes:
     """The zip as bytes. `status` is the Status page's data when the program is running."""
     from ..cli import updater
     from . import settings
 
     data = cfg.path(cfg.data_dir)
-    now = dt.datetime.now(cfg.tz)
+    now = now or dt.datetime.now(cfg.tz)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         def add(name: str, text: str) -> None:

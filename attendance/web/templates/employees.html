@@ -24,7 +24,7 @@
 
 {% if image_scores %}
 <form method="post" action="{{ url_for('delete_photos_everyone') }}" id="delete-low-score-photos" class="card"
-      data-scores="{{ image_scores|tojson|forceescape }}" data-confirm="Delete reference photos below the chosen Image score for everyone? Their face data will also be removed.">
+      data-scores="{{ image_scores|tojson|forceescape }}" data-confirm="Delete reference photos below the chosen Image score for everyone? Their face data will also be removed.">{% include "_csrf.html" %}
   <div class="form-row">
     <label class="field">Delete everyone's photos with an Image score below
       <input type="number" name="below_score" id="below-score" value="20" min="0" max="100" step="1" required></label>
@@ -57,9 +57,16 @@
     {{ look_alike_photo(p.a, p.ref_a, p.image_a) }}{{ look_alike_photo(p.b, p.ref_b, p.image_b) }}</span></div>
 {% endfor %}
 
+{% macro portal_access(person) -%}
+  {% set access = portal_roles.get(person.id, 'viewer') %}
+  <a class="btn btn-sm" href="{{ url_for('employee', employee_id=person.id) }}#portal-access"
+     onclick="event.stopPropagation()" title="Change portal access for {{ person.name }}"
+     aria-label="Change portal access for {{ person.name }}: {{ access }}">
+    {{ 'Admin' if access == 'admin' else 'Viewer' }}</a>
+{%- endmacro %}
 <div class="table-wrap">
   <table id="people">
-    <thead><tr><th style="width:60px"></th><th>Person</th><th>{{ icon('image') }}Photos</th><th class="hide-sm">{{ icon('chat') }}Chat</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th style="width:60px"></th><th>Person</th><th class="hide-sm">Portal access</th><th>{{ icon('image') }}Photos</th><th class="hide-sm">{{ icon('chat') }}Chat</th><th>Status</th><th></th></tr></thead>
     <tbody>
     {% for p in people %}
       {% set n = counts.get(p.id, 0) %}
@@ -68,7 +75,9 @@
       <tr class="link" data-name="{{ shown|lower }}{% if shown != p.name %} {{ p.name|lower }}{% endif %} {{ p.email|lower }}" data-needs="{{ 1 if p.active and (n == 0 or (q[2] < n and q[1] < good_photos)) else 0 }}" onclick="location.href='{{ url_for('employee', employee_id=p.id) }}'">
         <td>{% if thumbs.get(p.id) %}<img class="avatar" src="{{ url_for('media', path=thumbs[p.id]) }}" alt="" loading="lazy">{% else %}<span class="avatar empty">{{ shown[:1] }}</span>{% endif %}</td>
         <td><div class="cell-main">{{ shown }}</div><div class="cell-sub">{{ p.email or "Add email" }}{% if shown != p.name %} · {{ p.name }}{% endif %}</div>
-          <div class="cell-sub">Base: {{ p.base_username or 'Not mapped' }}</div></td>
+          <div class="cell-sub">Base: {{ p.base_username or 'Not mapped' }}</div>
+          <div class="show-sm"><span class="hint">Portal access: </span>{{ portal_access(p) }}</div></td>
+        <td class="hide-sm">{{ portal_access(p) }}</td>
         <td>{% if n == 0 %}<span class="badge bad plain">{{ icon('image') }}No photos</span>
             {% elif q[2] == n %}<span class="badge info plain" title="{{ n }} photos · quality not checked yet">{{ icon('image') }}{{ n }}</span>
             {% elif q[1] < good_photos %}<span class="badge late plain" title="{{ q[1] }} of {{ n }} photos are sharp and frontal · add {{ good_photos - q[1] }} more good ones">{{ icon('image') }}{{ q[1] }}/{{ n }} good</span>
@@ -99,7 +108,7 @@
 <dialog id="add">
   <div class="dialog-head"><strong>Add people</strong><button type="button" class="close" data-close aria-label="Close">{{ icon('close') }}</button></div>
   <div class="dialog-body">
-    <form method="post" action="{{ url_for('add_employee') }}">
+    <form method="post" action="{{ url_for('add_employee') }}">{% include "_csrf.html" %}
       <strong class="row">{{ icon('user-plus') }}One person</strong>
       <div class="form-row">
         <label class="field grow">Email<input type="email" name="email" id="new-email" required placeholder="person@example.com" autocomplete="email"></label>
@@ -110,14 +119,14 @@
       <div><button class="primary">{{ icon('plus') }}Add</button></div>
     </form>
     <div class="divider" style="margin:0"></div>
-    <form method="post" action="{{ url_for('import_employees') }}" enctype="multipart/form-data">
+    <form method="post" action="{{ url_for('import_employees') }}" enctype="multipart/form-data">{% include "_csrf.html" %}
       <strong class="row">{{ icon('upload') }}CSV file</strong>
       <label class="field"><span>Columns <code>email,name</code> · optional <code>base_username</code>, <code>chat_user</code> (Google Chat ID)</span>
         <input type="file" name="file" accept=".csv,text/csv" required></label>
       <div><button>{{ icon('upload') }}Import</button></div>
     </form>
     <div class="divider" style="margin:0"></div>
-    <form method="post" action="{{ url_for('import_base_usernames') }}" enctype="multipart/form-data">
+    <form method="post" action="{{ url_for('import_base_usernames') }}" enctype="multipart/form-data">{% include "_csrf.html" %}
       <strong class="row">Base usernames</strong>
       <label class="field">CSV with Email, Username or email, base_username columns
         <input type="file" name="file" accept=".csv,text/csv" required></label>
@@ -126,7 +135,7 @@
     </form>
     <div class="divider" style="margin:0"></div>
     <form method="post" action="{{ url_for('import_seed') }}" enctype="multipart/form-data"
-          {% if in_window %}data-confirm="It is camera hours: the camera pauses for the few minutes the import takes. Import now?"{% endif %}>
+          {% if in_window %}data-confirm="It is camera hours: the camera pauses for the few minutes the import takes. Import now?"{% endif %}>{% include "_csrf.html" %}
       <strong class="row">{{ icon('upload') }}Seed (.zip)</strong>
       <label class="field"><span>People, reference photos and Review samples from another install (<code>seed/</code> with <code>manifest.json</code>).
         Files are checked and everything is backed up first.</span>

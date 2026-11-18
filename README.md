@@ -4,6 +4,8 @@ The door camera records who arrives and when. Faces are recognised on a computer
 
 Local Vietnamese speech and custom voice packs: [ZeroTTS setup](docs/voice.md).
 
+Google sign-in and employee admin/viewer access: [setup guide](docs/google-login.md).
+
 ```mermaid
 flowchart LR
   cam[Door camera<br>RTSP] --> mac[Office Mac<br>recognises faces<br>greets at the door]

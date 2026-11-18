@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from . import setup as first_setup
-from .icons import icon
+from .icons import icon, logo
 
 if TYPE_CHECKING:
     from flask import Flask
@@ -52,27 +52,46 @@ def _time(value: str) -> dt.time:
 
 def current_user(cfg) -> str:
     from flask import request
+    from .auth import identity
 
+    if signed_in := identity():
+        return signed_in["user"]
     auth = request.authorization
     return auth.username if cfg.web.password and auth and auth.username else "admin"
 
 
-def role(cfg) -> str | None:
-    """'admin', 'viewer' (read-only login) or None (not logged in). Without a password everyone is admin."""
-    from flask import request
-
-    if not cfg.web.password:
-        return "admin"
-    auth = request.authorization
-    if not auth:
+def credential_role(cfg, username: str, password: str) -> str | None:
+    """'admin'/'viewer' for matching configured credentials (Basic or the password login form)."""
+    w, user, password = cfg.web, username.encode(), password.encode()
+    if not w.password:
         return None
-    user, password, w = auth.username or "", auth.password or "", cfg.web
-    if hmac.compare_digest(user, w.username) and hmac.compare_digest(password, w.password):
+    if hmac.compare_digest(user, w.username.encode()) and hmac.compare_digest(password, w.password.encode()):
         return "admin"
-    if (w.viewer_password and hmac.compare_digest(user, w.viewer_username)
-            and hmac.compare_digest(password, w.viewer_password)):
+    if (w.viewer_password and hmac.compare_digest(user, w.viewer_username.encode())
+            and hmac.compare_digest(password, w.viewer_password.encode())):
         return "viewer"
     return None
+
+
+def basic_role(cfg) -> str | None:
+    from flask import request
+
+    auth = request.authorization
+    if not auth or auth.type != "basic":
+        return None
+    return credential_role(cfg, auth.username or "", auth.password or "")
+
+
+def role(cfg) -> str | None:
+    """Portal session or legacy Basic role; anonymous admin only when both login modes are off."""
+    from flask import current_app
+    from .auth import identity, portal_config
+
+    if signed_in := identity():
+        return signed_in["role"]
+    if not cfg.web.password and not portal_config()["enabled"]:
+        return "admin"
+    return basic_role(cfg)
 
 
 def leave_status(core: "App") -> dict:
@@ -174,10 +193,15 @@ def create_app(core: "App") -> "Flask":
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
     secret = store.get("web_secret")
     if not secret:
-        secret = secrets.token_hex(32)
-        store.put("web_secret", secret)
+        store._exec("INSERT OR IGNORE INTO kv (key, value) VALUES ('web_secret', ?)", (secrets.token_hex(32),))
+        secret = store.get("web_secret")
     app.secret_key = secret
+    from . import auth as portal_auth
+
+    PUBLIC.update(portal_auth.AUTH_PUBLIC)
+    portal_auth.register(app, core)
     app.jinja_env.globals["icon"] = icon
+    app.jinja_env.globals["logo"] = logo
     app.jinja_env.globals["person_name"] = core.service.shown_name  # the email name, if Settings say so
     # Browsers keep the stylesheet and script until they change.
     static_dir = Path(app.static_folder or "")
@@ -188,16 +212,24 @@ def create_app(core: "App") -> "Flask":
         if request.endpoint not in PUBLIC:
             who = role(cfg)
             if who is None:
+                # Browsers go to the login page; scripts and fetch() still get 401.
+                browser = any(m == "text/html" for m, _ in request.accept_mimetypes)
+                if ((browser or portal_auth.portal_config()["enabled"]) and request.method == "GET" and not request.authorization
+                        and not request.path.startswith("/api/") and request.accept_mimetypes.best != "application/json"
+                        and request.headers.get("X-Requested-With") != "fetch"):
+                    return redirect(url_for("login", next=request.full_path.rstrip("?")))
                 return Response("Login required", 401, {"WWW-Authenticate": 'Basic realm="attendance"'})
             if who == "viewer" and (request.method != "GET" or request.endpoint not in VIEWER_PAGES):
                 abort(403, "This login can only look, not change anything.")
-        if core.edge.following and request.endpoint not in AT_THE_CAMERA:
+            if request.endpoint not in portal_auth.DEFER_CSRF:
+                portal_auth.check_csrf()
+        if core.edge.following and request.endpoint not in AT_THE_CAMERA | portal_auth.AUTH_PUBLIC:
             if request.endpoint == "index":
                 return redirect(url_for("live_page"))
             if request.method != "GET":
                 abort(403, "Administration has moved to the server.")
             return redirect(cfg.edge.server_url.rstrip("/") + request.full_path)
-        if request.method == "POST":
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
             # Reject form posts coming from other websites (cross-site request forgery).
             origin = request.headers.get("Origin") or request.headers.get("Referer")
             if origin and urlparse(origin).netloc != request.host:
@@ -211,7 +243,8 @@ def create_app(core: "App") -> "Flask":
                 "translocated": sys.platform == "darwin" and "/AppTranslocation/" in sys.executable,
                 "leave_label": lambda kind: LEAVE_KINDS.get(kind, kind), "WEEKDAYS": WEEKDAYS,
                 "employee_emails": store.employee_emails(), "config_warnings": health.config_warnings(cfg),
-                "role": "admin" if request.endpoint in PUBLIC else role(cfg), "following": core.edge.following}
+                "role": "admin" if request.endpoint in PUBLIC else role(cfg), "following": core.edge.following,
+                "portal_identity": portal_auth.identity()}
 
     from . import attendance as attendance_routes
     from . import capture as capture_routes

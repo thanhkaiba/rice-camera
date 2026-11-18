@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Attendance</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head><body>
+  <main style="max-width:440px;margin:8vh auto;padding:20px">
+    <section class="card stack">
+      <div class="logo-tile lg">{{ logo('loop') }}</div>
+      <h1>Sign in to Attendance</h1>
+      {% if message %}<p role="alert">{{ message }}</p>{% endif %}
+      {% if google %}
+      <div id="google-button" style="min-height:44px"></div>
+      <form method="post" action="{{ url_for('google_login') }}" id="google-form" hidden>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ next }}">
+        <input type="hidden" name="credential">
+      </form>
+      <p class="hint">Use your {{ google.domain or 'Google' }} account with the email on your employee record. Active employees have read-only access unless an admin changes their portal role.</p>
+      <script>
+        // Google Identity Services: Google gives this page an ID token, the form posts it to the server.
+        window.onGoogleLibraryLoad = () => {
+          const form = document.getElementById('google-form');
+          google.accounts.id.initialize({
+            client_id: {{ google.client_id|tojson }}, nonce: {{ google.nonce|tojson }},{% if google.domain %} hd: {{ google.domain|tojson }},{% endif %}
+            callback: ({ credential }) => { form.elements.credential.value = credential; form.submit(); },
+          });
+          google.accounts.id.renderButton(document.getElementById('google-button'),
+                                          { theme: 'outline', size: 'large', text: 'signin_with' });
+        };
+      </script>
+      <script src="https://accounts.google.com/gsi/client" async defer></script>
+      {% endif %}
+      <form method="post" action="{{ url_for('password_login') }}" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ next }}">
+        <h2>Password login</h2>
+        <label class="field">Username<input name="username" autocomplete="username" required></label>
+        <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary">Sign in</button>
+      </form>
+    </section>
+  </main>
+</body></html>

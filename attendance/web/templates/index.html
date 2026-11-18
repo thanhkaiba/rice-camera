@@ -76,7 +76,7 @@
 <div class="row between" style="margin-bottom:12px">
   <div class="search" style="flex: 0 1 340px"><input type="search" id="search" placeholder="Search…" aria-label="Search by name or email"></div>
   {% if leave.enabled %}
-  <form method="post" action="{{ url_for('leave_sync') }}" class="row" style="gap:6px">
+  <form method="post" action="{{ url_for('leave_sync') }}" class="row" style="gap:6px">{% include "_csrf.html" %}
     <input type="hidden" name="back" value="{{ request.full_path }}">
     <span class="chip" title="Leave &amp; holidays from the HR system{% if leave.last_success %}, updated {{ leave.last_success.strftime('%H:%M') }}{% endif %}">{{ icon('hr') }}HR{% if leave.last_success %} · {{ leave.last_success.strftime('%H:%M') }}{% endif %}</span>
     <button class="btn-sm icon" title="Refresh leave &amp; holidays" aria-label="Refresh leave and holidays">{{ icon('refresh') }}</button>
@@ -110,7 +110,7 @@
   <div class="card-head">
     <h2 class="row">{{ icon('chat') }}Late message</h2>
     <form method="post" action="{{ url_for('send_late_message', day=rep.day.isoformat()) }}"
-          {% if late_msg.sent %}data-confirm="The message was already sent. Send it again?"{% endif %}>
+          {% if late_msg.sent %}data-confirm="The message was already sent. Send it again?"{% endif %}>{% include "_csrf.html" %}
       <button class="{{ 'primary' if not late_msg.sent }}" {{ 'disabled' if not late_msg.preview }} title="Post to Google Chat">{{ icon('send') }}{{ 'Resend' if late_msg.sent else 'Send' }}</button>
     </form>
   </div>
@@ -139,7 +139,7 @@
   <div class="card-head">
     <h2 class="row">{{ icon('clock') }}Base requests to approve</h2>
     <form method="post" action="{{ url_for('send_pending_reminder', day=rep.day.isoformat()) }}"
-          {% if remind.sent %}data-confirm="The reminder was already sent. Send it again?"{% endif %}>
+          {% if remind.sent %}data-confirm="The reminder was already sent. Send it again?"{% endif %}>{% include "_csrf.html" %}
       <button {{ 'disabled' if not remind.preview }} title="Remind the approvers in Google Chat">{{ icon('send') }}Remind approvers</button>
     </form>
   </div>
@@ -161,13 +161,13 @@
       <div id="sightings" class="sightings"></div>
       <span class="hint">Arrival = earliest kept sighting. Moving a sighting also teaches the face to the right person.</span>
     </div>
-    <form method="post" id="form-set">
+    <form method="post" id="form-set">{% include "_csrf.html" %}
       <strong id="set-label">Arrival time</strong>
       <div class="form-row"><input name="time" id="edit-time" class="time24" inputmode="numeric" maxlength="5" placeholder="HH:MM"
         pattern="([01]\d|2[0-3]):[0-5]\d" autocomplete="off" required><button class="primary">{{ icon('check') }}Save</button></div>
       <span class="hint">24-hour clock, e.g. 0845.</span>
     </form>
-    <form method="post" id="form-move">
+    <form method="post" id="form-move">{% include "_csrf.html" %}
       <strong>Wrong person?</strong>
       <div class="form-row" style="flex-wrap:nowrap">
         <select name="to" id="edit-to" required style="flex:1; min-width:0">
@@ -177,12 +177,12 @@
         <button title="Move time and photo to them; the face is learned for them">{{ icon('swap') }}Move</button>
       </div>
     </form>
-    <form method="post" id="form-delete" data-confirm="Delete this arrival? If the person really comes later, the camera records them again.">
+    <form method="post" id="form-delete" data-confirm="Delete this arrival? If the person really comes later, the camera records them again.">{% include "_csrf.html" %}
       <div class="form-row"><button class="danger">{{ icon('trash') }}Delete arrival</button></div>
     </form>
     <details class="inline" id="leave-box">
       <summary>{{ icon('calendar') }} On leave</summary>
-      <form method="post" action="{{ url_for('add_leave') }}" id="form-leave" style="margin-top:8px">
+      <form method="post" action="{{ url_for('add_leave') }}" id="form-leave" style="margin-top:8px">{% include "_csrf.html" %}
         <input type="hidden" name="employee_id" id="leave-emp">
         <input type="hidden" name="back" value="{{ request.full_path }}">
         <input type="hidden" name="start" value="{{ rep.day.isoformat() }}">
@@ -200,13 +200,13 @@
   <div class="sighting">
     <a class="photo" target="_blank"><img class="avatar" alt=""></a>
     <div class="info"><strong class="time tnum"></strong><div class="small muted meta"></div></div>
-    <form method="post" class="move">
+    <form method="post" class="move">{% include "_csrf.html" %}
       <select name="to" required title="Wrong person? Pick who it really was"><option value="">Really was…</option>
         {% for id, name in employees.items() %}<option value="{{ id }}">{{ name }} ({{ employee_emails.get(id, '') }})</option>{% endfor %}</select>
       <button class="btn-sm icon" title="Move to this person" aria-label="Move">{{ icon('swap') }}</button>
     </form>
-    <form method="post" class="reject"><button class="btn-sm icon" title="Not them: nobody on the list, e.g. a visitor" aria-label="Not them">{{ icon('user-x') }}</button></form>
-    <form method="post" class="restore"><button class="btn-sm icon" title="Restore" aria-label="Restore">{{ icon('undo') }}</button></form>
+    <form method="post" class="reject">{% include "_csrf.html" %}<button class="btn-sm icon" title="Not them: nobody on the list, e.g. a visitor" aria-label="Not them">{{ icon('user-x') }}</button></form>
+    <form method="post" class="restore">{% include "_csrf.html" %}<button class="btn-sm icon" title="Restore" aria-label="Restore">{{ icon('undo') }}</button></form>
   </div>
 </template>
 {% endblock %}

@@ -1,4 +1,4 @@
-<form method="post" action="{{ url_for('reevaluate_quality') }}" class="row" style="margin:0 0 8px">
+<form method="post" action="{{ url_for('reevaluate_quality') }}" class="row" style="margin:0 0 8px">{% include "_csrf.html" %}
   {% if person is defined %}<input type="hidden" name="employee_id" value="{{ person.id }}">{% endif %}
   <button type="submit">{{ icon('refresh') }}Re-evaluate quality</button>
   {% if quality_report.checked_at %}<span class="hint">Last evaluated {{ quality_report.checked_at[:19]|replace('T', ' ') }}</span>{% endif %}

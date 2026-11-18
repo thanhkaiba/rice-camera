@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import datetime as dt
 import json
+import re
 import uuid
 from pathlib import PurePosixPath
 import sys
@@ -22,6 +23,7 @@ from ..vision.faces import decode_image, encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
 from .edge_api import heartbeat as edge_heartbeat
 from .attendance import wants_json
+from .auth import check_csrf
 
 if TYPE_CHECKING:
     from ..core.pipeline import App
@@ -173,9 +175,13 @@ def register(app: Flask, core: "App") -> None:
             names.update(((beat or {}).get("greeting") or {}).get("voices", []))
         names.add(cfg.greeting.zerotts_voice)
         names.discard("auto")
+        login_config = store.web_config()
+        login_google = {"enabled": login_config["enabled"], "client_id": login_config.get("client_id", ""),
+                        "domain": login_config.get("domain", "offspringdigital.com"),
+                        "origin": (cfg.web.public_url or request.host_url).rstrip("/")}
         unavailable = names - camera_voice_names(beat) if core.photos_read_elsewhere else set()
         return render_template("settings.html", s=settings.current(cfg), cfg=cfg, leave=leave_status(core),
-                               overrides=settings.overrides(cfg, store),
+                               overrides=settings.overrides(cfg, store), login_google=login_google,
                                late_background=latephoto.background_path(core.data_dir).exists(),
                                gallery=background_gallery(), occasion_list=occasions.OCCASIONS,
                                occasion_names={o.key: o.name for o in occasions.OCCASIONS},
@@ -197,6 +203,7 @@ def register(app: Flask, core: "App") -> None:
         request.max_form_parts = 4
         # Keep raw recordings in RAM, including multipart uploads larger than Werkzeug's spool threshold.
         request._get_file_stream = lambda *args, **kwargs: io.BytesIO()
+        check_csrf()
         try:
             upload = request.files.get("reference")
             if upload is None or not upload.filename:
@@ -246,6 +253,7 @@ def register(app: Flask, core: "App") -> None:
 
         request.max_content_length = 10 * 1024 * 1024
         request.max_form_parts = 32
+        check_csrf()
         message, ok = "", False
         try:
             files = request.files.getlist("voice_files")
@@ -302,6 +310,7 @@ def register(app: Flask, core: "App") -> None:
     @app.post("/settings/greeting/preview-text")
     def greeting_preview_text():
         request.max_content_length = 8192
+        check_csrf()
         text = request.form.get("text", "").strip()
         voice = request.form.get("voice", cfg.greeting.zerotts_voice)
         if not text or len(text) > 500:
@@ -626,6 +635,25 @@ def register(app: Flask, core: "App") -> None:
             return failed("Camera API could not prepare the report; check attendance and leave data.", "settings_page")
         store.log(service.now(), current_user(cfg), "send camera API", result["message"])
         return (done if result["ok"] else failed)(result["message"], "settings_page")
+
+    @app.post("/settings/google-login")
+    def save_google_login():
+        form = request.form
+        enabled = form.get("enabled") == "on"
+        client_id = form.get("client_id", "").strip()
+        domain = form.get("domain", "").strip().lower().lstrip("@")
+        try:
+            if domain and not re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", domain):
+                raise ValueError("Enter the company domain like example.com, or leave it empty for any Google account.")
+            if enabled and not cfg.web.password:
+                raise ValueError("Set an admin recovery password before enabling Google login.")
+            if enabled and (not client_id.endswith(".apps.googleusercontent.com") or len(client_id) > 512):
+                raise ValueError("Enter the Google web client ID (…apps.googleusercontent.com).")
+            store.web_save_config({"enabled": enabled, "client_id": client_id, "domain": domain})
+        except ValueError as exc:
+            return failed(f"Not saved: {exc}", "settings_page")
+        store.log(service.now(), current_user(cfg), "Google login settings", "enabled" if enabled else "disabled")
+        return done("Google login settings saved.", "settings_page")
 
     # Google Chat API (the late message with its picture) -----------------------------------
 

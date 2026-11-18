@@ -41,9 +41,9 @@ def _yaml(text: str) -> dict:
     return data
 
 
-def prepare(cfg: Config, config_file: Path, data) -> tuple[str, dict]:
+def prepare(cfg: Config, config_file: Path, data) -> tuple[str, dict, Config]:
     """Check an exported file against this program; returns (config.yaml text, saved settings) as
-    they will be written. Raises ValueError."""
+    they will be written, and the config they make. Raises ValueError."""
     if not isinstance(data, dict) or data.get("format") != FORMAT:
         raise ValueError("this is not a configuration file exported from this program")
     if data.get("version") != 1:
@@ -76,14 +76,15 @@ def prepare(cfg: Config, config_file: Path, data) -> tuple[str, dict]:
         settings.apply(trial, saved)
     except ValueError as exc:
         raise ValueError(f"the settings in the file are not valid here: {exc}") from None
-    return text, saved
+    return text, saved, trial
 
 
 def import_(cfg: Config, store, config_file: Path, data) -> Path:
     """Replace config.yaml and the saved settings with an exported file, after saving the current ones
     to <data folder>/config-backups/ (and the database). Takes full effect after a restart; returns
     the backup file."""
-    text, saved = prepare(cfg, config_file, data)
+    text, saved, trial = prepare(cfg, config_file, data)
+    settings.require_recovery_password(cfg, store, trial.web.password)
     before = export(cfg, store, config_file)
     stamp = dt.datetime.now(cfg.tz).strftime("%Y%m%d-%H%M%S")
     backup = cfg.path(cfg.data_dir) / "config-backups" / f"before-import-{stamp}.json"

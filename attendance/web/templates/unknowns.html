@@ -15,7 +15,7 @@
     {% if groups %}
     <button type="button" id="focus-toggle" title="Show one face at a time, with large buttons (handy on a phone)">{{ icon('eye') }}<span>One at a time</span></button>
     <button type="button" id="name-selected" disabled title="Confirm every selected card as one person">{{ icon('check') }}Name selected (<span id="selected-count" aria-live="polite">0</span>)</button>
-    <form method="post" id="bulk-delete" action="{{ url_for('delete_unknowns') }}" data-confirm="Remove the selected cards from review?">
+    <form method="post" id="bulk-delete" action="{{ url_for('delete_unknowns') }}" data-confirm="Remove the selected cards from review?">{% include "_csrf.html" %}
       <button class="danger" id="delete-selected" disabled>{{ icon('trash') }}Delete selected</button>
     </form>
     {% endif %}
@@ -87,7 +87,7 @@
       {% if guess and g.expected_id and g.expected_id != g.guess %}<div class="small">Model and source disagree · manual review required</div>{% endif %}
       {% if guess %}
       {% if g.members|length == 1 %}
-      <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
+      <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">{% include "_csrf.html" %}
         <input type="hidden" name="employee_id" value="{{ g.guess }}">
         <button class="{{ 'primary ' if g.sure }}btn-sm btn-block name-btn" title="{{ 'Label this sample; no attendance is recorded' if g.source == 'seed' else 'Learn the face; no attendance is recorded' if g.source == 'collect' else 'Confirm this person and learn the face' }}">{{ icon('check') }}Confirm: {{ guess_label }}</button>
       </form>
@@ -97,7 +97,7 @@
       {% endif %}
       {% for pid, score in g.maybe %}
       {% if g.members|length == 1 %}
-      <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">
+      <form method="post" action="{{ url_for('assign', unknown_id=g.id) }}">{% include "_csrf.html" %}
         <input type="hidden" name="employee_id" value="{{ pid }}">
         <button class="btn-sm btn-block name-btn" title="Name this person and learn the face">{{ icon('check') }}It's {{ employee_labels.get(pid, '') }}</button>
       </form>
@@ -106,10 +106,10 @@
       {% endif %}
       {% endfor %}
       <button type="button" class="{{ 'primary' if not guess and not g.maybe }} btn-sm btn-block open-btn" onclick="openReview(this.closest('.face-card'))">{{ icon('help') }}{{ 'Someone else?' if guess else 'Who is this?' }}</button>
-      <form method="post" action="{{ url_for('ignore', unknown_id=g.id) }}" class="focus-only skip-form">
+      <form method="post" action="{{ url_for('ignore', unknown_id=g.id) }}" class="focus-only skip-form">{% include "_csrf.html" %}
         <button class="btn-sm btn-block" title="Hidden for the rest of today; shown again if seen another day">{{ icon('user-x') }}Skip · not an employee</button>
       </form>
-      <form method="post" action="{{ url_for('delete_unknown', unknown_id=g.id) }}" class="delete-form">
+      <form method="post" action="{{ url_for('delete_unknown', unknown_id=g.id) }}" class="delete-form">{% include "_csrf.html" %}
         <button class="danger btn-sm btn-block" title="Remove blurry or unusable photos from review">{{ icon('trash') }}Delete from review</button>
       </form>
     </div>
@@ -137,7 +137,7 @@
       <div class="body">
         <strong class="small">{{ sample.name }}</strong>
         <div class="small muted">Similarity {{ '%.2f'|format(sample.score) }} · check the photo</div>
-        <form method="post" action="{{ url_for('reopen_seed', unknown_id=sample.id) }}"><button class="btn-sm btn-block">Review again</button></form>
+        <form method="post" action="{{ url_for('reopen_seed', unknown_id=sample.id) }}">{% include "_csrf.html" %}<button class="btn-sm btn-block">Review again</button></form>
       </div>
     </div>
     {% endfor %}
@@ -157,7 +157,7 @@
           {% if g.count > 1 %}<span class="badge plain" title="Seen {{ g.count }} times">{{ icon('eye') }}{{ g.count }}</span>{% endif %}</div>
         <div class="body">
           <span class="small muted tnum">{{ local(g.latest.ts).strftime('%H:%M') }}</span>
-          <form method="post" action="{{ url_for('restore', unknown_id=g.id) }}"><button class="btn-sm btn-block">{{ icon('undo') }}Restore</button></form>
+          <form method="post" action="{{ url_for('restore', unknown_id=g.id) }}">{% include "_csrf.html" %}<button class="btn-sm btn-block">{{ icon('undo') }}Restore</button></form>
         </div>
       </div>
       {% endfor %}
@@ -172,7 +172,7 @@
   <div class="dialog-body">
     <p class="hint" style="margin-top:0">Each card is confirmed as the person under it: the arrival is recorded and the face learned.
       At this similarity the suggestion was right about 24 times in 25, not always: untick any card that is not that person.</p>
-    <form method="post" id="high-form" action="{{ url_for('confirm_suggestions') }}">
+    <form method="post" id="high-form" action="{{ url_for('confirm_suggestions') }}">{% include "_csrf.html" %}
       <div class="high-list">
         {% for g in high %}{% set face = g.photos[0] if g.photos else None %}
         <label class="high-item">
@@ -200,7 +200,7 @@
   <div class="dialog-head"><strong>Name the selected cards</strong><button type="button" class="close" data-close aria-label="Close">{{ icon('close') }}</button></div>
   <div class="dialog-body">
     <p class="hint" style="margin-top:0">Every selected card is confirmed as this person: their arrival is recorded from the earliest card and the faces are learned. Only do this when all the selected cards show the same person.</p>
-    <form method="post" id="bulk-name" action="{{ url_for('assign_many') }}">
+    <form method="post" id="bulk-name" action="{{ url_for('assign_many') }}">{% include "_csrf.html" %}
       <div class="form-row" style="flex-wrap:nowrap">
         <div class="suggest-wrap"><input id="bulk-search" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search by name or email…" aria-label="Choose an employee by name or email" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="bulk-suggest"><div class="suggest" id="bulk-suggest" role="listbox" hidden></div></div>
         <input type="hidden" name="employee_id" id="bulk-id">
@@ -219,7 +219,7 @@
       <p class="hint">Select the photos you can confirm, or select wrong photos to delete. Unselected photos stay in Review.</p>
       <div class="small" id="photo-selection-count" aria-live="polite">0 photos selected</div>
     </div>
-    <form method="post" id="form-source" class="photo-selection-form" hidden>
+    <form method="post" id="form-source" class="photo-selection-form" hidden>{% include "_csrf.html" %}
       <input type="hidden" name="photo_selection" value="1">
       <strong id="source-name"></strong>
       <input type="hidden" name="employee_id" id="source-id">
@@ -227,7 +227,7 @@
       <span class="hint">Source label only; verify the photo before confirming. No attendance will be recorded.</span>
     </form>
     {% if employees %}
-    <form method="post" id="form-pick" class="photo-selection-form">
+    <form method="post" id="form-pick" class="photo-selection-form">{% include "_csrf.html" %}
       <input type="hidden" name="photo_selection" value="1">
       <strong id="pick-label">Someone else?</strong>
       <div class="form-row" style="flex-wrap:nowrap">
@@ -242,7 +242,7 @@
     {% endif %}
     <details class="inline" id="new-employee"{% if not employees %} open{% endif %}>
       <summary>{{ icon('user-plus') }} New employee</summary>
-      <form method="post" id="form-new" class="photo-selection-form" style="margin-top:8px">
+      <form method="post" id="form-new" class="photo-selection-form" style="margin-top:8px">{% include "_csrf.html" %}
         <input type="hidden" name="photo_selection" value="1">
         <div class="form-row">
           <input type="email" name="email" required placeholder="Email" aria-label="Employee email" style="flex:1 1 200px">
@@ -252,10 +252,10 @@
       </form>
     </details>
     <div class="divider" style="margin:0"></div>
-    <form method="post" id="form-skip">
+    <form method="post" id="form-skip">{% include "_csrf.html" %}
       <button class="btn-block" title="Hidden for the rest of today; shown again if seen another day">{{ icon('user-x') }}Skip · not an employee</button>
     </form>
-    <form method="post" id="form-delete" class="photo-selection-form" data-confirm="Remove the selected photos from review?">
+    <form method="post" id="form-delete" class="photo-selection-form" data-confirm="Remove the selected photos from review?">{% include "_csrf.html" %}
       <input type="hidden" name="photo_selection" value="1">
       <button class="danger btn-block" title="Remove only the selected photos from review" disabled>{{ icon('trash') }}Delete selected</button>
     </form>
@@ -417,7 +417,8 @@
   }
 
   // Actions are sent in the background: the card goes, the next one is shown, nothing reloads.
-  const HEADERS = { 'Accept': 'application/json', 'X-Requested-With': 'fetch' };
+  const HEADERS = { 'Accept': 'application/json', 'X-Requested-With': 'fetch',
+                    'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content };
   async function post(action, body) {
     let r;
     try { r = await fetch(action, { method: 'POST', body, headers: HEADERS }); }

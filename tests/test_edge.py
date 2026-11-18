@@ -314,7 +314,8 @@ def test_shadow_never_reports_late_arrivals_to_the_camera_api(tmp_path, monkeypa
     monkeypatch.setattr("attendance.integrations.camera_api.post", lambda *a: posted.append(a))
     _, core = server.build(tmp_path, PASSWORD, HASH, now=lambda: at(18, 0))
     core.cfg.camera_api.url, core.cfg.camera_api.key = "https://api.example/x", "key"
-    core.camera_sync.sync()
+    assert core.camera_sync.sync()["ok"] is False
+    core.camera_sync.sync(auto=True)  # as the background loop calls it
     assert posted == []
 
 
@@ -364,7 +365,8 @@ def mirror_to(site, tmp_path):
         answer = c.open(path, method=method, data=body, content_type=content_type, headers=AUTH)
         return answer.status_code, answer.data
     (tmp_path / "macdata").mkdir(exist_ok=True)
-    return core, mac, EdgeClient(SimpleNamespace(server_url="x", token="t"), mac, tmp_path / "macdata", send=send, sleep=lambda s: None)
+    return core, mac, EdgeClient(SimpleNamespace(server_url="x", token="t"), mac, tmp_path / "macdata", send=send, sleep=lambda s: None,
+                                   today=lambda: DAY)  # the sync window follows the test day, not the calendar
 
 
 def sighting(mac, sid, employee, ts, source="camera", image=None):
@@ -455,7 +457,8 @@ def test_the_shadow_site_has_no_stream_settings_and_says_it_only_mirrors(site):
     settings_page = c.get("/settings", headers=admin()).get_data(as_text=True)
     assert 'name="camera.url"' not in settings_page and 'name="camera.more"' not in settings_page
     assert "192.168.10.x" in settings_page
-    assert "only mirrors the office computer" in c.get("/report", headers=admin()).get_data(as_text=True)
+    page = c.get("/report", headers=admin()).get_data(as_text=True)
+    assert "only mirrors attendance" in page and "Portal access can be managed here" in page
 
 
 # The server in charge ---------------------------------------------------------------------------------

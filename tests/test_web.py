@@ -46,6 +46,8 @@ def test_password_protects_pages(core):
     c = client(app, password="s3cret")
     assert c.get("/").status_code == 401
     token = base64.b64encode(b"admin:s3cret").decode()
+    page = c.get("/settings", headers={"Accept": "text/html,*/*;q=0.8"})  # a browser goes to the login page
+    assert page.status_code == 302 and page.headers["Location"].endswith("/login?next=/settings")
     assert c.get("/", headers={"Authorization": f"Basic {token}"}).status_code == 200
 
 

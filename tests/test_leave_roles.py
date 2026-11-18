@@ -148,7 +148,9 @@ def test_personal_page_shows_only_that_person_without_the_admin_login(core):
     app.store.add_leave("A", DAY + dt.timedelta(days=3), DAY + dt.timedelta(days=4), "business_trip")
     c = client(app, password="s3cret")
     link = link_of(c, "A")
-    page = c.get(link).get_data(as_text=True)  # no login header
+    opened = c.get(link)  # no login header
+    assert "Set-Cookie" not in opened.headers  # a guest gets no session just for looking
+    page = opened.get_data(as_text=True)
     assert "Alice" in page and "10:15" in page and "Late 15 min" in page and "Business trip" in page
     assert "Bob" not in page and "08:40" not in page and "/media/" not in page and "bob@" not in page
 

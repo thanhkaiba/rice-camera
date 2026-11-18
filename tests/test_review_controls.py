@@ -48,7 +48,8 @@ def test_card_can_confirm_current_suggestion_without_opening_dialog(core, source
     controls = ReviewControls(c.get("/unknowns").get_data(as_text=True))
     quick = [f for f in controls.forms if not f["in_dialog"] and f.get("action") == f"/unknowns/{uid}/assign"]
     assert len(quick) == 1
-    assert quick[0]["fields"] == {"employee_id": "A"}
+    assert quick[0]["fields"] == {"employee_id": "A", "csrf_token": quick[0]["fields"].get("csrf_token")}
+    assert quick[0]["fields"]["csrf_token"]
     assert quick[0]["method"] == "post"
     assert app.store.unknown(uid).status == "pending"
 

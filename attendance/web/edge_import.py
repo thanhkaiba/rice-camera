@@ -95,7 +95,15 @@ def restart_worker() -> None:
 
 
 def register(app: Flask, core: "App") -> None:
+    from . import PUBLIC, basic_role
+
     data_dir = core.data_dir
+    PUBLIC.update(ENDPOINTS)
+
+    @app.before_request
+    def import_credentials():
+        if request.endpoint in ENDPOINTS and basic_role(core.cfg) != "admin":
+            abort(401, "The migration API requires the admin Basic credentials.")
 
     @app.put("/api/edge/import/config")
     def import_mac_config():

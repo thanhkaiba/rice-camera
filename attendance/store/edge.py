@@ -84,10 +84,7 @@ class EdgeStoreMixin:
         """The server's list wins: what it no longer has goes; returns the embeddings still to fetch."""
         wanted, have = set(keys), set(self.edge_embedding_keys())
         with self._lock, self._db:
-            self._db.execute(f"DELETE FROM employees WHERE id NOT IN ({','.join('?' * len(employees))})",
-                             [row["id"] for row in employees])
-            for row in employees:
-                self._edge_write("employees", row)
+            self._edge_employees(employees)
             for key in have - wanted:
                 self._db.execute("DELETE FROM embeddings WHERE id = ?", (int(key.split(":", 1)[0]),))
         return sorted(int(key.split(":", 1)[0]) for key in wanted - have)
@@ -120,11 +117,31 @@ class EdgeStoreMixin:
         self._exec("DELETE FROM edge_jobs WHERE id = ?", (job_id,))
         return json.loads(rows[0]["payload"]) if rows else None
 
+    def _edge_employees(self, employees: list[dict]) -> None:
+        """Inside the caller's transaction: the other side's people list replaces ours."""
+        self._db.execute(f"DELETE FROM employees WHERE id NOT IN ({','.join('?' * len(employees))})",
+                         [row["id"] for row in employees])
+        for row in employees:
+            self._edge_write("employees", row)
+
     def _edge_write(self, table: str, row: dict) -> None:
         columns = {r["name"] for r in self._db.execute(f"PRAGMA table_info({table})")}
         kept = [c for c in row if c in columns]
         marks = ",".join("?" * len(kept))
-        self._db.execute(f"INSERT OR REPLACE INTO {table} ({','.join(kept)}) VALUES ({marks})", [_stored(row[c]) for c in kept])
+        if table == "employees":
+            # The sender's list is the truth: another row still holding this email or Base username (moved or
+            # swapped) lets go of it now and gets its own value when its row is written in this same batch.
+            self._db.execute("UPDATE employees SET email = NULL WHERE id != ? AND email = ? COLLATE NOCASE",
+                             (row["id"], row.get("email")))
+            if row.get("base_username"):
+                self._db.execute("UPDATE employees SET base_username = '' WHERE id != ? AND base_username = ? COLLATE NOCASE",
+                                 (row["id"], row["base_username"]))
+            # REPLACE skips employee update triggers and would leave old portal sessions valid.
+            updates = ",".join(f"{c}=excluded.{c}" for c in kept if c != "id")
+            sql = f"INSERT INTO employees ({','.join(kept)}) VALUES ({marks}) ON CONFLICT(id) DO UPDATE SET {updates}"
+        else:
+            sql = f"INSERT OR REPLACE INTO {table} ({','.join(kept)}) VALUES ({marks})"
+        self._db.execute(sql, [_stored(row[c]) for c in kept])
 
     def edge_camera_times(self, day: str) -> set[str]:
         return {r["ts"] for r in self._all("SELECT ts FROM sightings WHERE day = ? AND source = 'camera'", (day,))}
@@ -142,10 +159,7 @@ class EdgeStoreMixin:
                         raise ValueError("a row is outside the days sent")
                     self._edge_write(table, row)
             if employees is not None:
-                self._db.execute(f"DELETE FROM employees WHERE id NOT IN ({','.join('?' * len(employees))})",
-                                 [row["id"] for row in employees])
-                for row in employees:
-                    self._edge_write("employees", row)
+                self._edge_employees(employees)
             if embedding_ids is not None:
                 keep = set(embedding_ids)
                 for (rowid,) in self._db.execute("SELECT id FROM embeddings").fetchall():

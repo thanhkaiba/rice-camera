@@ -234,7 +234,8 @@ def test_delete_photos_below_score_defaults_to_twenty_and_uses_displayed_points(
     c = client(app)
     controls = ReviewControls(c.get("/employees/A").get_data(as_text=True))
     low = next(f for f in controls.forms if f.get("id") == "delete-low-score-photos")
-    assert low["fields"] == {"below_score": "20"} and low.get("data-confirm")
+    assert low["fields"] == {"below_score": "20", "csrf_token": low["fields"].get("csrf_token")} and low.get("data-confirm")
+    assert low["fields"]["csrf_token"]
     response = c.post(low["action"], data=low["fields"], follow_redirects=True)
     assert response.status_code == 200 and "2 photos deleted" in response.get_data(as_text=True)
     remaining = {r.id for r in app.store.references(app.library.model_id, "A")}
@@ -649,7 +650,9 @@ def test_delete_photos_below_score_for_everyone(core):
     page = c.get("/employees").get_data(as_text=True)
     assert 'data-scores="[0, 10, 19, 20]"' in page
     low = next(f for f in ReviewControls(page).forms if f.get("id") == "delete-low-score-photos")
-    assert low["action"] == "/employees/photos/delete" and low["fields"] == {"below_score": "20"}
+    assert low["action"] == "/employees/photos/delete"
+    assert low["fields"] == {"below_score": "20", "csrf_token": low["fields"].get("csrf_token")}
+    assert low["fields"]["csrf_token"]
     response = c.post(low["action"], data=low["fields"], follow_redirects=True)
     assert response.status_code == 200 and "3 photos of 3 people deleted." in response.get_data(as_text=True)
     remaining = {r.id for r in app.store.references(app.library.model_id)}
