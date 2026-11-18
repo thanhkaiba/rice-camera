@@ -184,6 +184,8 @@ def test_google_redirect_carries_this_browsers_nonce_and_comes_back_here(portal)
     assert "redirect_uri=https%3A%2F%2Flocalhost%2Fauth%2Fgoogle%2Fcallback" in client.get("/auth/google").location
     page = client.get("/auth/google/callback").get_data(as_text=True)
     assert 'action="/auth/google"' in page and "id_token" in page and "history.replaceState" in page
+    # no-referrer makes the browser POST Origin: null, which the CSRF guard rejects.
+    assert '<meta name="referrer" content="same-origin">' in page
 
 
 def test_google_token_is_single_use_and_bound_to_this_browser(portal, monkeypatch):
