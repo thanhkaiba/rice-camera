@@ -238,9 +238,10 @@ class ChatApi:
                             f"multipart/related; boundary={boundary}")
         return result["attachmentDataRef"]
 
-    def send(self, text: str, image: bytes | None = None, filename: str = "late.jpg") -> str:
-        """Post `text` in the space as the signed-in user, with `image` attached; returns the message name."""
-        space = self._space()
+    def send(self, text: str, image: bytes | None = None, filename: str = "late.jpg", space: str | None = None) -> str:
+        """Post `text` in the space (or in `space`, "spaces/ID") as the signed-in user, with `image`
+        attached; returns the message name."""
+        space = space or self._space()
         if not space:
             raise ChatApiError("no Google Chat space (set the webhook address in Settings)", permanent=True)
         message: dict = {"text": text}

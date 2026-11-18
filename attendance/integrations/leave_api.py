@@ -36,6 +36,10 @@ log = logging.getLogger(__name__)
 STATUS_KEY = "leave_sync"
 RETRY_AFTER_FAILURE = dt.timedelta(minutes=2)
 BEFORE_DEADLINE = dt.timedelta(minutes=5)  # refresh once more just before the late list goes out
+# While people still arrive late, a request approved a moment ago matters at once (who is late, what the
+# door says): Base is asked this often for this long after the late time, whatever refresh_minutes says.
+ARRIVING_EVERY = dt.timedelta(minutes=5)
+ARRIVING_FOR = dt.timedelta(minutes=90)
 STALE_AFTER = dt.timedelta(hours=24)
 BASE_AUTO_HOURS = (dt.time(9), dt.time(18))  # local time; Base is not polled automatically outside it
 
@@ -115,6 +119,8 @@ class LeaveSync:
                           else RETRY_AFTER_FAILURE):
             return True
         deadline = self._late_after(now.date())
+        if self.cfg.base_api_key and deadline <= now < deadline + ARRIVING_FOR and now - last >= ARRIVING_EVERY:
+            return True
         return deadline - BEFORE_DEADLINE <= now < deadline and last < deadline - BEFORE_DEADLINE
 
     def sync(self) -> dict:

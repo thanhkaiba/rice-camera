@@ -116,7 +116,7 @@ def test_rules_from_base_requests(core):
     app, clock, _ = core
     app.store.put(f"base_timeoffs:{DAY}", "{}")
     rules = rules_for(app.service, DAY)
-    assert rules == {"day": DAY.isoformat(), "workday": True, "people": {}, "day_notes": [], "notes": {}}
+    assert rules == {"day": DAY.isoformat(), "workday": True, "people": {}, "day_notes": [], "notes": {}, "habits": {}, "pending": {}}
 
 
 def test_honorifics_are_set_on_the_server_and_reach_the_mac(live, tmp_path):  # noqa: F811
@@ -447,3 +447,197 @@ def test_a_foreign_name_is_respelled_for_the_vietnamese_voice_only_when_spoken(c
     assert said == ["Chào anh Bờ rai ần, Bờ rai ần đến sớm quá!", ("en", "Good morning, Brian!")]
     assert any("Chào anh Brian, Brian đến sớm quá! (said as: Chào anh Bờ rai ần" in r.getMessage() for r in caplog.records)
     assert "Brian" in g.heard("A", DAY + dt.timedelta(days=1))[0]  # remembered as written
+
+
+def test_habits_come_from_the_last_work_days_and_only_the_label_reaches_claude(core):
+    """Often late lately, or on time many days in a row: worked out on the server, a label without any time."""
+    import datetime as dt
+
+    from attendance.core.greeting import person_habits
+
+    app, clock, g, _, _ = make(core)
+    days, d = [], DAY
+    while len(days) < 6:
+        d -= dt.timedelta(days=1)
+        if app.service.is_workday(d):
+            days.append(d)
+    for n, d in enumerate(days):
+        app.store.mark_notice(d, "camera_ok", at(8, 0, day=d))
+        app.service.on_identified("A", at(8, 40, day=d), 0.9, None, None, None)  # Alice: on time every day
+        app.service.on_identified("B", at(10, 20, day=d) if n < 4 else at(8, 50, day=d), 0.9, None, None, None)  # Bob: late on 4
+    assert person_habits(app.service, DAY) == {"A": "on time 6 work days in a row", "B": "often late lately"}
+    g.set_rules(rules_for(app.service, DAY))
+    people = [app.store.employee(i) for i in "ABC"]
+    system, user, ids = g.prompt(people, DAY)
+    listed = {e["name"]: e for e in json.loads(user.split("People:\n")[1])}
+    assert listed["Alice"]["habit"] == "on time 6 work days in a row" and listed["Bob"]["habit"] == "often late lately"
+    assert "habit" not in listed["Carol"] and "10:20" not in user and "08:40" not in user
+    assert '"habit"' in system and "never mentions the habit" in system
+    # Switched off in Settings: nothing about anyone's attendance is worked out or sent.
+    app.cfg.greeting.tease = False
+    app.service._greeting_habits = None
+    assert rules_for(app.service, DAY)["habits"] == {}
+    g.set_rules(rules_for(app.service, DAY))
+    assert "habit" not in g.prompt(people, DAY)[1]
+
+
+def test_one_sentence_of_each_kind_is_asked_for(core):
+    app, clock, g, _, _ = make(core)
+    system, _, _ = g.prompt([app.store.employee("A")], DAY)
+    assert greeting.VARIANTS == 1 and "write 1 different greetings" in system
+
+
+def test_a_coming_late_request_still_waiting_moves_the_late_time_for_the_door_only(core):
+    """Asked for 10:00-10:30, not approved yet: the door does not greet them as late; attendance still does."""
+    import datetime as dt
+
+    app, clock, _ = core
+    app.store.import_base_usernames("Email,Username\nbob@example.com,bob\ncarol@example.com,carol\n")
+    entry = {"kind": "Coming late", "absence": False, "shift": "10:00-10:30"}
+    app.store.put(f"base_timeoffs:{DAY}", json.dumps({"bob": [{**entry, "approved": False, "approvers": ["boss"]}],
+                                                       "carol": [{**entry, "approved": True}]}))
+    rules = rules_for(app.service, DAY)
+    assert rules["people"] == {"B": at(10, 31).isoformat(), "C": at(10, 31).isoformat()}
+    assert rules["pending"] == {"B": "10:00-10:30"}  # only the one still waiting
+    from attendance.integrations.base_timeoff import permissions
+
+    assert "B" not in permissions(app.store, DAY)[0] and "C" in permissions(app.store, DAY)[0]  # the record: approved only
+
+
+def test_someone_whose_request_waits_for_approval_hears_so_at_the_door(core):
+    """After the late time, inside the interval they asked for: in time by their request, which still waits."""
+    app, clock, g, said, _ = make(core)
+    app.store.import_base_usernames("Email,Username\nbob@example.com,bob\n")
+    app.store.update_employee("B", "Bob", True)
+    entry = {"kind": "Coming late", "absence": False, "shift": "10:00-10:30", "approved": False, "approvers": ["boss"]}
+    app.store.put(f"base_timeoffs:{DAY}", json.dumps({"bob": [entry]}))
+    g.set_rules(rules_for(app.service, DAY))
+    bob = app.store.employee("B")
+    assert not g.waits_for_approval(bob, at(9, 50))  # before the late time: an ordinary on-time greeting
+    assert g.sentence(bob, at(9, 50)) == plain("Bob", "", False)
+    assert g.waits_for_approval(bob, at(10, 20)) and not g.is_late(bob, at(10, 20))
+    text = g.sentence(bob, at(10, 20))
+    assert "khung giờ đã xin đi muộn" in text and "chờ" in text and "Bob" in text
+    assert text == greeting.waiting_sentence(bob, DAY) == g.sentence(bob, at(10, 25))  # the same all day: read ahead once
+    assert g.is_late(bob, at(10, 31)) and g.sentence(bob, at(10, 31)) == plain("Bob", "", True)  # after the interval: late
+    # Arriving with others, they still hear their own sentence; the others share one.
+    plan = g._plan([(bob, at(10, 20), 0.0), (app.store.employee("A"), at(10, 20), 0.0), (app.store.employee("C"), at(10, 20), 0.0)])
+    assert [(t == text, [p.id for p, _, _ in group]) for t, _, group in plan] == [(True, ["B"]), (False, ["A", "C"])]
+    assert g.waits_for_approval(app.store.employee("A"), at(10, 20)) is False
+
+
+def test_what_the_door_said_is_kept_and_sent_to_the_server(core):
+    """Each greeting is recorded with its kind, for the Today page; a shared one under every person in it."""
+    app, clock, g, said, _ = make(core)
+    told = []
+    g.on_greeted = lambda ids, ts, text, kind: told.append((ids, text, kind))
+    clock.t = at(9, 30)
+    g.arrived("A", clock.t)
+    assert g.speak_next(timeout=0)
+    kept = app.store.greetings(DAY)
+    assert kept["A"]["text"] == said[0] and kept["A"]["kind"] == "on_time" and told == [(["A"], said[0], "on_time")]
+    clock.t = at(10, 20)
+    g.arrived("B", clock.t)
+    g.arrived("C", clock.t)
+    assert g.speak_next(timeout=0)
+    kept = app.store.greetings(DAY)
+    assert kept["B"]["kind"] == kept["C"]["kind"] == "together" and kept["B"]["text"] == kept["C"]["text"] == said[1]
+    from attendance.web import create_app
+
+    page = create_app(app).test_client().get(f"/?day={DAY}").get_data(as_text=True)
+    assert said[0] in page and "on-time greeting" in page and "greeted with others" in page
+
+
+def test_the_server_keeps_the_greetings_the_mac_reports(live):  # noqa: F811
+    _, core, c = live
+    event = {"id": "g1", "kind": "greeted", "ts": at(9, 30).isoformat(), "employee_ids": ["A", "nobody"],
+             "text": "Chào Alice!", "said": "on_time"}
+    r = c.post("/api/edge/events", json={"events": [event, {**event, "id": "g2", "said": "shouted"}]}, headers=AUTH)
+    assert r.get_json()["accepted"] == ["g1"] and [x["id"] for x in r.get_json()["rejected"]] == ["g2"]
+    kept = core.store.greetings(DAY)
+    assert list(kept) == ["A"] and kept["A"]["text"] == "Chào Alice!" and kept["A"]["kind"] == "on_time"
+    assert "Chào Alice!" in c.get(f"/?day={DAY}", headers=admin()).get_data(as_text=True)
+
+
+def test_zerotts_speed_shortens_the_audio_and_keeps_the_pitch():
+    import numpy as np
+
+    from attendance.core.greeting import quicker
+
+    rate = 24000
+    tone = np.sin(2 * np.pi * 200 * np.arange(rate * 3) / rate).astype(np.float32)
+    assert quicker(tone, rate, 1.0) is tone
+    fast = quicker(tone, rate, 1.2)
+    assert abs(len(fast) / len(tone) - 1 / 1.2) < 0.03
+    middle = fast[rate // 2:rate * 2]
+    crossings = np.sum((middle[:-1] < 0) & (middle[1:] >= 0)) / (len(middle) / rate)
+    assert abs(crossings - 200) < 4 and 0.9 < np.abs(middle).max() < 1.1  # still 200 Hz, no gaps or doubled pieces
+
+
+def test_zerotts_speed_and_liveliness_are_settings_and_remake_the_audio(core):
+    import pytest
+
+    from attendance.core import settings
+
+    app, clock, _ = core
+    g = Greeter(app.cfg, app.store, clock, lambda d: app.service.window(d).late_from)
+    before = g.audio_path("Chào anh Bình!", "maichi", DAY)
+    settings.save(app.cfg, app.store, {"greeting": {"zerotts_speed": "1.15", "zerotts_liveliness": "1.0"}})
+    assert (app.cfg.greeting.zerotts_speed, app.cfg.greeting.zerotts_liveliness) == (1.15, 1.0)
+    assert g.audio_path("Chào anh Bình!", "maichi", DAY) != before
+    for bad in ({"zerotts_speed": "2"}, {"zerotts_liveliness": "1.5"}):
+        with pytest.raises(ValueError):
+            settings.save(app.cfg, app.store, {"greeting": bad})
+
+    class Model:
+        sample_rate, frame_rate = 24000, 12.5
+
+        def synthesize(self, text, voice=None, max_frames=0, audio_temperature=None):
+            self.temperature = audio_temperature
+            import numpy as np
+            return (2 * np.sin(np.arange(24000 * 2) / 20)).astype(np.float32).reshape(1, -1)
+
+    model = Model()
+    audio = g._read_aloud(model, "Chào!", "maichi")
+    assert model.temperature == 1.0 and abs(len(audio) / 48000 - 1 / 1.15) < 0.03 and abs(audio).max() <= 1.0
+
+
+def test_keep_greeting_after_the_camera_hours_for_chosen_people_says_hello_once_and_records_nothing(core):
+    import datetime as dt
+
+    import pytest
+
+    from attendance.core import settings
+
+    app, clock, _ = core
+    queued = []
+
+    class Door:
+        def arrived(self, employee_id, ts):
+            queued.append(employee_id)
+
+    app.service.greeter = Door()
+    app.cfg.greeting.enabled = True
+    end = app.service.window(DAY).end
+    after = end + dt.timedelta(minutes=30)
+    until = (end + dt.timedelta(hours=2)).strftime("%H:%M")
+    assert app.cfg.greeting.until == "12:00" and not app.service.greets_after(after)  # nobody chosen: off
+    settings.save(app.cfg, app.store, {"greeting": {"until": until, "until_people": "A, B,B"}})
+    assert app.cfg.greeting.until_people == "A,B"
+    assert app.service.greets_after(after) and not app.service.greets_after(end - dt.timedelta(minutes=1))
+    assert not app.service.greets_after(end + dt.timedelta(hours=2))
+    app.service.on_identified("A", end - dt.timedelta(minutes=20), 0.8, None)  # arrived in the camera hours
+    queued.clear()
+    for _ in range(2):
+        for who in "ABC":  # C is not ticked: greeted in the camera hours only
+            app.service.greet_only(who, after)
+    assert queued == ["B"] and "B" not in app.store.checkins(DAY) and "C" not in app.store.checkins(DAY)
+    assert not app.service.greets_after(after + dt.timedelta(minutes=1))  # A arrived, B greeted: the camera can rest
+    app.service._greeted_after = set()  # the program restarted: what was said today is on disk
+    app.store.add_greeting(DAY, "B", after, "Chào!", "late")
+    app.service.greet_only("B", after + dt.timedelta(minutes=1))
+    assert queued == ["B"]
+    settings.save(app.cfg, app.store, {"greeting": {"until": "", "until_people": "B"}})
+    assert not app.service.greets_after(after + dt.timedelta(minutes=2))
+    with pytest.raises(ValueError):
+        settings.save(app.cfg, app.store, {"greeting": {"until": "soon"}})

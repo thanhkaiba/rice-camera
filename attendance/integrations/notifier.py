@@ -54,6 +54,8 @@ class GoogleChat:
         self._wake: threading.Event | None = None  # set once the background worker runs
         self.api: ChatApi | None = None  # set by the app: the Chat API, for messages with an "api" part
         self.data_dir: Path | None = None  # where an "api" part's picture is
+        # Other spaces a message can be sent to with `route`: name -> function giving the webhook address.
+        self.routes: dict[str, Callable[[], str]] = {}
 
     def start_background(self) -> None:
         """Deliver from a worker thread instead of the caller's thread."""
@@ -83,10 +85,16 @@ class GoogleChat:
         return self.api is not None and self.api.ready
 
     def send(self, text: str, thread_key: str | None, now: dt.datetime, cards: list[dict] | None = None,
-             api: dict | None = None, system: bool = False) -> None:
+             api: dict | None = None, system: bool = False, route: str = "") -> None:
         """`cards` are Google Chat cardsV2 shown under the text, e.g. a picture. `api`: {"text", "image"
-        (under the data folder)} to post through the Chat API instead, when it is signed in."""
-        log.info("Google Chat: %s", text.replace("\n", " | "))
+        (under the data folder)} to post through the Chat API instead, when it is signed in.
+        `route`: the name of another space in `routes` to post in (and nowhere else)."""
+        log.info("Google Chat%s: %s", f" ({route})" if route else "", text.replace("\n", " | "))
+        if route:
+            if self._route_url(route):
+                self.store.enqueue({"text": text, "route": route}, now)
+                self.kick(now)
+            return
         if not (self.system_webhook_url if system else self.webhook_url) and not (api and self.api_ready):
             return
         payload: dict = {"text": text}
@@ -100,6 +108,9 @@ class GoogleChat:
             payload["api"] = api
         self.store.enqueue(payload, now)
         self.kick(now)
+
+    def _route_url(self, route: str) -> str:
+        return (self.routes[route]() or "").strip() if route in self.routes else ""
 
     def kick(self, now: dt.datetime) -> None:
         """Deliver what is queued: on the worker thread when it runs, otherwise right here."""
@@ -120,7 +131,8 @@ class GoogleChat:
         """Post through the Chat API: True when done, False to retry later, None to use the webhook."""
         part = payload["api"]
         try:
-            name = self.api.send(part["text"], self._picture(part.get("image")))
+            elsewhere = {"space": part["space"]} if part.get("space") else {}  # the message's own space
+            name = self.api.send(part["text"], self._picture(part.get("image")), **elsewhere)
         except ChatApiError as exc:
             if not exc.permanent:
                 log.warning("Google Chat API delivery failed, will retry: %s", exc)
@@ -129,6 +141,9 @@ class GoogleChat:
             log.error("Google Chat API cannot post (%s); posting with the webhook instead", exc)
             if self.system_webhook_url:  # a problem to fix: the monitoring space, the message itself below
                 fix = ("Sign in again under Settings → Google Chat." if exc.sign_in else
+                       f"It was meant for the space {part['space'].removeprefix('spaces/')} (Settings → Daily late message): "
+                       "check that ID, and that the Google account signed in there is a member of that space, "
+                       "then press Test. It was posted in the notifications space instead." if part.get("space") else
                        "Check Settings → Google Chat and the Chat app in Google Cloud, then press Test.")
                 self._post(self.system_webhook_url, {"text": f"⚠️ The late message could not be posted with its picture: {exc}. {fix}"})
             return None
@@ -138,7 +153,8 @@ class GoogleChat:
 
     def flush(self, now: dt.datetime) -> None:
         """Deliver queued messages in order; stop at the first failure and retry on the next call."""
-        if not self.webhook_url and not self.system_webhook_url and not self.api_ready:
+        if (not self.webhook_url and not self.system_webhook_url and not self.api_ready
+                and not any(self._route_url(r) for r in self.routes)):
             return
         with self._flushing:
             for item_id, payload, created_at in self.store.outbox():
@@ -158,7 +174,9 @@ class GoogleChat:
                     if done:
                         continue
                 payload = {k: v for k, v in payload.items() if k != "api"}
-                url = self.system_webhook_url if payload.pop("system", False) else self.webhook_url
+                route = payload.pop("route", "")
+                url = (self._route_url(route) if route else
+                       self.system_webhook_url if payload.pop("system", False) else self.webhook_url)
                 if not url:
                     log.error("Dropping a Google Chat message: no webhook to post it with: %s", payload)
                     self.store.outbox_done(item_id)

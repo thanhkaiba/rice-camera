@@ -99,7 +99,32 @@ def register(app: Flask, core: "App") -> None:
                                late_msg=late_message_status(core, day), remind=pending_reminder_status(core, day),
                                deadline=deadline_status(core, day),
                                notes=store.day_notes(day),
+                               greetings={emp: {**g, "time": dt.datetime.fromisoformat(g["said_at"]).astimezone(service.tz)}
+                                          for emp, g in store.greetings(day).items()},
+                               listen_voices=listen_voices(),
+                               listen_emotions=[t.strip() for t in cfg.greeting.elevenlabs_tags.split(",") if t.strip()],
                                backup_warning=core.backup.warning(service.now()))
+
+    def listen_voices() -> list[tuple[str, str]]:
+        """(value, label) of the voices a greeting can be heard in again, in the browser: the saved one first."""
+        from ..core.voice import preset_names, voice_names
+        from .edge_api import heartbeat
+
+        g = cfg.greeting
+        if core.photos_read_elsewhere:  # the voices are on the camera computer: what it last reported
+            names = preset_names() | set(((heartbeat(store) or {}).get("greeting") or {}).get("voices", []))
+        else:
+            names = set(voice_names(cfg, presets=True))
+        first = [g.zerotts_voice] if g.zerotts_voice in names else []
+        voices = [(name, f"ZeroTTS · {name}") for name in first + sorted(names - set(first))]
+        if g.elevenlabs_key:  # the saved voice, then the suggested ones: each listen costs credits
+            from ..core.greeting import CLOUD_VOICES
+
+            saved = [("elevenlabs:" + g.elevenlabs_voice, "ElevenLabs · the saved voice")] if g.elevenlabs_voice else []
+            cloud = saved + [("elevenlabs:" + id, "ElevenLabs · " + label) for id, label in CLOUD_VOICES
+                             if id != g.elevenlabs_voice]
+            voices = cloud + voices if g.engine == "elevenlabs" else voices + cloud
+        return voices
 
     @app.post("/day/<day>/<employee_id>/set")
     def set_arrival(day: str, employee_id: str):

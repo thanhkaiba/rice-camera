@@ -2,13 +2,15 @@
 {% set title = 'Today' if rep.day == today else rep.day.strftime('%d %b') %}
 {% set SRC_ICON = {'camera': 'camera', 'admin': 'user-check', 'manual': 'edit', 'corrected': 'swap'} %}
 {% macro avatar(path, name) %}{% if path %}<a class="avatar-link" href="{{ url_for('media', path=path) }}" target="_blank"><img class="avatar" src="{{ url_for('media', path=path) }}" alt=""></a>{% else %}<span class="avatar empty">{{ name[:1] }}</span>{% endif %}{% endmacro %}
+{% set GREETED = {'on_time': 'on-time greeting', 'late': 'late greeting', 'pending': 'request waiting for approval', 'together': 'greeted with others'} %}
 {% macro row(status, emp_id, name, a=None, note='') %}
   <tr data-status="{{ status }}" data-name="{{ name|lower }} {{ employee_emails.get(emp_id, '') }}" data-emp="{{ emp_id }}" data-display="{{ name }}" data-requests="{{ request_memberships.get(emp_id, '') }}"
       data-time="{{ a.time if a else '' }}" data-has="{{ 1 if a else 0 }}"
       {% if status != 'on_leave' and role != 'viewer' %}class="editable" title="Click to correct"{% endif %}>
     <td>{{ avatar(a.image if a else None, name) }}</td>
     <td><div class="cell-main">{{ name }}</div><div class="cell-sub">{{ employee_emails.get(emp_id, '') }}</div>
-      {% if notes.get(emp_id) %}<div class="cell-sub day-note" title="Written by {{ name }} on their personal page">{{ icon('edit') }} {{ notes[emp_id] }}</div>{% endif %}</td>
+      {% if notes.get(emp_id) %}<div class="cell-sub day-note" title="Written by {{ name }} on their personal page">{{ icon('edit') }} {{ notes[emp_id] }}</div>{% endif %}
+      {% set said = greetings.get(emp_id) %}{% if said %}<div class="cell-sub greeted" title="What the door said, at {{ said.time.strftime('%H:%M:%S') }}">{{ icon('wave') }} “{{ said.text }}” <span class="hint">{{ said.time.strftime('%H:%M') }} · {{ GREETED.get(said.kind, said.kind) }}</span>{% if role != 'viewer' and listen_voices %} <button type="button" class="link listen" data-say="{{ said.text }}" title="Hear this sentence again, in this browser, in a voice you choose. The office speaker stays silent.">{{ icon('play') }}Listen</button>{% endif %}</div>{% endif %}</td>
     <td>
       {% if status == 'late' %}<span class="badge late">Late {{ late(a) }} min</span>
       {% elif status == 'on_time' %}<span class="badge ok">On time</span>
@@ -209,9 +211,80 @@
     <form method="post" class="restore">{% include "_csrf.html" %}<button class="btn-sm icon" title="Restore" aria-label="Restore">{{ icon('undo') }}</button></form>
   </div>
 </template>
+{% if role != 'viewer' and listen_voices and greetings %}
+<div id="listen-bar" class="listen-bar" hidden>
+  <div class="listen-text" id="listen-text"></div>
+  <div class="row">
+    <label>Voice <select id="listen-voice">{% for value, label in listen_voices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
+    <label id="listen-emotion-field" hidden>Emotion <select id="listen-emotion"><option value="auto">Claude chooses, part by part</option><option value="">none</option>{% for tag in listen_emotions %}<option value="[{{ tag }}]">{{ tag }}</option>{% endfor %}</select></label>
+    <button type="button" id="listen-again" class="btn-sm">{{ icon('play') }}Read again</button>
+    <audio id="listen-audio" controls preload="none" hidden aria-label="The greeting, read again"></audio>
+    <span class="plays" title="The office computer makes the audio and sends it here; the office speaker stays silent">{{ icon('play') }}Plays in this browser, not at the office</span>
+    <button type="button" id="listen-close" class="btn-sm icon" aria-label="Close" title="Close">×</button>
+  </div>
+  <div class="hint" id="listen-status" role="status" aria-live="polite"></div>
+</div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>
+{% if role != 'viewer' and listen_voices and greetings %}
+  // A greeting of today read again in this browser, in the chosen voice; the office speaker is never used.
+  (() => {
+    const bar = document.getElementById('listen-bar');
+    if (!bar) return;
+    const voice = document.getElementById('listen-voice'), audio = document.getElementById('listen-audio');
+    const status = document.getElementById('listen-status'), again = document.getElementById('listen-again');
+    const emotion = document.getElementById('listen-emotion'), emotionField = document.getElementById('listen-emotion-field');
+    const showEmotion = () => { emotionField.hidden = !voice.value.startsWith('elevenlabs:'); };
+    const url = "{{ url_for('greeting_preview_text') }}";
+    let text = '', busy = false, objectUrl;
+    async function read() {
+      if (busy || !text) return;
+      busy = true; again.disabled = voice.disabled = emotion.disabled = true;
+      status.textContent = 'Generating audio… Waiting for the camera computer; this may take up to two minutes.';
+      try {
+        const data = new FormData();
+        data.set('text', text);
+        data.set('csrf_token', (document.querySelector('meta[name="csrf-token"]') || {}).content || '');
+        if (voice.value.startsWith('elevenlabs:')) {  // an ElevenLabs voice, with the emotion chosen here
+          data.set('voice', 'elevenlabs'); data.set('cloud_voice', voice.value.slice(11)); if (emotion.value === 'auto') { data.set('cloud_emotions', 'auto'); data.set('cloud_prefix', ''); }
+          else data.set('cloud_prefix', emotion.value);
+        } else data.set('voice', voice.value);
+        let response = await fetch(url, {method: 'POST', body: data});
+        while (response.status === 202) {
+          const queued = await response.json();
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          response = await fetch(queued.preview_url, {cache: 'no-store'});
+        }
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(`HTTP ${response.status}: ${error.message || 'Could not generate audio.'}`);
+        }
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrl = URL.createObjectURL(await response.blob());
+        audio.src = objectUrl; audio.hidden = false;
+        status.textContent = '';
+        audio.play().catch(() => { status.textContent = 'Audio ready. Press Play to listen.'; });
+      } catch (error) { status.textContent = error.message; }
+      finally { busy = false; again.disabled = voice.disabled = emotion.disabled = false; }
+    }
+    document.addEventListener('click', event => {
+      const button = event.target.closest('button.listen');
+      if (!button) return;
+      event.stopPropagation(); event.preventDefault();
+      text = button.dataset.say;
+      document.getElementById('listen-text').textContent = '“' + text + '”';
+      bar.hidden = false;
+      read();
+    }, true);
+    again.addEventListener('click', read);
+    voice.addEventListener('change', () => { showEmotion(); read(); });
+    emotion.addEventListener('change', read);
+    showEmotion();
+    document.getElementById('listen-close').addEventListener('click', () => { audio.pause(); bar.hidden = true; });
+  })();
+{% endif %}
   const edit = document.getElementById('edit');
   const SIGHTINGS = {{ sightings|tojson }};
   const sightingUrl = "{{ url_for('change_sighting', sighting_id=0, action='ACTION') }}";

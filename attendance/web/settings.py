@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import re
 import datetime as dt
 import json
 import re
@@ -18,6 +19,7 @@ from werkzeug.utils import secure_filename
 from .. import __version__
 from ..cli import updater
 from ..core import latephoto, occasions, settings, transfer
+from ..core.greeting import CLOUD_VOICES
 from ..integrations import base_timeoff, camera_api, chat_api
 from ..vision.faces import decode_image, encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
@@ -165,6 +167,17 @@ def register(app: Flask, core: "App") -> None:
         return (f"Voice {name} uploaded. It will be selected after the office computer confirms installation."
                 if core.photos_read_elsewhere else f"Voice {name} installed and selected. You can test it now.")
 
+    def fine_status() -> dict:
+        """What the Fine notice part of the page shows about today."""
+        from ..core import fines
+
+        day = service.now().date()
+        sent, skipped = store.notice_time(day, fines.NOTICE), store.notice_time(day, fines.SKIPPED)
+        written = json.loads(store.get(fines.INTROS_KEY) or "{}")
+        return {"people": service.shown_names(), "sent": sent.astimezone(service.tz) if sent else None, "skipped": bool(skipped),
+                "claude": written.get("day") == day.isoformat() and bool(written.get("lines")),
+                "appeal": fines.link(service, day, fines.APPEAL), "review": fines.link(service, day, fines.REVIEW)}
+
     @app.get("/settings")
     def settings_page():
         from ..core.voice import voice_names
@@ -191,9 +204,9 @@ def register(app: Flask, core: "App") -> None:
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
                                update=updater.read_status(core.data_dir), backup=core.backup.status(),
                                versions=versions(), base_kinds=base_timeoff.KINDS, edge_beat=beat,
-                               zerotts_voices=sorted(names),
+                               zerotts_voices=sorted(names), cloud_voices=CLOUD_VOICES,
                                unavailable_voices=unavailable,
-                               voice_creation=creation_status())
+                               voice_creation=creation_status(), fine=fine_status())
 
     @app.post("/settings/greeting/create")
     def greeting_voice_create():
@@ -315,6 +328,22 @@ def register(app: Flask, core: "App") -> None:
         voice = request.form.get("voice", cfg.greeting.zerotts_voice)
         if not text or len(text) > 500:
             return jsonify(ok=False, message="Enter between 1 and 500 characters."), 400
+        cloud = None
+        if voice == "elevenlabs":  # the values on the page, saved or not; the key itself is the saved one
+            form = request.form
+            try:
+                cloud = {"account": int(form.get("cloud_account") or 1), "voice": form.get("cloud_voice", "").strip(),
+                         "model": form.get("cloud_model", "").strip(), "prefix": form.get("cloud_prefix", cfg.greeting.elevenlabs_prefix).strip(),
+                         "stability": float(form.get("cloud_stability") or cfg.greeting.elevenlabs_stability),
+                         "speed": float(form.get("cloud_speed") or cfg.greeting.elevenlabs_speed)}
+            except ValueError:
+                return jsonify(ok=False, message="Stability and speed must be numbers."), 400
+            if form.get("cloud_emotions") == "auto":  # on the camera computer Claude tags the parts of the sentence
+                cloud["emotions"] = "auto"
+            if (cloud["account"] not in (1, 2, 3) or not re.fullmatch(r"[A-Za-z0-9]{0,64}", cloud["voice"])
+                    or not re.fullmatch(r"([a-z0-9][a-z0-9_.-]{0,63})?", cloud["model"]) or len(cloud["prefix"]) > 60
+                    or not 0.0 <= cloud["stability"] <= 1.0 or not 0.7 <= cloud["speed"] <= 1.2):
+                return jsonify(ok=False, message="Check the voice ID, the model, stability (0 to 1) and speed (0.7 to 1.2)."), 400
         if core.photos_read_elsewhere:
             with text_preview_lock:
                 for key, preview in list(previews.items()):
@@ -326,13 +355,14 @@ def register(app: Flask, core: "App") -> None:
                 preview_id = uuid.uuid4().hex
                 expires = time.time() + 120
                 job_id = store.edge_job_add("preview_text", {"kind": "preview_text", "preview_id": preview_id,
-                    "text": text, "voice": voice, "expires": expires}, service.now())
+                    "text": text, "voice": voice, "expires": expires,
+                    **({} if cloud is None else {"cloud": cloud})}, service.now())
                 previews[preview_id] = {"job_id": job_id, "expires": expires, "kind": "preview_text"}
             return jsonify(ok=True, preview_url=url_for("greeting_preview_text_result", preview_id=preview_id)), 202
         if not text_preview_lock.acquire(blocking=False):
             return jsonify(ok=False, message="Another text preview is being generated. Try again when it finishes."), 409
         try:
-            data = core.greeter.render_text(text, voice)
+            data = core.greeter.render_text(text, voice) if cloud is None else core.greeter.render_text(text, voice, cloud)
             response = send_file(io.BytesIO(data), mimetype="audio/wav", download_name="voice-test.wav")
             response.headers["Cache-Control"] = "private, no-store"
             return response
@@ -390,11 +420,20 @@ def register(app: Flask, core: "App") -> None:
             for name in names:
                 key = f"{section}.{name}" if section else name
                 value = current[section][name]
-                if name in ("password", "token", "viewer_password", "base_api_key", "key"):
+                if name in ("elevenlabs_key2", "elevenlabs_key3") and form.get(f"{key}_off"):
+                    changes.setdefault(section, {})[name] = ""  # a spare account is taken out
+                elif name in ("password", "token", "viewer_password", "base_api_key", "key", "elevenlabs_key",
+                              "elevenlabs_key2", "elevenlabs_key3"):
                     if form.get(key):
                         changes.setdefault(section, {})[name] = form[key]
                 elif key == "pending_reminder.kinds":
                     if "pending_reminder.kinds_shown" in form:  # no box ticked = no type reminded
+                        changes.setdefault(section, {})[name] = ",".join(form.getlist(key))
+                elif key == "greeting.until_people":
+                    if "greeting.until_people_shown" in form:  # no box ticked = nobody is greeted after the hours
+                        changes.setdefault(section, {})[name] = ",".join(form.getlist(key))
+                elif key == "fine_notice.approvers":
+                    if "fine_notice.approvers_shown" in form:  # no box ticked = nobody approves
                         changes.setdefault(section, {})[name] = ",".join(form.getlist(key))
                 elif name == "work_days":
                     changes.setdefault(section, {})[name] = [int(d) for d in form.getlist(key)]
@@ -705,12 +744,15 @@ def register(app: Flask, core: "App") -> None:
 
         picture = np.full((180, 320, 3), (60, 170, 240), np.uint8)
         cv2.putText(picture, "Test", (100, 110), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (255, 255, 255), 3, cv2.LINE_AA)
+        own = cfg.late_message.space_name()  # the late message's own space, when Settings name one
+        where = f"the space {cfg.late_message.space}" if own else "the notifications space"
         try:
             core.chat.api.send("✅ The attendance system can post the late message here, with its picture attached.",
-                               encode_jpeg(picture), "test.jpg")
+                               encode_jpeg(picture), "test.jpg", space=own or None)
         except chat_api.ChatApiError as exc:
-            return failed(f"Sending failed: {exc}.", "settings_page")
-        return done("Test message with a picture sent; check Google Chat.", "settings_page")
+            hint = " Is the signed-in Google account a member of that space, and is the ID right?" if own else ""
+            return failed(f"Sending to {where} failed: {exc}.{hint}", "settings_page")
+        return done(f"Test message with a picture sent to {where}; check Google Chat.", "settings_page")
 
     @app.post("/settings/google/disconnect")
     def google_disconnect():

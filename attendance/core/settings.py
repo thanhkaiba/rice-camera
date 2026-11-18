@@ -14,7 +14,7 @@ from ..store import Store
 KEY = "settings"
 BASELINE = "_file_settings"  # attribute on the Config: the values from config.yaml, before overrides
 PINNED_PASSWORD = "_pinned_admin_password"  # attribute on the Config: the server's CHECKIN_ADMIN_PASSWORD, never replaced
-SECRET = {"password", "viewer_password", "token", "webhook_url", "system_webhook_url", "base_api_key", "key"}  # never shown, only "set"/"empty"
+SECRET = {"password", "viewer_password", "token", "webhook_url", "system_webhook_url", "approver_webhook_url", "base_api_key", "key", "elevenlabs_key", "elevenlabs_key2", "elevenlabs_key3"}  # never shown, only "set"/"empty"
 
 # section ("" = top level) -> editable fields
 EDITABLE: dict[str, list[str]] = {
@@ -31,14 +31,18 @@ EDITABLE: dict[str, list[str]] = {
     "camera_api": ["url", "key", "send_at", "include_late", "include_not_seen", "mode", "days_back",
                    "interval_seconds", "interval_start", "interval_end"],
     "leave_api": ["url", "token", "refresh_minutes"],
-    "late_message": ["enabled", "include_late", "include_not_seen", "intro", "item", "auto_send", "send_at", "photo", "occasions", "background"],
+    "late_message": ["enabled", "include_late", "include_not_seen", "intro", "item", "auto_send", "send_at", "photo", "occasions", "background", "space"],
     "pending_reminder": ["enabled", "auto_send", "time", "kinds"],
+    "fine_notice": ["enabled", "send_at", "list_until", "appeal_until", "review_until", "approvers", "approver_webhook_url"],
     "web": ["public_url", "password", "viewer_username", "viewer_password"],
     "updates": ["enabled"],
     "backup": ["folder", "time", "keep_days", "include_photos"],
     "collect": ["enabled", "start", "end", "min_score", "per_day", "enough", "fps", "review_per_day"],
     "greeting": ["enabled", "key", "model", "engine", "engine_en", "zerotts_voice", "zerotts_voices_dir",
-                 "voice", "voice_en", "rate", "style", "location", "unknown"],
+                 "voice", "voice_en", "rate", "until", "until_people", "zerotts_speed", "zerotts_liveliness",
+                 "elevenlabs_key", "elevenlabs_voice", "elevenlabs_key2", "elevenlabs_voice2",
+                 "elevenlabs_key3", "elevenlabs_voice3", "elevenlabs_model", "elevenlabs_prefix", "elevenlabs_stability", "elevenlabs_speed", "elevenlabs_emotions", "elevenlabs_tags", "style", "location",
+                 "unknown", "tease"],
     "": ["retention_days", "late_evidence_days", "healthcheck_url", "base_api_key"],
 }
 

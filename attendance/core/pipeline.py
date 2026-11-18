@@ -12,6 +12,7 @@ from pathlib import Path
 from . import settings
 from .backup import Backup
 from .config import Config
+from . import fines
 from .edge import EdgeClient
 from .collect import Collector
 from .enrolment import DoorEnrolment
@@ -61,6 +62,7 @@ class App:
                                system_url=lambda: cfg.google_chat.system_webhook_url)
         self.chat.api = ChatApi(self.store, lambda: space_of(cfg.google_chat.webhook_url))
         self.chat.data_dir = cfg.path(cfg.data_dir)
+        self.chat.routes[fines.ROUTE] = lambda: cfg.fine_notice.approver_webhook_url
         self.service = AttendanceService(cfg, self.store, self.chat, self.gallery, now=now)
         self.camera_sync = CameraSync(cfg, self.store, self.service)
         self.recognizer_lock = threading.Lock()
@@ -91,6 +93,8 @@ class App:
 
         self.greeter = Greeter(cfg, self.store, self.service.now, lambda d: self.service.window(d).late_from)
         self.edge.on_rules = self.greeter.set_rules
+        if self.edge.enabled:
+            self.greeter.on_greeted = self.edge.greeted
         self.edge.on_arrived = self.service.set_arrived
         self.edge.on_say = self.greeter.say_test
         self.edge.render_text = self.greeter.render_text
@@ -399,12 +403,16 @@ def run(cfg: Config) -> None:
     last_ping = last_tick = 0.0
     placement_saved = time.time()
     fps_since = time.time()
-    was_in_window = False
+    was_in_window = was_greeting = False
 
-    def handle(decisions: list[Decision], slot: _CameraSlot) -> None:
+    def handle(decisions: list[Decision], slot: _CameraSlot, greet_only: bool = False) -> None:
         several = len(slots) > 1
         for d in decisions:
             ts = d.ts.astimezone(service.tz)
+            if greet_only:  # after the camera hours: a hello for who is recognised, nothing kept
+                if d.kind == "identified":
+                    service.greet_only(d.employee_id, ts)
+                continue
             d.camera = slot.index if several else None
             image = save_crop(app, d, ts)
             digest = evidence_digest(app.data_dir, image)
@@ -421,7 +429,8 @@ def run(cfg: Config) -> None:
                 if d.trace:  # why nobody was named: one entry per frame
                     log.info("Frames of the unknown face at %s: %s", ts.strftime("%H:%M:%S"), d.trace)
 
-    def watch(slot: _CameraSlot, fps: float, in_window: bool, enrolling: bool, collecting: bool) -> bool:
+    def watch(slot: _CameraSlot, fps: float, in_window: bool, enrolling: bool, collecting: bool,
+              greeting: bool = False) -> bool:
         """Open the camera if needed and analyse its newest frame when one is due. True if a frame
         was analysed."""
         cam = slot.camera
@@ -454,13 +463,13 @@ def run(cfg: Config) -> None:
         ts = dt.datetime.fromtimestamp(frame_time, service.tz)
         try:
             # An enrolment walk is a rehearsal: faces are kept as references, not as arrivals.
-            decisions, matched, people = slot.processor.process(frame, ts, record=in_window and not enrolling,
-                                                                raw=raw if raw is not frame else None)
+            decisions, matched, people = slot.processor.process(
+                frame, ts, record=(in_window or greeting) and not enrolling, raw=raw if raw is not frame else None)
             if enrolling:
                 app.enrolment.observe([(f, c) for f, c, _ in matched], frame)
             elif collecting:
                 app.collector.observe(matched, frame, ts)
-            handle(decisions, slot)
+            handle(decisions, slot, greet_only=greeting and not in_window)
             if in_window and not enrolling:
                 app.placement.add_frame(ts.date(), [f for f, _, _ in matched], cfg.recognition,
                                         frame_time - slot.last_recorded)
@@ -498,11 +507,16 @@ def run(cfg: Config) -> None:
             app.placement.save()  # before the summary, which reads it
         was_in_window = in_window
         camera_ok = True
+        greeting = not in_window and not app.maintenance and service.greets_after(now)
+        if was_greeting and not greeting:
+            for slot in slots:
+                slot.processor.flush()  # tracks of the greeting-only time are dropped, not recorded
+        was_greeting = greeting
 
         enrolling = app.enrolment.active
         # Outside the camera hours the camera may still collect reference photos, at a lower rate.
         collecting = not enrolling and recognizer is not None and app.collector.running(now, in_window)
-        watching = in_window or live.previewing or enrolling
+        watching = in_window or greeting or live.previewing or enrolling
         fps = cfg.camera.process_fps if watching else min(cfg.camera.process_fps, cfg.collect.fps)
         urls = cfg.camera.urls()
         if (watching or collecting) and recognizer is not None and urls and not app.maintenance:
@@ -517,7 +531,7 @@ def run(cfg: Config) -> None:
                 if len(slots) > 1:
                     log.info("Watching %d cameras", len(slots))
             # The camera that has waited longest goes first, so none of them starves the others.
-            analysed = [watch(slot, fps, in_window, enrolling, collecting)
+            analysed = [watch(slot, fps, in_window, enrolling, collecting, greeting)
                         for slot in sorted(slots, key=lambda s: s.last_processed)]
             if not any(analysed):
                 time.sleep(0.02 if all(slot.ok for slot in slots) else 0.05)

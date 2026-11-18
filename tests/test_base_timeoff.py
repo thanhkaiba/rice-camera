@@ -470,3 +470,26 @@ def test_late_with_a_pending_coming_late_request_says_pending(core, monkeypatch)
     assert person.lines() == ['Request pending 9:00-09:30', 'Arrived 10:15 (+15 min)']
     assert latephoto.fingerprint([person], None) != latephoto.fingerprint(
         [latephoto.Person('Bob', '10:15', 15, None, '9:00-09:30')], None)
+
+
+def test_base_is_asked_every_five_minutes_while_people_arrive_late(core):
+    """After the late time a request approved a moment ago matters at once; later the usual interval is enough."""
+    from attendance.integrations import leave_api
+
+    app, clock, _ = core
+    app.cfg.base_api_key = 'secret'
+    late = app.service.window(DAY).late_from.replace(second=0)
+
+    def synced(when):
+        app.store.put(leave_api.STATUS_KEY, json.dumps({'at': when.isoformat(), 'ok': True}))
+
+    synced(late)
+    clock.t = late + dt.timedelta(minutes=4)
+    assert not app.leave_sync.due()
+    clock.t = late + dt.timedelta(minutes=5)
+    assert app.leave_sync.due()
+    synced(late + dt.timedelta(minutes=95))
+    clock.t = late + dt.timedelta(minutes=101)
+    assert not app.leave_sync.due()  # people have arrived: back to refresh_minutes (15)
+    clock.t = late + dt.timedelta(minutes=110)
+    assert app.leave_sync.due()

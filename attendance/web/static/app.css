@@ -358,6 +358,9 @@ details.panel > summary::before { content: ""; width: 8px; height: 8px; border-r
                                   transition: transform var(--normal) var(--spring); }
 details.panel[open] > summary::before { transform: rotate(45deg); }
 details.panel > div { padding: 0 20px 20px; animation: fade-down var(--normal) var(--ease); }
+details.panel > summary svg { width: 18px; height: 18px; flex: none; color: var(--muted); }
+details.panel > summary .sum { margin-left: auto; font-weight: 400; font-size: .9em; color: var(--muted); text-align: right; }
+details.group > div > :first-child { margin-top: 0; }
 details.panel.danger-zone { border-color: var(--bad-line); } details.panel.danger-zone > summary { color: var(--bad); }
 details.inline > summary { cursor: pointer; color: var(--brand); font-weight: 500; font-size: .92em; list-style: none; }
 details.inline > summary::-webkit-details-marker { display: none; }
@@ -595,6 +598,9 @@ button.link { background: none; border: 0; padding: 0; box-shadow: none; color: 
 .viewer form[method="post"]:not(.logout-form):not(.portal-access-form), .viewer .face-select, .viewer .focus-only { display: none !important; }
 .day-note { color: var(--brand-text); }
 .day-note svg { width: 12px; height: 12px; vertical-align: -1px; }
+.greeted svg { width: 12px; height: 12px; vertical-align: -1px; } .greeted { white-space: normal; max-width: 46ch; }
+.plays { display: inline-flex; align-items: center; gap: 5px; font-size: .86em; font-weight: 500; padding: 2px 9px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.plays svg { width: 13px; height: 13px; }
 body.personal main { max-width: 760px; }
 
 /* Settings: backgrounds of the late picture to choose from ------------------------- */
@@ -616,3 +622,10 @@ button.bg-pick:disabled { cursor: not-allowed; opacity: .6; }
 .undo-bar[hidden] { display: none; }
 .readonly form[method="post"]:not(.logout-form):not(.portal-access-form) button { display: none !important; }
 .viewer .name-btn, .viewer .open-btn, .viewer #name-selected, .viewer #delete-selected { display: none !important; }
+button.listen { margin-left: 6px; white-space: nowrap; color: var(--muted); } button.listen svg { width: 11px; height: 11px; vertical-align: -1px; margin-right: 2px; }
+.listen-bar { position: sticky; bottom: 12px; z-index: 5; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card, #fff); box-shadow: 0 6px 24px rgba(0, 0, 0, .14); }
+.listen-bar .row { flex-wrap: wrap; gap: 10px; align-items: center; } .listen-bar audio { height: 34px; max-width: 100%; } .listen-text { margin-bottom: 8px; }
+.engine-box, .listen-box { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 12px 0; background: var(--soft); }
+.engine-box[hidden] { display: none; } .engine-box h4, .listen-box h4 { margin: 0 0 8px; font-size: 1em; display: flex; align-items: center; gap: 10px; }
+.listen-box { background: var(--card); } .listen-box audio { max-width: 100%; }
+.reads-now { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 10px; background: var(--soft-2); margin: 10px 0 4px; } .reads-now svg { width: 15px; height: 15px; flex: none; }

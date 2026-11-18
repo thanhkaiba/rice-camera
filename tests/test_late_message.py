@@ -710,7 +710,7 @@ def test_notifications_can_turn_not_seen_off_and_restore_default(core):
     assert app.service.late_text(DAY) == 'Not seen (1):\n• @Carol'
 
 
-def test_people_not_seen_are_in_the_picture_when_the_message_lists_them(core, monkeypatch):
+def test_people_not_seen_are_never_in_the_picture(core, monkeypatch):
     from test_evidence import seen
 
     from attendance.core import latephoto
@@ -731,8 +731,8 @@ def test_people_not_seen_are_in_the_picture_when_the_message_lists_them(core, mo
     app.cfg.late_message.include_not_seen = True
     assert app.service.late_photo(DAY)
     people, title = drawn[-1]
-    assert [(p.name, p.not_seen, p.lines()) for p in people] == [("Bob", False, ["10:15  +15 min"]), ("Carol", True, ["Not seen"])]
-    assert people[1].photo == reference and title.startswith("Late and not seen on ")
+    assert [(p.name, p.not_seen, p.lines()) for p in people] == [("Bob", False, ["10:15  +15 min"])]
+    assert title.startswith("Late on ")  # Carol is listed in the message, but there is no picture of her today
 
     app.cfg.late_message.include_not_seen = False
     app.service.late_photo(DAY)
@@ -740,7 +740,7 @@ def test_people_not_seen_are_in_the_picture_when_the_message_lists_them(core, mo
     assert [p.name for p in people] == ["Bob"] and title.startswith("Late on ")
 
 
-def test_a_picture_of_only_people_not_seen(core, monkeypatch):
+def test_no_picture_of_only_people_not_seen(core, monkeypatch):
     from attendance.core import latephoto
 
     app, clock, _ = core
@@ -753,8 +753,7 @@ def test_a_picture_of_only_people_not_seen(core, monkeypatch):
     cv2.imwrite(str(reference), np.full((60, 40, 3), 128, np.uint8))
     monkeypatch.setattr(app.service, "best_reference_photo", lambda emp: reference if emp == "C" else None)
     app.cfg.late_message.include_not_seen = True
-    rel = app.service.late_photo(DAY)
-    assert rel and cv2.imread(str(app.data_dir / rel)) is not None
+    assert app.service.late_photo(DAY) is None
     app.cfg.late_message.include_not_seen = False
     assert app.service.late_photo(DAY) is None
 
@@ -770,7 +769,7 @@ def test_people_not_seen_start_a_row_of_their_own():
     assert latephoto.compose(late + missing, "t")[:2] == b"\xff\xd8"
 
 
-def test_people_not_seen_with_a_pending_wfh_request_get_their_own_row(core, monkeypatch):
+def test_people_not_seen_with_a_pending_wfh_request_are_not_in_the_picture_either(core, monkeypatch):
     import json
 
     from attendance.core import latephoto
@@ -792,7 +791,7 @@ def test_people_not_seen_with_a_pending_wfh_request_get_their_own_row(core, monk
     app.service.late_photo(DAY)
     rows = latephoto.rows_of(drawn[-1])
     assert [[(p.name, p.lines()) for p in row] for row in rows] == [
-        [("Alice", ["10:05  +5 min"])], [("Bob", ["Not seen"])], [("Carol", ["Not seen", "WFH pending 9:00-13:00"])]]
+        [("Alice", ["10:05  +5 min"])]]
 
 
 def test_each_group_in_the_picture_has_a_heading():
@@ -885,4 +884,4 @@ def test_chat_picture_uses_selected_groups(core, monkeypatch, include_late, incl
     monkeypatch.setattr('attendance.core.latephoto.write', write)
     app.service.late_photo(DAY)
     assert [person.name for person in pictures if not person.not_seen] == (['Bob'] if include_late else [])
-    assert [person.name for person in pictures if person.not_seen] == (['Alice', 'Carol'] if include_not_seen else [])
+    assert not [person.name for person in pictures if person.not_seen]  # never in the picture, only in the text

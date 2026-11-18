@@ -22,7 +22,7 @@ from flask import Flask, Response, abort, jsonify, request, send_from_directory
 if TYPE_CHECKING:
     from ..core.pipeline import App
 
-from ..core import settings
+from ..core import fines, settings
 
 log = logging.getLogger(__name__)
 
@@ -142,6 +142,13 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
             core.library.reload()
         elif event["kind"] == "alert":
             service.alert(str(event["text"])[:1000])
+        elif event["kind"] == "greeted":  # what the door said: kept for the Today page
+            said = str(event.get("said", ""))
+            if said not in ("on_time", "late", "pending", "together") or not isinstance(event["employee_ids"], list):
+                raise ValueError("bad greeting")
+            for employee_id in event["employee_ids"][:20]:
+                if store.employee(str(employee_id)) is not None:
+                    store.add_greeting(ts.date(), str(employee_id), ts, str(event["text"])[:500], said)
         else:
             raise ValueError("unknown kind")
 
@@ -187,6 +194,9 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
     @from_the_mac
     def edge_heartbeat():
         beat = request.get_json(silent=True) or {}
+        intros = (beat.get("greeting") or {}).get("fine_intros") if isinstance(beat.get("greeting"), dict) else None
+        if isinstance(intros, dict) and intros.get("day") == service.now().date().isoformat():
+            fines.keep_intros(store, service.now().date(), intros.get("lines"))  # the fine notice's opening lines
         store.put(HEARTBEAT_KEY, json.dumps({"at": service.now().isoformat(), "camera_ok": bool(beat.get("camera_ok")),
                                              "camera_state": str(beat.get("camera_state", ""))[:200],
                                              "version": str(beat.get("version", ""))[:40],

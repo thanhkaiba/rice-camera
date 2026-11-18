@@ -143,6 +143,28 @@ CREATE TABLE IF NOT EXISTS outbox (
     created_at TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0
 );
+-- Appeals against the morning's fine notice (core/fines.py): one per person and day.
+CREATE TABLE IF NOT EXISTS appeals (
+    day TEXT NOT NULL,
+    employee_id TEXT NOT NULL,
+    message TEXT NOT NULL,
+    kind TEXT NOT NULL,  -- late or not_seen: what the person was fined for when they appealed
+    created_at TEXT NOT NULL,
+    edits INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending, accepted (counted as on time) or rejected
+    decided_at TEXT,
+    decided_by TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (day, employee_id)
+);
+CREATE TABLE IF NOT EXISTS greetings (  -- what the door said to someone: for the Today page, to audit it
+    day TEXT NOT NULL,
+    employee_id TEXT NOT NULL,
+    said_at TEXT NOT NULL,
+    text TEXT NOT NULL,
+    kind TEXT NOT NULL,  -- on_time, late, pending (request waiting for approval) or together (one for several)
+    PRIMARY KEY (day, employee_id)
+);
 CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL

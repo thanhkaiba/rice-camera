@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Phòng xử kêu oan {{ day.strftime('%d/%m') }}</title>
+<script>
+  try { const t = localStorage.getItem('theme'); document.documentElement.dataset.theme =
+    t || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) {}
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ asset_version }}">
+<style>
+  .appeal { display: flex; gap: 14px; align-items: flex-start; }
+  .appeal img { width: 96px; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 10px; flex: none; }
+  .appeal blockquote { margin: 6px 0 10px; padding-left: 10px; border-left: 3px solid rgba(128,128,128,.4); white-space: pre-wrap; }
+</style>
+</head>
+<body class="personal">
+<div class="toasts" id="toasts">
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+    <div class="toast {{ category }}" data-flash="{{ category }}" role="status">
+      <span class="ico">{{ icon('check' if category == 'ok' else 'alert') }}</span>
+      <span class="msg">{{ message }}</span>
+      <button class="close" type="button" aria-label="Đóng">{{ icon('close') }}</button>
+    </div>
+  {% endfor %}
+</div>
+<main>
+  <div class="page-head">
+    <div>
+      <div class="eyebrow">Phạt nguội · {{ day.strftime('%d/%m/%Y') }}</div>
+      <h1>Phòng xử kêu oan</h1>
+      <p class="subtitle">Chấp nhận: người đó được ghi là đến đúng giờ hôm nay. Oan Thị Mầu: vẫn bị phạt. Phòng xử đóng sau {{ cfg.review_until }}; ai chưa được xử thì vẫn bị phạt.
+        <a href="{{ url_for('fines_review', token=token) }}">Tải lại</a></p>
+    </div>
+  </div>
+  {% if not approvers %}<div class="card"><p style="margin:0">Chưa có người phê duyệt nào được chọn trong Settings → Notifications → Fine notice.</p></div>{% endif %}
+  {% if not appeals %}<div class="card"><p style="margin:0">Chưa ai kêu oan. Yên ắng lạ thường.</p></div>{% endif %}
+  <form method="post" action="{{ url_for('fines_decide', token=token) }}" style="margin:0">
+    {% if appeals and approvers %}
+    <div class="card">
+      <label class="field">Bạn là
+        <select name="approver" required>
+          <option value="">Chọn tên người cầm cân…</option>
+          {% for id, name in approvers.items() %}<option value="{{ id }}" {{ 'selected' if request.cookies.get('fine_approver') == id }}>{{ name }}</option>{% endfor %}
+        </select></label>
+    </div>
+    {% endif %}
+    {% for a in appeals %}
+    <div class="card appeal">
+      {% if a.person and a.person.photo %}<img src="{{ url_for('fines_review_photo', token=token, employee_id=a.employee_id) }}" alt="Ảnh camera lúc {{ a.name }} đến">{% endif %}
+      <div style="flex:1; min-width:0">
+        <div><strong>{{ a.name }}</strong>
+          <span class="muted">{% if a.person and a.person.kind == 'late' %}đến lúc {{ a.person.time }}{% elif a.kind == 'late' %}đến muộn{% else %}chưa thấy trên camera{% endif %}</span>
+          {% if a.status == 'accepted' %}<span class="badge ok">đã chấp nhận · {{ a.decided_by }}</span>
+          {% elif a.status == 'rejected' %}<span class="badge late">oan Thị Mầu · {{ a.decided_by }}</span>
+          {% else %}<span class="badge info">chờ xử</span>{% endif %}</div>
+        <blockquote>{{ a.message }}</blockquote>
+        {% if a.note %}<div class="small muted">Ghi chú: {{ a.note }}</div>{% endif %}
+        {% if approvers %}
+        <div class="form-row" style="align-items:flex-end">
+          <label class="field grow">Ghi chú (không bắt buộc)<input name="note:{{ a.employee_id }}" maxlength="{{ max_note }}" value=""></label>
+          <button class="primary" name="accept" value="{{ a.employee_id }}">{{ icon('check') }}Chấp nhận</button>
+          <button name="reject" value="{{ a.employee_id }}">{{ icon('close') }}Oan Thị Mầu</button>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </form>
+</main>
+<script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}"></script>
+</body>
+</html>

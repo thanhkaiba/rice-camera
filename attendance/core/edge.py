@@ -91,6 +91,10 @@ class EdgeClient:
     def alert(self, text: str) -> None:
         self._enqueue({"kind": "alert", "ts": dt.datetime.now(dt.timezone.utc).isoformat(), "text": text})
 
+    def greeted(self, employee_ids: list[str], ts: dt.datetime, text: str, said: str) -> None:
+        """What the door said to these people, for the server's Today page."""
+        self._enqueue({"kind": "greeted", "ts": ts.isoformat(), "employee_ids": employee_ids, "text": text, "said": said})
+
     def _enqueue(self, event: dict) -> None:
         try:
             self.store.edge_enqueue({"id": uuid.uuid4().hex, **event}, dt.datetime.now(dt.timezone.utc))
@@ -247,7 +251,9 @@ class EdgeClient:
                     raise ValueError("Text preview expired. Generate audio again.")
                 if self.render_text is None:
                     raise ValueError("Text previews are not available on this camera. Update the camera app.")
-                audio = self.render_text(payload["text"], payload["voice"])
+                cloud = payload.get("cloud")  # the ElevenLabs values being tried on the Settings page
+                audio = (self.render_text(payload["text"], payload["voice"]) if cloud is None
+                         else self.render_text(payload["text"], payload["voice"], cloud))
                 if not 12 <= len(audio) <= 4 * 1024 * 1024:
                     raise ValueError("Preview audio must be a WAV of at most 4 MB.")
                 result = {"ok": True}

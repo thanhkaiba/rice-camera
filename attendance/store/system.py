@@ -89,6 +89,41 @@ class SystemStoreMixin:
     def outbox_failed(self, item_id: int) -> None:
         self._exec("UPDATE outbox SET attempts = attempts + 1 WHERE id = ?", (item_id,))
 
+    # appeals against the fine notice ---------------------------------------------------
+
+    def add_greeting(self, day: dt.date, employee_id: str, said_at: dt.datetime, text: str, kind: str) -> None:
+        """What the door said to someone; a person is greeted once a day, a second report replaces the first."""
+        self._exec("INSERT OR REPLACE INTO greetings (day, employee_id, said_at, text, kind) VALUES (?, ?, ?, ?, ?)",
+                   (day.isoformat(), employee_id, said_at.isoformat(), text, kind))
+
+    def greetings(self, day: dt.date) -> dict[str, dict]:
+        return {r["employee_id"]: dict(r) for r in self._all("SELECT * FROM greetings WHERE day = ?", (day.isoformat(),))}
+
+    def appeals(self, day: dt.date) -> list[dict]:
+        return [dict(r) for r in self._all("SELECT * FROM appeals WHERE day = ? ORDER BY created_at, employee_id",
+                                           (day.isoformat(),))]
+
+    def appeal(self, day: dt.date, employee_id: str) -> dict | None:
+        rows = self._all("SELECT * FROM appeals WHERE day = ? AND employee_id = ?", (day.isoformat(), employee_id))
+        return dict(rows[0]) if rows else None
+
+    def accepted_appeals(self, day: dt.date) -> set[str]:
+        return {r["employee_id"] for r in self._all("SELECT employee_id FROM appeals WHERE day = ? AND status = 'accepted'",
+                                                    (day.isoformat(),))}
+
+    def put_appeal(self, day: dt.date, employee_id: str, message: str, kind: str, now: dt.datetime) -> None:
+        """A new appeal, or new words for one nobody has decided yet."""
+        self._exec("INSERT INTO appeals (day, employee_id, message, kind, created_at) VALUES (?, ?, ?, ?, ?) "
+                   "ON CONFLICT(day, employee_id) DO UPDATE SET message = excluded.message, kind = excluded.kind, "
+                   "edits = edits + 1 WHERE status = 'pending'",
+                   (day.isoformat(), employee_id, message, kind, now.isoformat()))
+
+    def decide_appeal(self, day: dt.date, employee_id: str, status: str, by: str, note: str, now: dt.datetime) -> bool:
+        cur = self._exec("UPDATE appeals SET status = ?, decided_at = ?, decided_by = ?, note = ? "
+                         "WHERE day = ? AND employee_id = ?",
+                         (status, now.isoformat(), by, note, day.isoformat(), employee_id))
+        return cur.rowcount == 1
+
     def get(self, key: str) -> str | None:
         rows = self._all("SELECT value FROM kv WHERE key = ?", (key,))
         return rows[0]["value"] if rows else None

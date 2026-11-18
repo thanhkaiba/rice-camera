@@ -83,12 +83,24 @@ late_message:             # one message a day listing late arrivals and people n
   item: "{mention} ({time})"   # {mention}, {name}, {time}, {minutes}
   auto_send: true
   send_at: ""             # empty = when the camera stops (window_end); or a time after late_after
+  space: ""               # a Google Chat space ID (AAAAabc123) to post this message in through the Chat API,
+                          # instead of the notifications space; the signed-in account must be a member
   photo: true             # attach one picture of the late people: each cut out of the camera photo, on a
                           # cheerful background (drawn, or uploaded in Settings), with a name tag and the time.
                           # Shown in Google Chat only when web.public_url is an https address reachable
                           # from the internet (e.g. Tailscale Funnel); otherwise the message links to it.
                           # The cutout model (models/u2netp.onnx, 4.5 MB) is downloaded on the first start;
                           # until then the people are cut out more roughly with OpenCV alone.
+
+
+fine_notice:              # the morning's "phat nguoi" notice with a public appeal page (web server; see core/fines.py)
+  enabled: false          # on: sent instead of the automatic late message
+  send_at: "09:50"        # the message goes to the notifications space
+  list_until: "10:00"     # arrivals up to here still move people on the list
+  appeal_until: "10:10"   # the public appeal page closes (each time includes its whole minute)
+  review_until: "10:14"   # the approvers' page closes; an appeal nobody decided stays a fine
+  approvers: ""           # employee ids, comma separated; chosen in Settings
+  approver_webhook_url: ""  # webhook of the approvers' Google Chat space: gets each appeal and the review link
 
 
 leave_api:

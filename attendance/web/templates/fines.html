@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Cáo thị {{ day.strftime('%d/%m') }}</title>
+<script>
+  try { const t = localStorage.getItem('theme'); document.documentElement.dataset.theme =
+    t || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) {}
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ asset_version }}">
+<style>
+  .fined { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  .fined figure { margin: 0; text-align: center; }
+  .fined img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 10px; background: rgba(128,128,128,.15); }
+  .fined figcaption { margin-top: 6px; font-weight: 500; }
+  .names { display: flex; flex-wrap: wrap; gap: 8px; }
+</style>
+</head>
+<body class="personal">
+<div class="toasts" id="toasts">
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+    <div class="toast {{ category }}" data-flash="{{ category }}" role="status">
+      <span class="ico">{{ icon('check' if category == 'ok' else 'alert') }}</span>
+      <span class="msg">{{ message }}</span>
+      <button class="close" type="button" aria-label="Đóng">{{ icon('close') }}</button>
+    </div>
+  {% endfor %}
+</div>
+<main>
+  <div class="page-head">
+    <div>
+      <div class="eyebrow">Triều đình cáo thị · ngày {{ day.strftime('%d/%m/%Y') }}</div>
+      <h1>Buổi chầu sáng nay</h1>
+      <p class="subtitle">Triều đình cáo thị: sổ chầu buổi sớm đã yết trước cổng thành, kính mời bá quan ghé xem.</p>
+    </div>
+  </div>
+
+  <div id="list">
+    {% set late = people|selectattr('kind', 'equalto', 'late')|list %}
+    {% set missing = people|selectattr('kind', 'equalto', 'not_seen')|list %}
+    {% if not people %}<div class="card"><p style="margin:0">Hôm nay bá quan tề tựu đông đủ, sổ sạch trơn.</p></div>{% endif %}
+    {% if late %}
+    <div class="card">
+      <h2>Trễ giờ thượng triều ({{ late|length }})</h2>
+      <div class="fined">
+        {% for f in late %}
+        <figure>
+          {% if f.photo %}<img src="{{ url_for('fines_photo', token=token, employee_id=f.employee_id) }}" alt="Ảnh camera lúc {{ f.name }} đến" loading="lazy">{% endif %}
+          <figcaption>{{ f.name }} <span class="muted tnum">{{ f.time }}</span>
+            {% if f.appeal %}<div><span class="badge info">{{ 'đang kêu oan' if f.appeal.status == 'pending' else 'quan chưa chuẩn đơn' }}</span></div>{% endif %}</figcaption>
+        </figure>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% if missing %}
+    <div class="card">
+      <h2>Lính gác cổng chưa thấy mặt ({{ missing|length }})</h2>
+      <div class="names">
+        {% for f in missing %}<span class="chip">{{ f.name }}{% if f.appeal %} · {{ 'đang kêu oan' if f.appeal.status == 'pending' else 'quan chưa chuẩn đơn' }}{% endif %}</span>{% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    <p class="hint">{% if list_open %}Sổ còn mở đến {{ cfg.list_until }}: ai qua cổng thành, lính gác sẽ ghi lại vào sổ.{% else %}Sổ đã khoá lúc {{ cfg.list_until }}.{% endif %}</p>
+  </div>
+
+  {% if people %}
+  <div class="card">
+    <h2 class="row">{{ icon('edit') }}Đánh trống kêu oan</h2>
+    <form method="post" action="{{ url_for('fines_appeal', token=token) }}" class="stack" style="margin:0">
+      <label class="field">Bẩm quan, tiểu dân tên là
+        <select name="employee_id" required>
+          <option value="">Xưng danh…</option>
+          {% for f in people|sort(attribute='name') %}<option value="{{ f.employee_id }}">{{ f.name }}</option>{% endfor %}
+        </select></label>
+      <label class="field">Nỗi oan xin tỏ bày
+        <textarea name="message" rows="3" maxlength="{{ max_message }}" required></textarea></label>
+      <div><button class="primary">{{ icon('send') }}Dâng đơn lên công đường</button></div>
+      <span class="hint">Công đường nhận đơn đến {{ cfg.appeal_until }}, quá giờ thì bãi đường. Quan phán xử trước {{ cfg.review_until }}.</span>
+    </form>
+  </div>
+  {% endif %}
+</main>
+<script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}"></script>
+{% if list_open %}<script>
+  // The list follows the camera until it is closed; the form being typed in is left alone.
+  setInterval(async () => {
+    try {
+      const page = await fetch(location.href, {cache: 'no-store'});
+      if (!page.ok) return;
+      const fresh = new DOMParser().parseFromString(await page.text(), 'text/html').getElementById('list');
+      if (fresh) document.getElementById('list').innerHTML = fresh.innerHTML;
+    } catch (e) {}
+  }, 30000);
+</script>{% endif %}
+</body>
+</html>

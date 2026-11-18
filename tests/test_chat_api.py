@@ -195,3 +195,38 @@ def test_the_alert_says_what_to_fix(core):
     app.service.send_late_message(DAY)
     app.chat.flush(clock.t)
     assert any("Sign in again" in m for m in sent)
+
+
+def test_late_message_goes_to_its_own_space_when_one_is_set(core):
+    """Settings → late_message.space: the Chat API posts there; other messages keep the notifications space."""
+    app, clock, posted = core
+    sent = []
+
+    class Api:
+        ready = True
+
+        def send(self, text, image=None, filename="late.jpg", space=None):
+            sent.append((text, space))
+            return "spaces/x/messages/1"
+
+    app.chat.api = Api()
+    from attendance.core import settings
+
+    settings.save(app.cfg, app.store, {"late_message": {"space": "spaces/AAAAexample1"}})
+    assert app.cfg.late_message.space == "AAAAexample1"
+    app.service.post_with_late_photo("late today", clock.t.date())
+    assert sent == [("late today", "spaces/AAAAexample1")] and not posted
+    settings.save(app.cfg, app.store, {"late_message": {"space": ""}})
+    app.service.post_with_late_photo("late again", clock.t.date())
+    assert sent[-1] == ("late again", None)
+    with pytest.raises(ValueError, match="space ID"):
+        settings.save(app.cfg, app.store, {"late_message": {"space": "https://chat.googleapis.com/x"}})
+
+
+def test_chat_api_posts_and_uploads_in_the_space_it_is_given(core):
+    app, _, _ = core
+    google = Google()
+    api = signed_in(app.store, google)
+    api.send("late today", b"\xff\xd8jpeg", space="spaces/AAAAexample1")
+    urls = [c[1] for c in google.calls if "/messages" in c[1] or "/attachments:upload" in c[1]]
+    assert len(urls) == 2 and all("/spaces/AAAAexample1/" in u for u in urls)

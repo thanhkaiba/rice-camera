@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
-from . import latephoto
+from . import fines, latephoto
 from ..integrations import leave_api
 from ..integrations.base_timeoff import pending_arrivals as base_pending_arrivals, permissions as base_permissions
 from .config import Config, parse_clock
@@ -45,7 +45,7 @@ MIN_REFERENCES = 3  # reference photos the midnight housekeeping always leaves s
 # (November 2026); such cards may be confirmed together, each as its own suggestion, after a look.
 HIGH_SCORE = 0.50
 SOURCES = {"camera": "Camera", "admin": "Admin confirmed photo", "manual": "Entered by admin",
-           "corrected": "Corrected by admin"}
+           "corrected": "Corrected by admin", "appeal": "Appeal accepted"}
 
 
 @dataclass
@@ -70,6 +70,7 @@ class Arrival:
     late_after: dt.datetime | None = None
     registered: str = ""  # the "coming late" interval on Base (9:00-09:20) that was still missed
     pending: bool = False  # that request is still waiting for approval
+    appealed: bool = False  # late or not seen, counted as on time because their appeal was accepted (fines.py)
 
     @property
     def time(self) -> str:
@@ -121,6 +122,8 @@ def email_name(email: str) -> str:
 
 
 def minutes_late(a: Arrival, w: Window) -> int:
+    if a.appealed:
+        return 0
     return int((a.ts - (a.late_after or w.late_after)).total_seconds() // 60)
 
 
@@ -167,6 +170,8 @@ class AttendanceService:
         self._last_alive_saved = self._last_alive
         self._last_flush: dt.datetime | None = None
         self._arrived_elsewhere: tuple[str, frozenset] = ("", frozenset())  # (day, people in on the server)
+        self._greeted_after: set = set()  # (day, person) said hello to after the camera hours
+        self._greets_after = (dt.datetime.min.replace(tzinfo=dt.timezone.utc), None, False)
         self._unknown_rows: dict[int, int] = {}  # face track -> its Review row, for a track that continues it
         self._camera_seen_day: dt.date | None = None
         self._bad_since: dt.datetime | None = None  # when the camera stopped working, in this run
@@ -199,6 +204,46 @@ class AttendanceService:
     def in_window(self, now: dt.datetime) -> bool:
         w = self.window(now.date())
         return w.start <= now < w.end and self.is_workday(now.date())
+
+    def _greeted_late(self) -> frozenset:
+        """Who is still greeted after the camera hours (Settings → Greeting)."""
+        g = self.cfg.greeting
+        return frozenset(v for v in g.until_people.split(",") if v) if g.enabled and g.until else frozenset()
+
+    def greets_after(self, now: dt.datetime) -> bool:
+        """After the camera hours on a work day, until Settings → Greeting → "Until", while one of the people
+        ticked there has neither arrived nor been greeted today. Looked up again every 30 s at most."""
+        people = self._greeted_late()
+        if not people or not self.is_workday(now.date()):
+            return False
+        if not (self.window(now.date()).end <= now and now.time() < parse_clock(self.cfg.greeting.until)):
+            return False
+        at, known, answer = self._greets_after
+        if known != (now.date(), people) or abs((now - at).total_seconds()) >= 30:
+            done = set(self.store.checkins(now.date())) | set(self.arrived_elsewhere(now.date()))
+            done |= {e for d, e in self._greeted_after if d == now.date()}
+            done |= set(self.store.greetings(now.date()))  # kept on disk: once a day across a restart too
+            answer = bool(people - done)
+            self._greets_after = (now, (now.date(), people), answer)
+        return answer
+
+    def greet_only(self, employee_id: str, ts: dt.datetime) -> None:
+        """Recognised after the camera hours: a hello, once, for one of the people ticked in Settings who has no
+        arrival today. Nothing is recorded."""
+        ts = self._local(ts)
+        key = (ts.date(), employee_id)
+        if self.greeter is None or employee_id not in self._greeted_late() or key in self._greeted_after:
+            return
+        self._greeted_after = {k for k in self._greeted_after if k[0] == ts.date()} | {key}
+        self._greets_after = (ts, None, False)  # looked up again at once
+        if (employee_id in self.store.checkins(ts.date()) or employee_id in self.arrived_elsewhere(ts.date())
+                or employee_id in self.store.greetings(ts.date())):
+            return
+        log.info("Recognised %s at %s, after the camera hours: greeted, not recorded", employee_id, ts.strftime("%H:%M:%S"))
+        try:
+            self.greeter.arrived(employee_id, ts)
+        except Exception:  # a greeting never stops the camera
+            log.exception("Greeting not queued")
 
     def _local(self, ts: dt.datetime) -> dt.datetime:
         return ts.astimezone(self.tz)
@@ -258,18 +303,18 @@ class AttendanceService:
 
     # daily late message ----------------------------------------------------------
 
-    def late_people(self, day: dt.date) -> list[Arrival]:
+    def late_people(self, day: dt.date, appeals: bool = True) -> list[Arrival]:
         """Late arrivals of the day (people on leave who came in anyway are left out)."""
         if not self.cfg.late_message.include_late or not self.is_workday(day):
             return []
         on_leave = self.store.leaves_on(day)
-        return [a for a in self.report(day).late if a.employee_id not in on_leave]
+        return [a for a in self.report(day, appeals).late if a.employee_id not in on_leave]
 
-    def not_seen_people(self, day: dt.date) -> list[tuple[str, str]]:
+    def not_seen_people(self, day: dt.date, appeals: bool = True) -> list[tuple[str, str]]:
         """People included in the message when Not seen notifications are enabled."""
         if not self.cfg.late_message.include_not_seen:
             return []
-        report = self.report(day)
+        report = self.report(day, appeals)
         return report.not_seen if report.workday else []
 
     def pending_wfh(self, day: dt.date) -> dict[str, str]:
@@ -279,17 +324,19 @@ class AttendanceService:
         return {ids[username]: entry["shift"] for username, entries in snapshot.items() if username in ids
                 for entry in entries if entry.get("kind") == "WFH" and not entry.get("approved")}
 
-    def late_text(self, day: dt.date, preview: bool = False) -> str | None:
+    def late_text(self, day: dt.date, preview: bool = False, intro: str | None = None, not_seen: bool = True) -> str | None:
         """List each person on their own line, grouped by late arrivals, not seen, and not seen with a
         work-from-home request still pending on Base.
 
         Preview uses @Name instead of Chat mention codes; past reports start with their date.
+        `intro` replaces the one in the settings (the fine notice has its own opening line).
         """
         people = self.late_people(day)
-        missing = self.not_seen_people(day)
+        missing = self.not_seen_people(day) if not_seen else []
         if not people and not missing:
             return None
         lm, w = self.cfg.late_message, self.window(day)
+        intro = lm.intro if intro is None else intro
         items = [lm.item.format(mention=f"@{self.chat_name(a.employee_id, a.name)}" if preview
                                 else self.mention(a.employee_id), name=self.chat_name(a.employee_id, a.name),
                                 time=a.time, minutes=minutes_late(a, w),
@@ -299,8 +346,8 @@ class AttendanceService:
         sections = []
         if items:
             lines = [f"Late arrivals ({len(items)}):", *(f"• {item}" for item in items)]
-            if lm.intro.strip():
-                lines.insert(0, lm.intro.strip())
+            if intro.strip():
+                lines.insert(0, intro.strip())
             sections.append("\n".join(lines))
         who = lambda emp, name: f"@{self.chat_name(emp, name)}" if preview else self.mention(emp)  # noqa: E731
         wfh = self.pending_wfh(day) if missing else {}
@@ -318,13 +365,13 @@ class AttendanceService:
         """One picture of the day's late people (the whole person as the camera saw them, or their
         best reference photo when the arrival was entered by hand; name and time burned in), made
         or refreshed as needed: its path under the data folder. None when the picture is switched
-        off, nobody is late, or there is no photo of any of the late people. When the message lists the
-        people not seen, they are in the picture too, after the late ones, with their reference photo."""
+        off, nobody is late, or there is no photo of any of the late people. The people not seen are
+        never in the picture: there is no picture of them from that day."""
         if not self.cfg.late_message.photo:
             return None
         people = self.late_people(day)
-        missing = self.not_seen_people(day)
-        if not people and not missing:
+        if not people:
+            latephoto.remove(self.cfg.path(self.cfg.data_dir), day)
             return None
         data_dir, w = self.cfg.path(self.cfg.data_dir), self.window(day)
         items = []
@@ -339,16 +386,11 @@ class AttendanceService:
                 from_gallery = photo is not None
             items.append(latephoto.Person(self.chat_name(a.employee_id, a.name), a.time, minutes_late(a, w), photo,
                                           a.registered, from_gallery, a.pending))
-        wfh = self.pending_wfh(day) if missing else {}
-        for employee_id, name in missing:
-            items.append(latephoto.Person(self.chat_name(employee_id, name), "", 0, self.best_reference_photo(employee_id),
-                                          from_gallery=True, not_seen=True, wfh_pending=wfh.get(employee_id, "")))
         if not any(p.photo for p in items):  # nobody on camera and no reference photos: nothing to show
             latephoto.remove(data_dir, day)
             return None
         try:
-            title = f"{'Late and not seen' if missing and people else 'Not seen' if missing else 'Late'} on {day:%A %d %b %Y}"
-            return latephoto.write(data_dir, day, items, title, self.cfg.late_message.occasions,
+            return latephoto.write(data_dir, day, items, f"Late on {day:%A %d %b %Y}", self.cfg.late_message.occasions,
                                    self.cfg.late_message.background)
         except Exception:
             log.exception("Could not make the picture of the late people")
@@ -397,9 +439,18 @@ class AttendanceService:
             return False
         if not self.store.mark_notice(day, "late_message", self.now()) and auto:
             return False
+        self.post_with_late_photo(text, day)
+        names = [a.name for a in self.late_people(day)] + [name for _, name in self.not_seen_people(day)]
+        self.store.log(self.now(), user, "send late message", ", ".join(names))
+        return True
+
+    def post_with_late_photo(self, text: str, day: dt.date) -> None:
+        """Post `text` as its own message with the day's picture of the late people, when there is one."""
         cards = None
         # Signed in to the Chat API: posted as the admin, the picture attached (shown in any case).
         api = {"text": text, "image": self.late_photo(day)} if self.chat.api_ready else None
+        if api and self.cfg.late_message.space_name():  # a space of its own (Settings), not the notifications space
+            api["space"] = self.cfg.late_message.space_name()
         url = self.late_photo_url(day)
         if url and url.startswith("https://"):
             cards = [{"cardId": f"late-photo-{day.isoformat()}", "card": {"sections": [{"widgets": [
@@ -408,9 +459,6 @@ class AttendanceService:
         elif url:
             text += f"\n📷 <{url}|Picture of the late people>"
         self.chat.send(text, None, self.now(), cards, api=api)
-        names = [a.name for a in self.late_people(day)] + [name for _, name in self.not_seen_people(day)]
-        self.store.log(self.now(), user, "send late message", ", ".join(names))
-        return True
 
     # reminder to approve the pending Base requests ----------------------------------
 
@@ -883,7 +931,8 @@ class AttendanceService:
 
     # reports -------------------------------------------------------------------
 
-    def report(self, day: dt.date) -> DayReport:
+    def report(self, day: dt.date, appeals: bool = True) -> DayReport:
+        """`appeals` off: as the day was before any appeal against the fine notice was accepted."""
         w = self.window(day)
         workday, note = self.day_info(day)
         rep = DayReport(day, workday, note, w)
@@ -894,6 +943,8 @@ class AttendanceService:
         pending_late = base_pending_arrivals(self.store, day)
         enrolled = self.gallery.counts()
         exempt, support = self.store.exempt_ids(), self.store.support_ids()
+        # Late or not seen, but their appeal was accepted: on time.
+        accepted = self.store.accepted_appeals(day) if appeals else set()
         for emp_id, name in employees.items():
             c = checkins.get(emp_id)
             if emp_id in exempt:
@@ -914,10 +965,13 @@ class AttendanceService:
                         a.registered = permission[0].rpartition(": ")[2]
                     elif a.ts >= w.late_from and emp_id in pending_late:
                         a.registered, a.pending = pending_late[emp_id], True
-                    (rep.late if a.ts >= w.late_from else rep.on_time).append(a)
+                    a.appealed = a.ts >= w.late_from and emp_id in accepted
+                    (rep.late if a.ts >= w.late_from and not a.appealed else rep.on_time).append(a)
             elif emp_id in leave or emp_id in permitted_absence:
                 kind = leave.get(emp_id) or permitted_absence[emp_id]
                 rep.on_leave.append((emp_id, name, LEAVE_KINDS.get(kind, kind)))
+            elif emp_id in accepted:
+                rep.on_time.append(Arrival(emp_id, name, w.late_after, "appeal", None, appealed=True))
             else:
                 rep.not_seen.append((emp_id, name))
             if emp_id not in enrolled:
@@ -1071,7 +1125,10 @@ class AttendanceService:
 
             lm = self.cfg.late_message
             send_at = dt.datetime.combine(day, parse_clock(lm.send_at), tzinfo=self.tz) if lm.send_at else w.end
-            if (lm.enabled and lm.auto_send and send_at <= now < send_at + dt.timedelta(minutes=1)
+            fines.send_if_due(self, now)
+            # The fine notice, when on, is the morning's message about the late: this one is then only sent by hand.
+            if (lm.enabled and lm.auto_send and not self.cfg.fine_notice.enabled
+                    and send_at <= now < send_at + dt.timedelta(minutes=1)
                     and not self.store.notice_sent(day, "late_message")
                     and not self.store.notice_sent(day, "late_message_skipped")):
                 self.send_late_message(day, auto=True)

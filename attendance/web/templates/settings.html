@@ -66,8 +66,10 @@
     <p class="hint" style="margin:14px 0 0">Holidays and leave come from the HR system. Arrivals before the camera starts count only if the person passes again.</p>
   </section>
 
-  <section class="card tab" id="notify">
-    <h2 class="row">{{ icon('chat') }}Google Chat</h2>
+  <section class="tab groups" id="notify">
+    <details class="panel group" id="g-google-chat">
+      <summary>{{ icon('chat') }}<span>Google Chat spaces</span><span class="sum">{{ 'notifications space set' if s.google_chat.webhook_url else 'no notifications space' }} · {{ 'monitoring in its own space' if s.google_chat.system_webhook_url else 'monitoring in the same space' }}</span></summary>
+    <div>
     <p class="hint" style="margin-top:0">Two spaces, so people read about attendance and whoever looks after this computer reads about problems. Each one is a webhook of its own space; Test posts to the address typed here, before saving.</p>
     <div class="form-row">
       <label class="field grow">Notifications space<input name="google_chat.webhook_url" value="{{ s.google_chat.webhook_url }}" placeholder="https://chat.googleapis.com/v1/spaces/…">
@@ -94,7 +96,10 @@
         <span class="hint">Used when there is no Chat ID to @mention them, and on the People and Camera pages</span>{{ src('google_chat.names') }}</label>
     </div>
 
-    <h3 class="row" style="margin-top:18px">{{ icon('image') }}Late message with its picture attached</h3>
+    </div></details>
+    <details class="panel group" id="g-late-message-with-its-picture-attached">
+      <summary>{{ icon('image') }}<span>Late message with its picture attached · Google sign-in</span><span class="sum">{{ 'signed in' if google.connected else 'not signed in' }}</span></summary>
+    <div>
     <p class="hint" style="margin:4px 0 8px">A webhook cannot attach a picture, only link it. Signed in with a Google account (a member of the space), the late message is posted as that account with the picture attached; alerts still use the webhook. If posting fails for good, the webhook posts it with a link instead.</p>
     {% set g = google %}
     <div class="stack small">
@@ -110,7 +115,7 @@
         · space <code>{{ g.space or 'none (set the webhook URL)' }}</code></div>
       {% if g.client %}<div class="row" style="gap:8px; flex-wrap:wrap">
         <button class="btn btn-sm primary" form="google-connect">{{ icon('link') }}{{ 'Connect again' if g.connected else 'Connect' }}</button>
-        {% if g.connected %}<button class="btn btn-sm" form="google-test" title="Post a test message with a small picture">{{ icon('send') }}Test</button>
+        {% if g.connected %}<button class="btn btn-sm" form="google-test" title="Post a test message with a small picture, in the late message's space">{{ icon('send') }}Test{{ ' in ' ~ s.late_message.space if s.late_message.space }}</button>
         <button class="btn btn-sm ghost" form="google-disconnect">{{ icon('trash') }}Disconnect</button>{% endif %}
       </div>
       <div class="hint">Sign in with the account that should post (e.g. admin@…). Google then opens <code>http://127.0.0.1:{{ cfg.web.port }}/…</code>: on this computer that finishes the sign-in; from another computer that page does not open, so copy its address from the address bar and paste it here:</div>
@@ -120,8 +125,37 @@
       </div>{% endif %}
     </div>
 
-    <hr>
-    <h2 class="row">{{ icon('send') }}Daily late message</h2>
+    </div></details>
+    <details class="panel group" id="g-fine-notice-and-appeals">
+      <summary>{{ icon('alert') }}<span>Fine notice and appeals</span><span class="sum">{{ 'on · ' ~ s.fine_notice.send_at if s.fine_notice.enabled else 'off' }}</span></summary>
+    <div>
+    <p class="hint" style="margin-top:0">One message in the notifications space with a playful "phạt nguội" opening line, who is late and not seen, the picture of the late people, and a link to a page (no login, a new address every day) where people appeal. Each appeal is announced in the approvers' space with a link to the review page; an accepted appeal counts the person as on time. While this is on, the daily late message below is not sent automatically, and today's fines go to the Camera API only after the review closes.</p>
+    <div class="stack">{{ check('fine_notice', 'enabled', 'Send the fine notice every work day') }}</div>
+    <div class="form-row">
+      {{ time24('fine_notice', 'send_at', 'Send at') }}
+      {{ time24('fine_notice', 'list_until', 'List follows the camera until') }}
+      {{ time24('fine_notice', 'appeal_until', 'Appeals until') }}
+      {{ time24('fine_notice', 'review_until', 'Review until') }}
+    </div>
+    <p class="hint" style="margin:4px 0 0">Each time includes its whole minute: with appeals until 10:10 the page closes when the clock turns 10:11. After its time a link no longer opens; yesterday's links never do.</p>
+    <div class="form-row">
+      <label class="field grow">Approvers' space<input name="fine_notice.approver_webhook_url" value="{{ s.fine_notice.approver_webhook_url }}" placeholder="https://chat.googleapis.com/v1/spaces/…">
+        <span class="hint">Webhook of a Google Chat space with only the approvers in it: whoever is in that space can open the review link. {% if not s.fine_notice.approver_webhook_url %}<strong>Not set: nobody is told about appeals.</strong>{% endif %}</span>{{ src('fine_notice.approver_webhook_url') }}</label>
+    </div>
+    <p style="margin:14px 0 8px; font-weight:500">Approvers <span class="hint">they pick their own name on the review page; their decisions are in Audit</span></p>
+    <input type="hidden" name="fine_notice.approvers_shown" value="1">
+    <div class="days words">
+      {% for id, name in fine.people.items() %}<label><input type="checkbox" name="fine_notice.approvers" value="{{ id }}" {{ 'checked' if id in s.fine_notice.approvers.split(',') }}><span>{{ name }}</span></label>{% endfor %}
+    </div>
+    {{ src('fine_notice.approvers') }}
+    {% if s.fine_notice.enabled %}<p class="hint" style="margin:10px 0 0">Today: {% if fine.sent %}sent {{ fine.sent.strftime('%H:%M') }}{% elif fine.skipped %}nobody to fine{% else %}not sent yet{% endif %}
+      · opening line by {{ 'Claude' if fine.claude else 'the built-in list (no line from the office computer yet today)' }}
+      · <a href="{{ fine.appeal }}">appeal page</a> · <a href="{{ fine.review }}">review page</a> (they open only during their hours)</p>{% endif %}
+
+    </div></details>
+    <details class="panel group" id="g-daily-late-message">
+      <summary>{{ icon('send') }}<span>Daily late message</span><span class="sum">{% if not s.late_message.enabled %}off{% elif s.fine_notice.enabled %}replaced by the fine notice{% else %}on{{ ' · automatic at ' ~ (s.late_message.send_at or s.schedule.window_end) if s.late_message.auto_send else ' · sent by hand' }}{{ ' · space ' ~ s.late_message.space if s.late_message.space }}{% endif %}</span></summary>
+    <div>
     <p class="hint" style="margin-top:0">Groups late arrivals and people not seen, with a count and one person per line. Leave and exemptions are excluded. Mentions need each person's Chat ID (People page).</p>
     <div class="stack">{{ check('late_message', 'enabled', 'Post the daily late message') }}
       {{ check('late_message', 'include_late', 'Include late arrivals', 'Applies to automatic messages, preview, picture and Send.') }}
@@ -130,6 +164,10 @@
       <label class="field grow">Intro<input name="late_message.intro" value="{{ s.late_message.intro }}">{{ src('late_message.intro') }}</label>
       <label class="field grow">Per person<input name="late_message.item" value="{{ s.late_message.item }}">
         <span class="hint">{mention} {name} {time} {minutes} {registered}</span>{{ src('late_message.item') }}</label>
+    </div>
+    <div class="form-row">
+      <label class="field grow">Space for this message<input name="late_message.space" value="{{ s.late_message.space }}" placeholder="empty: the notifications space">
+        <span class="hint">A Google Chat space ID (e.g. AAAAabc123): the late message is posted there through the Chat API instead of the notifications space. The signed-in Google account must be a member of it. Without the Chat API sign-in the message goes to the notifications space.</span>{{ src('late_message.space') }}</label>
     </div>
     <div class="form-row" style="margin-top:14px; align-items:center">
       {{ check('late_message', 'auto_send', 'Send automatically at') }}
@@ -141,7 +179,10 @@
     <p class="hint" style="margin:4px 0 0">{% if occasion %}Now: <strong>{{ occasion.name }}</strong> background. {% endif %}Next: {% for o, d in upcoming %}{{ o.name }} {{ d.strftime('%d/%m') }}{{ ', ' if not loop.last }}{% endfor %}.
       Your own pictures for one: upload them below with "Around …" chosen (they land in the data folder, <code>late/backgrounds/&lt;name&gt;/</code>).</p>
     <p class="hint" style="margin:4px 0 0">Google Chat shows the picture only when the address of this page (Access tab) is https and reachable from the internet, e.g. with Tailscale Funnel; otherwise the message links to it.</p>
-    <h3 class="row" style="margin-top:18px">{{ icon('image') }}Background of the picture</h3>
+    </div></details>
+    <details class="panel group" id="g-background-of-the-picture">
+      <summary>{{ icon('image') }}<span>Background of the picture</span><span class="sum">{{ 'one picture every day' if gallery.selected else 'automatic' }}</span></summary>
+    <div>
     <p class="hint" style="margin:4px 0 10px">Click a picture to use it every day, holidays too. Automatic changes it each day and uses holiday pictures around holidays.
       {% if gallery.selected == 'single' %}Your picture is used every day, holidays too: remove it to go back to automatic.{% endif %}</p>
     <div class="bg-grid">
@@ -181,6 +222,7 @@
         </select></label>
       <button class="btn" form="late-bg" title="Save the chosen pictures">{{ icon('upload') }}Use</button>
     </div>
+    </div></details>
   </section>
 
   <section class="card tab" id="greeting">
@@ -190,36 +232,133 @@
     <div class="stack">
       {{ check('greeting', 'enabled', 'Greet people at the door', 'Off: silent') }}
       {{ check('greeting', 'unknown', 'Say hello to faces the camera cannot name', '“Xin chào!” without a name, at most once every 2 minutes') }}
+      {{ check('greeting', 'tease', 'Joke about how people have arrived lately', 'Someone often late who comes early, or on time many days in a row. Only that label goes to Claude with the name, never a time. A late arrival is never teased about the habit.') }}
     </div>
+    <details class="panel" style="margin-top:14px" {{ 'open' if s.greeting.until_people }}>
+      <summary><span>Greet some people after the camera hours</span><span class="sum">{{ (s.greeting.until_people.split(',')|length ~ ' people · until ' ~ s.greeting.until) if s.greeting.until_people and s.greeting.until else 'off' }}</span></summary>
+      <p class="hint">On work days, after the camera hours, the camera keeps looking until this time, only to say hello to the people ticked here who have not arrived yet today. Only the hello: no arrival, photo or review card is recorded. Everyone else is greeted in the camera hours only. Nobody ticked, or no time: off.</p>
+      <div class="row">{{ time24('greeting', 'until', 'Until', required=false) }}</div>
+      <input type="hidden" name="greeting.until_people_shown" value="1">
+      <div class="days words">
+        {% for id, name in fine.people.items() %}<label><input type="checkbox" name="greeting.until_people" value="{{ id }}" {{ 'checked' if id in s.greeting.until_people.split(',') }}><span>{{ name }}</span></label>{% endfor %}
+      </div>
+      {{ src('greeting.until_people') }}
+    </details>
 
-    <h3 style="margin-top:18px">Voices</h3>
+    <h3 style="margin-top:18px">Voice</h3>
+    {% set gs = (edge_beat or {}).get('greeting') %}
+    {% set ENGINES = (('zerotts', 'ZeroTTS · on the office computer, free'), ('elevenlabs', 'ElevenLabs · online, paid per character'), ('macos', 'macOS · the computer’s built-in voice')) %}
     <div class="form-row">
       <label class="field">Vietnamese is read by
-        <select name="greeting.engine">
-          <option value="zerotts" {{ 'selected' if s.greeting.engine == 'zerotts' }}>ZeroTTS · natural voice, on the office computer</option>
-          <option value="macos" {{ 'selected' if s.greeting.engine == 'macos' }}>macOS voice ({{ s.greeting.voice }})</option>
+        <select name="greeting.engine" id="engine-vi">
+          {% for value, label in ENGINES %}<option value="{{ value }}" {{ 'selected' if s.greeting.engine == value }}>{{ label }}</option>{% endfor %}
         </select>{{ src('greeting.engine') }}
       </label>
-      <label class="field grow">ZeroTTS voice
-        <select name="greeting.zerotts_voice">
-          <option value="auto" {{ 'selected' if s.greeting.zerotts_voice == 'auto' }}>Auto · change voice every day</option>
-          {% for name in zerotts_voices %}<option value="{{ name }}" {{ 'selected' if s.greeting.zerotts_voice == name }} {{ 'disabled' if name in unavailable_voices }}>{{ name }}{{ ' · awaiting camera confirmation' if name in unavailable_voices }}</option>{% endfor %}
+      <label class="field">English is read by
+        <select name="greeting.engine_en" id="engine-en">
+          {% for value, label in (ENGINES[2], ENGINES[0], ENGINES[1]) %}<option value="{{ value }}" {{ 'selected' if s.greeting.engine_en == value }}>{{ label }}</option>{% endfor %}
         </select>
-        <span class="hint">Used wherever ZeroTTS is chosen. Add your own under “Add a voice” below.</span>{{ src('greeting.zerotts_voice') }}
+        <span class="hint">Only for people greeted in English (People → Greetings). ZeroTTS reads English with a Vietnamese accent.</span>{{ src('greeting.engine_en') }}
       </label>
     </div>
-    <div class="form-row">
-      <label class="field">English is read by
-        <select name="greeting.engine_en">
-          <option value="macos" {{ 'selected' if s.greeting.engine_en == 'macos' }}>macOS voice ({{ s.greeting.voice_en }}) · native English</option>
-          <option value="zerotts" {{ 'selected' if s.greeting.engine_en == 'zerotts' }}>ZeroTTS · the same voice as Vietnamese</option>
-        </select>
-        <span class="hint">ZeroTTS is made for Vietnamese: it reads English with a Vietnamese accent, but in the same voice as the Vietnamese greetings.</span>{{ src('greeting.engine_en') }}
-      </label>
-      {{ field('greeting', 'voice_en', 'macOS English voice', 'Samantha, Daniel, Karen… as installed on the office computer') }}
+    {% macro reads(engine, macos_voice) %}{% if engine == 'elevenlabs' %}{% if s.greeting.elevenlabs_key and s.greeting.elevenlabs_voice %}ElevenLabs · {{ s.greeting.elevenlabs_model }} · voice {{ s.greeting.elevenlabs_voice }}{% else %}ZeroTTS · {{ s.greeting.zerotts_voice }} (ElevenLabs is chosen but has no {{ 'voice ID' if s.greeting.elevenlabs_key else 'API key' }} yet){% endif %}{% elif engine == 'zerotts' %}ZeroTTS · {{ s.greeting.zerotts_voice }}{% else %}macOS · {{ macos_voice }}{% endif %}{% endmacro %}
+    <p class="reads-now">{{ icon('wave') }}<span><strong>Saved now</strong> · Vietnamese: {{ reads(s.greeting.engine, s.greeting.voice) }} · English: {{ reads(s.greeting.engine_en, s.greeting.voice_en) }}</span></p>
+    <p class="hint">Only the settings of the voices chosen here are shown below. A change counts once you press Save.</p>
+
+    <div class="engine-box" data-engine="zerotts">
+      <h4>ZeroTTS</h4>
+      <div class="form-row">
+        <label class="field grow">Voice
+          <select name="greeting.zerotts_voice">
+            <option value="auto" {{ 'selected' if s.greeting.zerotts_voice == 'auto' }}>Auto · change voice every day</option>
+            {% for name in zerotts_voices %}<option value="{{ name }}" {{ 'selected' if s.greeting.zerotts_voice == name }} {{ 'disabled' if name in unavailable_voices }}>{{ name }}{{ ' · awaiting camera confirmation' if name in unavailable_voices }}</option>{% endfor %}
+          </select>
+          <span class="hint">Your own voice: “Add a ZeroTTS voice” at the bottom.</span>{{ src('greeting.zerotts_voice') }}
+        </label>
+        {{ field('greeting', 'zerotts_speed', 'Speed', '1.0 = natural · 1.15 a little brisker · 0.8–1.5', type='number', step='0.05') }}
+        {{ field('greeting', 'zerotts_liveliness', 'Liveliness', '0.8 = default · up to 1.2: rises and falls more, misreads more', type='number', step='0.05') }}
+      </div>
     </div>
 
-    {% set gs = (edge_beat or {}).get('greeting') %}
+    <div class="engine-box" data-engine="elevenlabs" id="elevenlabs">
+      <h4>ElevenLabs</h4>
+      <p class="hint" style="margin-top:0">Each sentence, with the names in it, is sent to elevenlabs.io and costs credits (about one per character with Eleven v3).
+        When it fails or the credits run out, ZeroTTS reads instead.
+        {% if gs and gs.elevenlabs and (gs.elevenlabs.credits or gs.elevenlabs.error) %}<br>Used this month: <strong>{{ gs.elevenlabs.credits }}</strong> credits{% for n, used in (gs.elevenlabs.get('keys') or {})|dictsort %}{{ ' (' if loop.first else ', ' }}key {{ n }}: {{ used }}{{ ')' if loop.last }}{% endfor %}.
+        {% if gs.elevenlabs.error %}<br><span class="badge bad">Problem</span> {{ gs.elevenlabs.error }}{% endif %}{% endif %}</p>
+      <div class="form-row">
+        <label class="field grow">API key<input name="greeting.elevenlabs_key" type="password" autocomplete="off"
+          placeholder="{{ 'saved · leave empty to keep' if s.greeting.elevenlabs_key else 'sk_…' }}">
+          <span class="hint">elevenlabs.io → Developers → API keys. {% if not s.greeting.elevenlabs_key %}<strong>Paste it and press Save before listening.</strong>{% endif %}</span>{{ src('greeting.elevenlabs_key') }}</label>
+        <label class="field">Voice ID
+          <input name="greeting.elevenlabs_voice" value="{{ s.greeting.elevenlabs_voice }}" list="elevenlabs-voices" autocomplete="off">
+          <datalist id="elevenlabs-voices">
+            {% for id, label in cloud_voices %}<option value="{{ id }}">{{ label }}</option>{% endfor %}
+          </datalist>
+          <span class="hint">Click the box for suggestions, or paste an ID: voice’s menu (⋯) → Copy voice ID. Library voices need a paid ElevenLabs plan.</span>{{ src('greeting.elevenlabs_voice') }}</label>
+      </div>
+      <div class="form-row">
+        <label class="field">Model
+          <select name="greeting.elevenlabs_model">
+            {% for value, label in (('eleven_v3', 'Eleven v3 · most expressive'), ('eleven_flash_v2_5', 'Flash v2.5 · faster, half the credits'), ('eleven_turbo_v2_5', 'Turbo v2.5')) %}<option value="{{ value }}" {{ 'selected' if s.greeting.elevenlabs_model == value }}>{{ label }}</option>{% endfor %}
+            {% if s.greeting.elevenlabs_model not in ('eleven_v3', 'eleven_flash_v2_5', 'eleven_turbo_v2_5') %}<option value="{{ s.greeting.elevenlabs_model }}" selected>{{ s.greeting.elevenlabs_model }}</option>{% endif %}
+          </select>{{ src('greeting.elevenlabs_model') }}</label>
+        <label class="field">Emotion
+          <select name="greeting.elevenlabs_stability">
+            {% for value, label in ((0.0, 'Most emotion'), (0.25, 'Lively'), (0.5, 'Natural'), (0.75, 'Steady'), (1.0, 'Most even')) %}<option value="{{ value }}" {{ 'selected' if s.greeting.elevenlabs_stability == value }}>{{ label }}</option>{% endfor %}
+            {% if s.greeting.elevenlabs_stability not in (0.0, 0.25, 0.5, 0.75, 1.0) %}<option value="{{ s.greeting.elevenlabs_stability }}" selected>{{ s.greeting.elevenlabs_stability }}</option>{% endif %}
+          </select>
+          <span class="hint">More emotion also differs more each time.</span>{{ src('greeting.elevenlabs_stability') }}</label>
+        {{ field('greeting', 'elevenlabs_speed', 'Speed', '1.0 = natural · 0.7–1.2', type='number', step='0.05') }}
+        {{ field('greeting', 'elevenlabs_prefix', 'Mood of every sentence', 'Eleven v3 only, e.g. [cheerfully] · for sentences without a tag of their own · empty: none') }}
+      </div>
+      <div class="stack" style="margin:10px 0">
+        {{ check('greeting', 'elevenlabs_emotions', 'Claude chooses the emotion of each part of a sentence', 'Eleven v3 only. Claude puts a tag before the words it fits, e.g. “[surprised] Ủa, anh Minh! [laughs] Hôm nay sớm ghê.” The tags are never shown or read aloud. Sentences already written today are written again.') }}
+      </div>
+      {{ field('greeting', 'elevenlabs_tags', 'Emotions Claude may use', 'English words, comma separated, without brackets · e.g. excited, cheerfully, surprised, laughs, whispers, sighs · try one in “Listen” by typing [surprised] in the text', cls='grow') }}
+      <details class="inline" {{ 'open' if s.greeting.elevenlabs_key2 or s.greeting.elevenlabs_key3 }}>
+        <summary>Spare accounts ({{ (1 if s.greeting.elevenlabs_key2 else 0) + (1 if s.greeting.elevenlabs_key3 else 0) }} saved) · used when the first key is refused or out of credits</summary>
+        <div>
+          <p class="hint">A voice you added belongs to one account: add the same voice in each account and paste its ID here.</p>
+          {% for n in ('2', '3') %}
+          <div class="form-row">
+            <label class="field grow">API key {{ n }}<input name="greeting.elevenlabs_key{{ n }}" type="password" autocomplete="off"
+              placeholder="{{ 'saved · leave empty to keep' if s.greeting['elevenlabs_key' ~ n] else 'none' }}">{{ src('greeting.elevenlabs_key' ~ n) }}</label>
+            {{ field('greeting', 'elevenlabs_voice' ~ n, 'Voice ID of key ' ~ n, 'Empty: the same as the first key') }}
+            {% if s.greeting['elevenlabs_key' ~ n] %}<label class="switch"><input type="checkbox" name="greeting.elevenlabs_key{{ n }}_off"><span>Remove key {{ n }}</span></label>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+    </div>
+
+    <div class="engine-box" data-engine="macos">
+      <h4>macOS</h4>
+      <div class="form-row">
+        {{ field('greeting', 'voice', 'Vietnamese voice', 'Linh') }}
+        {{ field('greeting', 'voice_en', 'English voice', 'Samantha, Daniel, Karen…') }}
+        {{ field('greeting', 'rate', 'Speed (words/min)', '180 is calm · 90–360', type='number') }}
+      </div>
+      <p class="hint">A macOS voice cannot be heard in this browser, only at the office.</p>
+    </div>
+
+    <div class="listen-box">
+      <h4>Listen <span class="plays" title="The office computer makes the audio and sends it here; the office speaker stays silent">{{ icon('play') }}Plays in this browser, not at the office</span></h4>
+      <label class="field">Text to read
+        <textarea name="text" form="voice-text-test" rows="2" maxlength="500" required placeholder="Nhập nội dung bạn muốn giọng đọc thử…">Chào buổi sáng anh Minh, chúc anh một ngày làm việc thật vui!</textarea>
+        <span class="hint">Read with what is chosen above for Vietnamese, as it is on this page now: no need to save first (except a new API key). Up to 500 characters. With ElevenLabs it costs credits.</span>
+      </label>
+      <div class="row">
+        <label class="field" id="cloud-account-field" hidden>ElevenLabs key<select id="cloud-account">
+          <option value="1">key 1{{ '' if s.greeting.elevenlabs_key else ' (not saved)' }}</option>
+          {% for n in ('2', '3') %}{% if s.greeting['elevenlabs_key' ~ n] %}<option value="{{ n }}">key {{ n }}</option>{% endif %}{% endfor %}
+        </select></label>
+        <button type="submit" form="voice-text-test" id="voice-text-button">{{ icon('play') }}Listen</button>
+      </div>
+      <p class="hint" id="voice-text-status" role="status" aria-live="polite"></p>
+      <audio id="voice-text-audio" controls preload="none" hidden aria-label="Listen to your text"></audio>
+    </div>
+
     <div class="row between" style="margin:14px 0">
       <span class="hint">{% if gs %}Office computer: {{ 'on' if gs.enabled else 'off' }} ·
         {% if gs.voice %}voices ready{% else %}<strong>Check {{ s.greeting.zerotts_voice if s.greeting.engine == 'zerotts' else s.greeting.voice }} ({{ s.greeting.engine }}) and {{ s.greeting.zerotts_voice if s.greeting.engine_en == 'zerotts' else s.greeting.voice_en }} ({{ s.greeting.engine_en }}) on the office computer</strong>{% endif %} ·
@@ -227,6 +366,7 @@
         {% if gs.error %}<br><span class="badge bad">Problem</span> {{ gs.error }}{% endif %}
         {% elif edge_beat is not none %}Office computer: no greeting yet (it needs version 1.1.48 or later){% else %}Greets on the computer with the camera{% endif %}</span>
       <button formaction="{{ url_for('greeting_test') }}" formnovalidate title="The office computer says a test sentence, then asks Claude for a greeting and says it: checks the key and the model">{{ icon('play') }}Say a test greeting</button>
+      <span class="plays" title="You hear nothing in this browser: someone has to be at the office door">{{ icon('wave') }}Plays on the office speaker</span>
     </div>
 
     <details class="panel" {{ 'open' if not s.greeting.key }}>
@@ -248,20 +388,7 @@
     </details>
 
     <details class="panel">
-      <summary>Try a voice with your own text</summary>
-      <div>
-        <label class="field">Text to read
-          <textarea name="text" form="voice-text-test" rows="3" maxlength="500" required placeholder="Nhập nội dung bạn muốn giọng đọc thử…"></textarea>
-          <span class="hint">Read by the ZeroTTS voice selected above, without saving settings, and played in this browser. Up to 500 characters and 20 seconds. The audio is made on the office computer, so keep it online; it may take 30 seconds to start.</span>
-        </label>
-        <button type="submit" form="voice-text-test" id="voice-text-button">Generate audio</button>
-        <p class="hint" id="voice-text-status" role="status" aria-live="polite"></p>
-        <audio id="voice-text-audio" controls preload="none" hidden aria-label="Listen to your text"></audio>
-      </div>
-    </details>
-
-    <details class="panel">
-      <summary>Add a voice</summary>
+      <summary>Add a ZeroTTS voice <span class="sum"><span class="plays">{{ icon('play') }}Preview plays in this browser</span></span></summary>
       <div>
         <h3 style="margin-top:0">Record a voice here</h3>
         <p class="hint">Use a clean recording of your own voice, or a speaker who has agreed to its use. It is processed on the office computer, without an external voice service. Listen to the result before choosing it.</p>
@@ -328,18 +455,16 @@
     <details class="panel">
       <summary>Advanced</summary>
       <div>
-        <div class="form-row">
-          {{ field('greeting', 'voice', 'macOS Vietnamese voice', 'Used when Vietnamese is read by macOS: Linh') }}
-          {{ field('greeting', 'rate', 'macOS speed (words/min)', '180 is calm; 90–360. ZeroTTS uses its natural pace.', type='number') }}
-        </div>
         {{ field('greeting', 'zerotts_voices_dir', 'Custom voice folder', 'Folder on the office computer, e.g. data/voices, containing <voice name>/voice.npz. Voices added on this page go there by themselves.', cls='grow') }}
-        <p class="hint">Missing ZeroTTS models download on the office computer on first use (about 1 GB; Internet required). “Say a test greeting” uses the office speaker; text tests and new-voice previews play in this browser.</p>
+        <p class="hint">Missing ZeroTTS models download on the office computer on first use (about 1 GB; Internet required). Where you hear things: “Say a test greeting” and every real greeting come out of the office speaker (the computer with the camera); “Listen” and new-voice previews play in this browser only.</p>
       </div>
     </details>
   </section>
 
-  <section class="card tab" id="camera">
-    <h2 class="row">{{ icon('camera') }}Camera</h2>
+  <section class="tab groups" id="camera">
+    <details class="panel group" id="g-camera">
+      <summary>{{ icon('camera') }}<span>Camera</span></summary>
+    <div>
     {% if office %}<div class="cam-status warn" style="margin-top:14px"><span>The camera can only be checked from the office network, on a computer with an address in <strong>{{ office.network }}</strong>, the same network as the camera. This server cannot reach it.{% if not shadow_site %} Addresses saved here are sent to the office computer within a minute.{% endif %}</span>
       <a class="btn btn-sm" href="{{ office.url }}/live" target="_blank" rel="noopener">{{ icon('camera') }}Check camera at {{ office.url }}</a></div>
     {% endif %}
@@ -363,8 +488,10 @@
     {% endif %}
     <div class="stack">{{ check('camera', 'enhance_low_light', 'Brighten dark frames') }}</div>
     {% endif %}
-    <hr>
-    <h2 class="row">{{ icon('image') }}Collect reference photos</h2>
+    </div></details>
+    <details class="panel group" id="g-collect-reference-photos">
+      <summary>{{ icon('image') }}<span>Collect reference photos</span><span class="sum">{{ 'on' if s.collect.enabled else 'off' }}</span></summary>
+    <div>
     <p class="hint">Outside the camera hours the camera keeps watching, more slowly, and keeps very clear faces of people it recognises without doubt as their reference photos: one per walk past, a few a day, until they have enough good ones. A clear face it does not recognise goes to Review, where naming it teaches the face. Arrivals are not recorded then.</p>
     <div class="stack">{{ check('collect', 'enabled', 'Collect outside the camera hours', 'On work days, between the times below') }}</div>
     <div class="form-row" style="margin-top:14px">
@@ -378,8 +505,10 @@
       {{ field('collect', 'fps', 'Frames / second', 'Lighter than camera hours', type='number', step='0.5') }}
       {{ field('collect', 'review_per_day', 'Unrecognised faces to Review a day', 'Clear faces nobody matches · no arrival is recorded · 0 = none', type='number', step='1') }}
     </div>
-    <hr>
-    <h2 class="row">{{ icon('employees') }}Groups of people</h2>
+    </div></details>
+    <details class="panel group" id="g-groups-of-people">
+      <summary>{{ icon('employees') }}<span>Groups of people</span></summary>
+    <div>
     <div class="form-row">
       <label class="field">Follow
         <select name="tracking.mode">
@@ -391,10 +520,13 @@
       {{ field('tracking', 'person_conf', 'Person confidence', 'Raise if bags or chairs get followed', type='number', step='0.05') }}
       {{ field('tracking', 'full_frame_every', 'Full frame every N frames', 'Higher = faster', type='number') }}
     </div>
+    </div></details>
   </section>
 
-  <section class="card tab" id="admin">
-    <h2 class="row">{{ icon('shield') }}Access &amp; privacy</h2>
+  <section class="tab groups" id="admin">
+    <details class="panel group" id="g-access-privacy">
+      <summary>{{ icon('shield') }}<span>Access &amp; privacy</span></summary>
+    <div>
     <div class="form-row">
       <label class="field grow">Address of this page<input name="web.public_url" value="{{ s.web.public_url }}"><span class="hint">Used in chat links</span>{{ src('web.public_url') }}</label>
       <label class="field">New password<input name="web.password" type="password" autocomplete="new-password" placeholder="leave empty to keep"><span class="hint">User: {{ cfg.web.username }}</span>{{ src('web.password') }}</label>
@@ -426,8 +558,10 @@
       <label class="field grow">Healthchecks.io ping URL<input name="healthcheck_url" value="{{ s['']['healthcheck_url'] }}" placeholder="https://hc-ping.com/…">
         <span class="hint">Alerts when this whole computer is off or asleep, which it cannot report itself: create a free check at healthchecks.io (period 1 minute), paste its ping URL here and add Google Chat or e-mail there</span>{{ src('healthcheck_url') }}</label>
     </div>
-    <hr>
-    <h2 class="row">{{ icon('key') }}API for other systems</h2>
+    </div></details>
+    <details class="panel group" id="g-api-for-other-systems">
+      <summary>{{ icon('key') }}<span>API for other systems</span><span class="sum">{{ api_keys()|length }} key{{ '' if api_keys()|length == 1 else 's' }}</span></summary>
+    <div>
     <p class="hint" style="margin-top:0">Lets another system (payroll, HR) read a person's arrival and lateness by day. Give each system its own key;
       revoke it when the system stops using it. Send the developers this page:
       <a href="{{ url_for('api_docs') }}" target="_blank" rel="noopener">{{ url_for('api_docs', _external=True) }}</a></p>
@@ -444,8 +578,10 @@
       <label class="field grow">New key for<input name="name" form="api-key-new" placeholder="e.g. Payroll system" maxlength="60" autocomplete="off"></label>
       <button class="btn-sm" form="api-key-new">{{ icon('plus') }}Make a key</button>
     </div>
-    <hr>
-    <h2 class="row">{{ icon('database') }}Backup</h2>
+    </div></details>
+    <details class="panel group" id="g-backup">
+      <summary>{{ icon('database') }}<span>Backup</span><span class="sum">{{ 'daily at ' ~ s.backup.time if s.backup.folder else 'off' }}</span></summary>
+    <div>
     <p class="hint" style="margin-top:0">Daily copy of the database, settings and photos to a folder: external drive, network share or a Drive / OneDrive / Dropbox folder.
       Move to another computer with <code>restore</code> from that folder.
       {% if backup.at %}<br>Last backup {{ backup.at|replace('T', ' ')|truncate(19, True, '') }}:
@@ -461,8 +597,10 @@
       {{ check('backup', 'include_photos', 'Include camera pictures', 'Database and reference photos are always included') }}
       <button class="btn-sm" formaction="{{ url_for('backup_now') }}" formnovalidate>{{ icon('database') }}Back up now</button>
     </div>
-    <hr>
-    <h2 class="row">{{ icon('download') }}Updates</h2>
+    </div></details>
+    <details class="panel group" id="g-updates">
+      <summary>{{ icon('download') }}<span>Updates</span><span class="sum">{{ 'automatic' if s.updates.enabled else 'off' }}</span></summary>
+    <div>
     <p class="hint" style="margin-top:0">Version {{ version }}.
       {% if update.checked_at %}Checked {{ update.checked_at|replace('T', ' ') }}{% if update.latest %} · newest {{ update.latest }}{% endif %}.{% endif %}
       {% if update.state %}<b>{{ update.state }}.</b>{% endif %}
@@ -493,8 +631,10 @@
     <input type="hidden" name="updates.enabled" value="{{ 'on' if s.updates.enabled }}">
     <p class="hint">This copy runs from source; automatic updates are part of the installed program.</p>
     {% endif %}
-    <hr>
-    <h2 class="row">{{ icon('archive') }}Configuration file</h2>
+    </div></details>
+    <details class="panel group" id="g-configuration-file">
+      <summary>{{ icon('archive') }}<span>Configuration file</span></summary>
+    <div>
     <p class="hint" style="margin-top:0">Set up another computer the same way: config.yaml and everything on this page, including the detection area.
       People, photos and attendance are not included (use a backup or the seed import). Importing keeps this computer's data folder and page address,
       saves the current configuration first and restarts the program.</p>
@@ -508,10 +648,13 @@
       <button class="btn-sm" formaction="{{ url_for('import_config') }}" formenctype="multipart/form-data" formnovalidate
               onclick="return confirm('Replace the configuration of this computer with this file?')">{{ icon('upload') }}Import</button>
     </div>
+    </div></details>
   </section>
 
-  <section class="card tab" id="hr">
-    <h2 class="row">{{ icon('hr') }}HR system</h2>
+  <section class="tab groups" id="hr">
+    <details class="panel group" id="g-hr-system">
+      <summary>{{ icon('hr') }}<span>HR system</span></summary>
+    <div>
     <label class="field">Base Timeoff token (V2)<input name="base_api_key" type="password" autocomplete="off"
       placeholder="{{ 'saved · leave empty to keep' if s['']['base_api_key'] else 'none' }}">{{ src('base_api_key') }}
       <span class="hint">Requires Timeoff read scope. Save settings, then Load now to check. Keep API address below empty when using Base.</span></label>
@@ -528,7 +671,10 @@
         {% else %}Not connected{% endif %}</span>
       {% if leave.enabled %}<button formaction="{{ url_for('leave_sync') }}">{{ icon('refresh') }}Load now</button>{% endif %}
     </div>
-    <h3 style="margin:22px 0 8px">Camera API · Late fines</h3>
+    </div></details>
+    <details class="panel group" id="g-camera-api-late-fines">
+      <summary><span>Camera API · Late fines</span><span class="sum">{{ 'on' if s.camera_api.url else 'off' }}</span></summary>
+    <div>
     <p class="hint">Reports selected late arrivals and not seen employees using the same attendance and Base leave rules as Today.
       Missing reports are skipped on days without camera data.
       Creates fines on the server. Automatic sending stops outside the selected schedule; weekends are excluded.
@@ -572,7 +718,10 @@
     {% if camera_api_status %}<p class="hint">{{ camera_api_status.at }} ·
       {{ 'OK' if camera_api_status.ok else 'Needs attention' }} · {{ camera_api_status.message }}</p>{% endif %}
     <p class="hint">Rejected events are listed in Audit. Correct their data to retry. Successful fines cannot be undone here; cancel them on the server.</p>
-    <h3 style="margin:22px 0 8px">Remind approvers</h3>
+    </div></details>
+    <details class="panel group" id="g-remind-approvers">
+      <summary><span>Remind approvers</span><span class="sum">{{ 'on · ' ~ s.pending_reminder.time if s.pending_reminder.enabled else 'off' }}</span></summary>
+    <div>
     <p class="hint" style="margin:0 0 8px">Once a day, Google Chat names the people who still have to approve Base requests (needs the Base token above).</p>
     <div class="stack">
       {{ check('pending_reminder', 'enabled', 'Remind the approvers of pending requests', 'Off: no reminder at all, and no button on the Today page') }}
@@ -587,6 +736,7 @@
       {% for id, label in base_kinds.items() %}<label><input type="checkbox" name="pending_reminder.kinds" value="{{ id }}" {{ 'checked' if id in s.pending_reminder.kinds.split(',') }}><span>{{ label }}</span></label>{% endfor %}
     </div>
     {{ src('pending_reminder.kinds') }}
+    </div></details>
   </section>
 
   <section class="card tab" id="recognition">
@@ -680,12 +830,39 @@
   showCameraApiMode();
 
   // A field with a wrong value may sit on a hidden tab: open that tab so the browser can point at it.
-  document.getElementById('settings').addEventListener('invalid', e => showTab(e.target.closest('.tab').id), true);
+  document.getElementById('settings').addEventListener('invalid', e => {
+    showTab(e.target.closest('.tab').id);
+    for (let g = e.target.closest('details'); g; g = g.parentElement.closest('details')) g.open = true;
+  }, true);
+
+  // Each tab is a short list of groups; the ones opened stay open on this computer.
+  const OPEN_KEY = 'settings-open-groups';
+  let opened = [];
+  try { opened = JSON.parse(localStorage.getItem(OPEN_KEY) || '[]'); } catch (e) {}
+  document.querySelectorAll('details.group').forEach(g => {
+    if (opened.includes(g.id)) g.open = true;
+    g.addEventListener('toggle', () => {
+      opened = [...document.querySelectorAll('details.group[open]')].map(d => d.id);
+      try { localStorage.setItem(OPEN_KEY, JSON.stringify(opened)); } catch (e) {}
+    });
+  });
   document.getElementById('settings').addEventListener('input', event => {
     if (event.target.form !== event.currentTarget || !event.target.name) return;
     document.getElementById('dirty').textContent = 'Unsaved changes';
     document.querySelector('.savebar').classList.add('dirty');
   });
+
+  // Only the settings of the voices chosen for Vietnamese and English are shown; the others stay in the form.
+  const engineVi = document.getElementById('engine-vi'), engineEn = document.getElementById('engine-en');
+  function showEngines() {
+    document.querySelectorAll('.engine-box').forEach(box => {
+      box.hidden = ![engineVi.value, engineEn.value].includes(box.dataset.engine);
+    });
+    document.getElementById('cloud-account-field').hidden = engineVi.value !== 'elevenlabs';
+  }
+  engineVi.addEventListener('change', showEngines);
+  engineEn.addEventListener('change', showEngines);
+  showEngines();
 
   const textForm = document.getElementById('voice-text-test');
   const textButton = document.getElementById('voice-text-button');
@@ -696,7 +873,16 @@
     event.preventDefault();
     if (textButton.disabled) return;
     const data = new FormData(textForm);
-    data.set('voice', document.querySelector('[name="greeting.zerotts_voice"]').value);
+    const engine = document.querySelector('[name="greeting.engine"]').value;
+    if (engine === 'macos') { textStatus.textContent = 'A macOS voice cannot be heard in this browser. Use “Say a test greeting” at the office.'; return; }
+    if (engine === 'elevenlabs') {  // the values on the page now, saved or not; the key itself is the saved one
+      const value = name => document.querySelector(`[name="greeting.elevenlabs_${name}"]`).value.trim();
+      const account = document.getElementById('cloud-account').value;
+      const voice = value('voice' + (account === '1' ? '' : account)) || value('voice');
+      if (!voice) { textStatus.textContent = 'Enter the ElevenLabs voice ID first.'; return; }
+      for (const [key, item] of Object.entries({voice: 'elevenlabs', cloud_account: account, cloud_voice: voice, cloud_model: value('model'),
+        cloud_prefix: value('prefix'), cloud_stability: value('stability'), cloud_speed: value('speed')})) data.set(key, item);
+    } else data.set('voice', document.querySelector('[name="greeting.zerotts_voice"]').value);
     textButton.disabled = true;
     textStatus.textContent = 'Generating audio… Waiting for the camera computer; this may take up to two minutes.';
     try {

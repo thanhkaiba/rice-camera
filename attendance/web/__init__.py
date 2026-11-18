@@ -26,7 +26,9 @@ MAX_UPLOAD_MB = 50
 # What the office Mac still shows once the server is in charge: only what needs to be next to the camera.
 AT_THE_CAMERA = {"live_page", "live_jpg", "live_full_jpg", "live_json", "models_json", "camera_check", "set_area", "preview",
                  "enrol_start", "capture", "capture_page", "capture_add", "status_page", "media", "static"}
-PUBLIC = {"personal_page", "personal_note", "static", "late_photo"}  # late_photo is guarded by its token
+PUBLIC = {"personal_page", "personal_note", "static", "late_photo",  # late_photo is guarded by its token
+          # the fine notice's pages: guarded by the day's token and their opening hours (web/fines.py)
+          "fines_page", "fines_appeal", "fines_photo", "fines_review", "fines_decide", "fines_review_photo"}
 # What the read-only login may open; it may never send a form.
 VIEWER_PAGES = {"index", "evidence_page", "evidence_zip", "unknowns", "report", "accuracy", "audit",
                 "report_summary_csv", "report_details_csv", "media", "models_json"}
@@ -249,6 +251,7 @@ def create_app(core: "App") -> "Flask":
     from . import attendance as attendance_routes
     from . import capture as capture_routes
     from . import employees as employees_routes
+    from . import fines as fines_routes
     from . import leave as leave_routes
     from . import personal as personal_routes
     from . import reports as reports_routes
@@ -258,6 +261,7 @@ def create_app(core: "App") -> "Flask":
     attendance_routes.register(app, core)
     capture_routes.register(app, core)
     employees_routes.register(app, core)
+    fines_routes.register(app, core)
     leave_routes.register(app, core)
     personal_routes.register(app, core)
     reports_routes.register(app, core)

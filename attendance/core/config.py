@@ -232,6 +232,33 @@ class LateMessageConfig:
     # The one picture behind the cards, chosen on the Settings page (see latephoto.backgrounds);
     # empty: automatic, a different one each day and holiday pictures around holidays.
     background: str = ""
+    # The Google Chat space the message is posted in through the Chat API (the ID, e.g. AAAAabc123, or
+    # spaces/AAAAabc123), when it is not the notifications space. The signed-in account must be a member.
+    # Empty, or when the Chat API is not signed in: the notifications space.
+    space: str = ""
+
+    def space_name(self) -> str:
+        """"spaces/ID" for the Chat API, or "" for the notifications space."""
+        return f"spaces/{self.space}" if self.space else ""
+
+
+@dataclass
+class FineNoticeConfig:
+    """The morning's "cold fine" notice: one Google Chat message at `send_at` with the picture of the
+    late people and a link to a public page (see core/fines.py) that lists who is fined, where they
+    can appeal until `appeal_until`; approvers decide on their own page until `review_until`.
+    When on, it takes the place of the automatic late message."""
+    enabled: bool = False
+    send_at: str = "09:50"
+    list_until: str = "10:00"  # arrivals up to here move people on the list; later it stays as it is
+    appeal_until: str = "10:10"  # the public page closes
+    review_until: str = "10:14"  # the approvers' page closes; an appeal nobody decided stays a fine
+    approvers: str = ""  # employee ids, comma separated: who may decide (they pick their name on the page)
+    # Webhook of the Google Chat space of the approvers: each appeal is announced there with the review link.
+    approver_webhook_url: str = field(default="", repr=False)
+
+    def clocks(self) -> tuple[dt.time, dt.time, dt.time, dt.time]:
+        return tuple(parse_clock(v) for v in (self.send_at, self.list_until, self.appeal_until, self.review_until))
 
 
 @dataclass
@@ -309,7 +336,7 @@ class GreetingConfig:
     enabled: bool = False
     key: str = field(default="", repr=False)  # Claude API key; empty: plain built-in greetings
     model: str = "claude-opus-5-5"
-    engine: str = "macos"  # Vietnamese speech: macos or zerotts
+    engine: str = "macos"  # Vietnamese speech: macos, zerotts or elevenlabs
     # English speech: macos (voice_en), or zerotts with the same ZeroTTS voice as Vietnamese. ZeroTTS is
     # built for Vietnamese: it reads English with a Vietnamese accent, in one voice for both languages.
     engine_en: str = "macos"
@@ -318,9 +345,42 @@ class GreetingConfig:
     voice: str = "Linh"  # a macOS voice that speaks Vietnamese
     voice_en: str = "Samantha"  # the macOS voice for people greeted in English
     rate: int = 180  # words per minute
+    # ZeroTTS only. speed: the audio is shortened after it is made, the pitch stays (1.0 = as made, 1.15 = a bit
+    # brisker). liveliness: the model's audio sampling temperature; higher moves the voice up and down more, and
+    # misreads words more often (0.8 is the model's own default).
+    # For the people in until_people only (employee ids, comma separated), on work days: after the camera hours the
+    # camera keeps looking until `until` ("HH:MM"), only to say hello to those of them who have not arrived yet
+    # today. Nothing is recorded: no arrival, no photo, no review card. Everyone else is greeted in the camera hours.
+    until: str = "12:00"
+    until_people: str = ""
+    zerotts_speed: float = 1.0
+    zerotts_liveliness: float = 0.8
+    # ElevenLabs (engine/engine_en "elevenlabs"): the sentence, with the names in it, is sent to api.elevenlabs.io
+    # and the audio comes back; every character costs credits there. When it fails (no network, no credits left)
+    # ZeroTTS reads instead. elevenlabs_prefix goes before every sentence, e.g. "[excited]" (an audio tag of v3).
+    # Up to three accounts, tried in this order: when one's key is refused or its credits are used up, the next
+    # reads. Each has its own voice ID (a voice belongs to an account); empty: the voice ID of the first.
+    elevenlabs_key: str = field(default="", repr=False)
+    elevenlabs_voice: str = ""  # the voice ID from the ElevenLabs voice library
+    elevenlabs_key2: str = field(default="", repr=False)
+    elevenlabs_voice2: str = ""
+    elevenlabs_key3: str = field(default="", repr=False)
+    elevenlabs_voice3: str = ""
+    elevenlabs_model: str = "eleven_v3"
+    elevenlabs_prefix: str = ""
+    # With Eleven v3 the voice can act. emotions: Claude puts one of elevenlabs_tags (comma separated, without the
+    # brackets) in square brackets before the part of a sentence it fits, e.g. "[surprised] Ủa, anh Minh!"; only
+    # ElevenLabs is given the tags, everything shown or read by another voice is without them.
+    elevenlabs_emotions: bool = True
+    elevenlabs_tags: str = "excited, cheerfully, surprised, laughs, playfully, warmly"
+    elevenlabs_stability: float = 0.5  # 0 = most expressive, changes most between readings; 1 = most even
+    elevenlabs_speed: float = 1.0  # 0.7 to 1.2, as ElevenLabs takes it
     style: str = ""  # extra wishes for the sentences, e.g. "mention the weather" (any language)
     location: str = ""  # the office, for the morning weather: a place ("Hà Nội") or "21.03,105.85"; empty: no weather
     unknown: bool = True  # a short hello without a name for a face the camera cannot name (at most one every 2 minutes)
+    # Jokes about how someone has arrived lately ("often late lately", "on time 6 work days in a row"): that label,
+    # never a time, is sent to Claude with the name. Off: nothing about anyone's attendance leaves the office.
+    tease: bool = True
 
 
 @dataclass
@@ -350,6 +410,7 @@ class Config:
     camera_api: CameraApiConfig = field(default_factory=CameraApiConfig)
     late_message: LateMessageConfig = field(default_factory=LateMessageConfig)
     pending_reminder: PendingReminderConfig = field(default_factory=PendingReminderConfig)
+    fine_notice: FineNoticeConfig = field(default_factory=FineNoticeConfig)
     web: WebConfig = field(default_factory=WebConfig)
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
@@ -438,11 +499,32 @@ class Config:
             raise ValueError("collect.fps must be between 0.2 and 30")
         g = self.greeting
         g.engine = g.engine.strip().lower()
-        if g.engine not in ("macos", "zerotts"):
-            raise ValueError("greeting.engine must be macos or zerotts")
+        if g.engine not in ("macos", "zerotts", "elevenlabs"):
+            raise ValueError("greeting.engine must be macos, zerotts or elevenlabs")
         g.engine_en = g.engine_en.strip().lower()
-        if g.engine_en not in ("macos", "zerotts"):
-            raise ValueError("greeting.engine_en must be macos or zerotts")
+        if g.engine_en not in ("macos", "zerotts", "elevenlabs"):
+            raise ValueError("greeting.engine_en must be macos, zerotts or elevenlabs")
+        for n in ("", "2", "3"):
+            setattr(g, f"elevenlabs_key{n}", getattr(g, f"elevenlabs_key{n}").strip())
+            voice = getattr(g, f"elevenlabs_voice{n}").strip()
+            setattr(g, f"elevenlabs_voice{n}", voice)
+            if not re.fullmatch(r"[A-Za-z0-9]{0,64}", voice):
+                raise ValueError(f"greeting.elevenlabs_voice{n} must be a voice ID (letters and numbers)")
+        g.elevenlabs_model, g.elevenlabs_prefix = g.elevenlabs_model.strip(), g.elevenlabs_prefix.strip()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", g.elevenlabs_model):
+            raise ValueError("greeting.elevenlabs_model must be a model ID such as eleven_v3")
+        if len(g.elevenlabs_prefix) > 60:
+            raise ValueError("greeting.elevenlabs_prefix must be at most 60 characters")
+        g.elevenlabs_stability, g.elevenlabs_speed = float(g.elevenlabs_stability), float(g.elevenlabs_speed)
+        tags = list(dict.fromkeys(" ".join(t.strip(" []").lower().split()) for t in str(g.elevenlabs_tags).split(",")))
+        tags = [t for t in tags if t]
+        if len(tags) > 12 or not all(re.fullmatch(r"[a-z][a-z ]{0,23}", t) for t in tags):
+            raise ValueError("greeting.elevenlabs_tags must be at most 12 English words or short phrases, comma separated")
+        g.elevenlabs_tags = ", ".join(tags)
+        if not 0.0 <= g.elevenlabs_stability <= 1.0:
+            raise ValueError("greeting.elevenlabs_stability must be between 0 and 1")
+        if not 0.7 <= g.elevenlabs_speed <= 1.2:
+            raise ValueError("greeting.elevenlabs_speed must be between 0.7 and 1.2")
         g.zerotts_voice = g.zerotts_voice.strip()
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", g.zerotts_voice):
             raise ValueError("greeting.zerotts_voice must be a voice name (letters, numbers, _, - or .)")
@@ -453,6 +535,15 @@ class Config:
         g.location = g.location.strip()[:100]
         if not 90 <= g.rate <= 360:
             raise ValueError("greeting.rate must be between 90 and 360 words per minute")
+        g.until = str(g.until or "").strip()
+        g.until_people = ",".join(dict.fromkeys(v.strip() for v in str(g.until_people).split(",") if v.strip()))
+        if g.until:
+            g.until = parse_clock(g.until).strftime("%H:%M")
+        g.zerotts_speed, g.zerotts_liveliness = round(float(g.zerotts_speed), 2), round(float(g.zerotts_liveliness), 2)
+        if not 0.8 <= g.zerotts_speed <= 1.5:
+            raise ValueError("greeting.zerotts_speed must be between 0.8 and 1.5")
+        if not 0.5 <= g.zerotts_liveliness <= 1.2:
+            raise ValueError("greeting.zerotts_liveliness must be between 0.5 and 1.2")
         lm = self.late_message
         if str(lm.send_at).strip():
             lm.send_at = parse_clock(lm.send_at).strftime("%H:%M")
@@ -462,6 +553,17 @@ class Config:
         else:
             lm.send_at = ""
         check_late_message_item(lm.item)
+        lm.space = str(lm.space).strip().removeprefix("spaces/")
+        if lm.space and not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", lm.space):
+            raise ValueError("late_message.space must be a Google Chat space ID such as AAAAabc123")
+        fn = self.fine_notice
+        fn.send_at, fn.list_until, fn.appeal_until, fn.review_until = (c.strftime("%H:%M") for c in fn.clocks())
+        if not fn.send_at < fn.list_until <= fn.appeal_until <= fn.review_until:
+            raise ValueError("fine notice times must be in order: send < list closes <= appeals close <= review closes")
+        fn.approvers = ",".join(dict.fromkeys(v.strip() for v in str(fn.approvers).split(",") if v.strip()))
+        fn.approver_webhook_url = fn.approver_webhook_url.strip()
+        if fn.approver_webhook_url and not fn.approver_webhook_url.startswith("https://"):
+            raise ValueError("the approvers' webhook must be an https address")
         if not 0 <= self.recognition.cpu_threads <= 64:
             raise ValueError("recognition.cpu_threads must be between 0 (automatic) and 64")
         a = parse_area(self.camera.area)

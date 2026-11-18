@@ -10,6 +10,7 @@ import urllib.request
 from zoneinfo import ZoneInfo
 
 from . import leave_api
+from ..core import fines
 from ..core.config import parse_clock
 from ..core.service import minutes_late
 
@@ -75,6 +76,11 @@ class CameraSync:
         send_at = api.send_at or self.cfg.schedule.window_end
         send_time = parse_clock(send_at)
         scheduled = dt.datetime.combine(now.date(), send_time, self.service.tz)
+        # While appeals against the fine notice can still be accepted, today's fines are not final:
+        # they are reported once the review page has closed.
+        review_close = fines.times(self.service, now.date()).review_close if self.cfg.fine_notice.enabled else None
+        if review_close and api.mode == 'daily':
+            scheduled = max(scheduled, review_close)
         if not api.include_late and not api.include_not_seen:
             return {'ok': True, 'message': 'Late and missing reporting are both disabled.'}
         deadline = scheduled + dt.timedelta(minutes=1)
@@ -89,6 +95,8 @@ class CameraSync:
                          if api.interval_start else self.service.window(now.date()).late_from)
                 deadline = (dt.datetime.combine(now.date(), parse_clock(api.interval_end), self.service.tz)
                             if api.interval_end else self.service.window(now.date()).end)
+                if review_close:
+                    deadline = max(deadline, review_close + dt.timedelta(seconds=max(60, 2 * api.interval_seconds)))
                 if not start <= now < deadline:
                     return {'ok': True, 'message': 'Outside the automatic interval window; use Send now for manual delivery.'}
                 elapsed = (now - start).total_seconds()
@@ -103,6 +111,10 @@ class CameraSync:
         for offset in range(api.days_back, -1, -1):
             day = today - dt.timedelta(days=offset)
             if day.weekday() >= 5 or not self.service.is_workday(day):
+                continue
+            if day == now.date() and review_close and now < review_close:
+                issues.append(f'{day}: Waiting until appeals against the fine notice are decided '
+                              f'({self.cfg.fine_notice.review_until}).')
                 continue
             # Check freshness before building a report; a concurrent refresh must not bless provisional fines.
             if self.cfg.base_api_key:
