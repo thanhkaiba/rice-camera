@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Signing in · Attendance</title>
+{% include "_app_head.html" %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head><body>
+  <main style="max-width:440px;margin:8vh auto;padding:20px">
+    <section class="card stack">
+      <div class="logo-tile lg">{{ logo('load') }}</div>
+      <p>Signing in…</p>
+      <noscript><p role="alert">Turn on JavaScript to sign in with Google, or <a href="{{ url_for('login') }}">use password login</a>.</p></noscript>
+    </section>
+  </main>
+  <form method="post" action="{{ url_for('google_login') }}" id="google-form" hidden>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="credential"><input type="hidden" name="error">
+  </form>
+  <script>
+    // Google returned "#id_token=…" (or "#error=…"): take it out of the address and history, then post it.
+    const answer = new URLSearchParams(location.hash.slice(1)), form = document.getElementById('google-form');
+    history.replaceState(null, '', location.pathname);
+    form.elements.credential.value = answer.get('id_token') || '';
+    form.elements.error.value = answer.get('id_token') ? '' : (answer.get('error') || 'no token');
+    form.submit();
+  </script>
+</body></html>

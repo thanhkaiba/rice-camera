@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import time
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -67,7 +68,7 @@ def test_identity_binding_resets_on_lifecycle_changes(core):
     assert not store._all("SELECT * FROM web_accounts WHERE employee_id = 'B'")
 
 
-def test_google_button_from_an_old_login_page_expires(portal, monkeypatch):
+def test_google_sign_in_started_long_ago_expires(portal, monkeypatch):
     from attendance.web import auth
     client, _ = portal
     nonce, token = start(client)
@@ -108,9 +109,10 @@ def csrf(client):
         return session["csrf_token"]
 
 
-def start(client):
-    """Open the login page: the nonce its Google button uses and the CSRF token of its forms."""
-    client.get("/login")
+def start(client, next="/"):
+    """Press "Sign in with Google" and come back: the nonce sent to Google and the return page's CSRF token."""
+    client.get("/auth/google", query_string={"next": next})
+    client.get("/auth/google/callback")  # Google adds "#id_token=…", which never reaches the server
     with client.session_transaction() as session:
         return session["google_login"]["nonce"], session["csrf_token"]
 
@@ -120,7 +122,7 @@ def claims_for(nonce, email="bob@example.com", subject="google-bob"):
 
 
 def google_login(client, monkeypatch, email="bob@example.com", subject="google-bob", **overrides):
-    """What the Google button does: Google gives the page an ID token (checked by auth.verify), the page posts it."""
+    """Google sends back an ID token (checked by auth.verify) and the return page posts it."""
     from attendance.web import auth
 
     nonce, token = start(client)
@@ -167,26 +169,47 @@ def test_without_a_company_domain_any_workspace_or_gmail_may_sign_in(portal, mon
     assert google_login(client.application.test_client(), monkeypatch, hd=None).status_code == 403  # no Workspace, not Gmail
 
 
+def test_google_redirect_carries_this_browsers_nonce_and_comes_back_here(portal):
+    client, core_app = portal
+    assert 'href="/auth/google?next=/report"' in client.get("/login?next=/report").get_data(as_text=True)
+    google = urlsplit(client.get("/auth/google?next=/report").location)
+    args = {k: v[0] for k, v in parse_qs(google.query).items()}
+    with client.session_transaction() as session:
+        pending = session["google_login"]
+    assert google.netloc == "accounts.google.com" and "client_secret" not in args
+    assert (args["client_id"], args["response_type"], args["hd"]) == ("client.apps.googleusercontent.com", "id_token", "example.com")
+    assert args["nonce"] == pending["nonce"] and pending["next"] == "/report"
+    assert args["redirect_uri"] == "http://localhost/auth/google/callback"
+    core_app.cfg.web.public_url = "https://localhost"  # HTTPS ends at a proxy in front of the server
+    assert "redirect_uri=https%3A%2F%2Flocalhost%2Fauth%2Fgoogle%2Fcallback" in client.get("/auth/google").location
+    page = client.get("/auth/google/callback").get_data(as_text=True)
+    assert 'action="/auth/google"' in page and "id_token" in page and "history.replaceState" in page
+
+
 def test_google_token_is_single_use_and_bound_to_this_browser(portal, monkeypatch):
     from attendance.web import auth
     client, _ = portal
-    page = client.get("/login?next=//evil.example").get_data(as_text=True)
-    with client.session_transaction() as session:
-        nonce, token = session["google_login"]["nonce"], session["csrf_token"]
-    assert "accounts.google.com/gsi/client" in page and '"client.apps.googleusercontent.com"' in page
-    assert f'nonce: "{nonce}"' in page and 'hd: "example.com"' in page
+    nonce, token = start(client, next="//evil.example")
     calls = []
     monkeypatch.setattr(auth, "verify", lambda client_id, credential: calls.append((client_id, credential)) or claims_for(nonce))
     assert client.post("/auth/google", data={"credential": "token"}).status_code == 403  # no CSRF token
-    other = client.application.test_client()  # another browser: its own login page, its own nonce
+    other = client.application.test_client()  # another browser: its own sign-in, its own nonce
     assert other.post("/auth/google", data={"credential": "token", "csrf_token": start(other)[1]}).status_code == 400
     cookie = client.get_cookie("session").value
-    form = {"credential": "token", "csrf_token": token, "next": "//evil.example"}
+    form = {"credential": "token", "csrf_token": token}
     result = client.post("/auth/google", data=form)
     assert result.status_code == 302 and result.location == "/"
     client.set_cookie("session", cookie)  # the old cookie and the same token, replayed
     assert client.post("/auth/google", data=form).status_code == 400
     assert calls == [("client.apps.googleusercontent.com", "token")] * 2
+
+
+def test_cancelled_google_sign_in_returns_to_the_login_page(portal):
+    client, _ = portal
+    _, token = start(client)
+    result = client.post("/auth/google", data={"error": "access_denied", "csrf_token": token})
+    assert result.status_code == 400 and "cancelled" in result.get_data(as_text=True)
+    assert client.get("/").status_code == 302
 
 
 def test_google_session_lifecycle_and_csrf(portal, monkeypatch):
@@ -281,7 +304,8 @@ def test_google_configuration_can_be_updated(portal, monkeypatch):
     client, core_app = portal
     google_login(client, monkeypatch, "alice@example.com", "google-alice")
     page = client.get("/settings").get_data(as_text=True)
-    assert 'name="domain"' in page and "Authorized JavaScript origins" in page and "client_secret" not in page
+    assert 'name="domain"' in page and "client_secret" not in page
+    assert "Authorized redirect URIs</b>: <code>http://localhost/auth/google/callback</code>" in page
     result = client.post("/settings/google-login", data={"enabled": "on", "client_id": "updated.apps.googleusercontent.com",
                                                          "domain": " @Company.Example ", "csrf_token": csrf(client)})
     assert result.status_code == 302

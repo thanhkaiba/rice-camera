@@ -7,17 +7,18 @@ import hmac
 import secrets
 import threading
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from flask import abort, current_app, g, redirect, render_template, request, session, url_for
 from flask.sessions import SecureCookieSessionInterface
 
-AUTH_PUBLIC = {"login", "password_login", "google_login", "logout"}
+AUTH_PUBLIC = {"login", "password_login", "google_start", "google_return", "google_login", "logout"}
 # These handlers set upload limits/streaming before reading the CSRF form field.
 DEFER_CSRF = {"import_seed", "greeting_voice_create", "greeting_voice_upload", "greeting_preview_text"}
 SESSION_SECONDS = 8 * 3600
-STATE_SECONDS = 3600  # how long a login page's Google button stays usable
+STATE_SECONDS = 600  # from "Sign in with Google" to coming back from Google
 MAX_USED_STATES = 10_000
+CALLBACK = "/auth/google/callback"
 
 
 class PortalSessionInterface(SecureCookieSessionInterface):
@@ -33,8 +34,16 @@ class GoogleLoginError(Exception):
         self.status = status
 
 
+def callback_url() -> str:
+    """Where Google sends the browser back: the address it is on, so the session cookie (and its nonce) comes
+    back too. The configured address wins for its own host, as HTTPS may end at a proxy in front of us."""
+    public = urlsplit(current_app.extensions["portal_core"].cfg.web.public_url or "")
+    base = f"{public.scheme}://{public.netloc}" if public.netloc.lower() == request.host.lower() else request.host_url
+    return base.rstrip("/") + CALLBACK
+
+
 def verify(client_id: str, credential: str) -> dict:
-    """The claims of an ID token from the Google button, checked here: Google's signature, issuer, expiry
+    """The claims of an ID token from Google, checked here: Google's signature, issuer, expiry
     and that it was issued to `client_id`. Only Google's public keys are fetched."""
     import requests
     from google.auth.exceptions import GoogleAuthError, TransportError
@@ -128,14 +137,9 @@ def register(app, core) -> None:
             request.max_content_length = 8192
 
     def login_page(message="", status=200):
-        config, google = portal_config(), None
-        if config["enabled"] and config.get("client_id"):
-            # The token Google gives this page must carry this nonce: it only signs in this browser, once.
-            nonce = secrets.token_urlsafe(32)
-            session["google_login"] = {"nonce": nonce, "expires": time.time() + STATE_SECONDS}
-            google = {"client_id": config["client_id"], "nonce": nonce, "domain": config.get("domain", "")}
-        return render_template("login.html", google=google, message=message,
-                               next=safe_next(request.values.get("next", "/"))), status
+        config = portal_config()
+        return render_template("login.html", google_enabled=config["enabled"] and bool(config.get("client_id")),
+                               message=message, next=safe_next(request.values.get("next", "/"))), status
 
     @app.get("/login")
     def login():
@@ -170,9 +174,29 @@ def register(app, core) -> None:
             used[nonce] = expires
             return True
 
+    # The whole page goes to Google and back (no popup: home-screen apps on iPhone cannot open one).
+    @app.get("/auth/google")
+    def google_start():
+        config = portal_config()
+        if not config["enabled"] or not config.get("client_id"):
+            return login_page("Google login is not configured. Use password login.", 503)
+        # The token Google returns must carry this nonce: it signs in only this browser, once.
+        nonce = secrets.token_urlsafe(32)
+        session["google_login"] = {"nonce": nonce, "expires": time.time() + STATE_SECONDS,
+                                   "next": safe_next(request.args.get("next", "/"))}
+        query = {"client_id": config["client_id"], "redirect_uri": callback_url(), "response_type": "id_token",
+                 "scope": "openid email", "nonce": nonce, "prompt": "select_account"}
+        if config.get("domain"):
+            query["hd"] = config["domain"]
+        return redirect("https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(query))
+
+    @app.get(CALLBACK)
+    def google_return():
+        """Google puts the ID token after '#', which only the page sees: it posts it to google_login."""
+        return render_template("google_return.html")
+
     @app.post("/auth/google")
     def google_login():
-        """The Google button on the login page posts the ID token it got from Google here."""
         check_csrf()
         pending = session.pop("google_login", None)
         config = portal_config()
@@ -181,6 +205,8 @@ def register(app, core) -> None:
         if (not isinstance(pending, dict) or pending.get("expires", 0) <= time.time()
                 or not used_once(pending["nonce"], pending["expires"])):
             return login_page("Google sign-in has expired. Start again.", 400)
+        if request.form.get("error"):
+            return login_page("Google sign-in was cancelled or denied. Try again.", 400)
         domain = config.get("domain", "")
         try:
             claims = verify(config["client_id"], request.form.get("credential", ""))
@@ -205,7 +231,7 @@ def register(app, core) -> None:
                                   "email": person.email.lower(), "version": account["version"], "at": time.time()}
         csrf_token()
         core.store.log(core.service.now(), person.email, "Google login", "")
-        return redirect(safe_next(request.form.get("next", "/")))
+        return redirect(pending["next"])
 
     @app.post("/logout")
     def logout():

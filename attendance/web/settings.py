@@ -23,7 +23,7 @@ from ..vision.faces import decode_image, encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
 from .edge_api import heartbeat as edge_heartbeat
 from .attendance import wants_json
-from .auth import check_csrf
+from .auth import callback_url, check_csrf
 
 if TYPE_CHECKING:
     from ..core.pipeline import App
@@ -178,7 +178,7 @@ def register(app: Flask, core: "App") -> None:
         login_config = store.web_config()
         login_google = {"enabled": login_config["enabled"], "client_id": login_config.get("client_id", ""),
                         "domain": login_config.get("domain", "offspringdigital.com"),
-                        "origin": (cfg.web.public_url or request.host_url).rstrip("/")}
+                        "callback": callback_url()}
         unavailable = names - camera_voice_names(beat) if core.photos_read_elsewhere else set()
         return render_template("settings.html", s=settings.current(cfg), cfg=cfg, leave=leave_status(core),
                                overrides=settings.overrides(cfg, store), login_google=login_google,

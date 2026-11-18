@@ -376,7 +376,7 @@
       <label class="field grow">Company domain<input name="domain" form="google-login-config" value="{{ login_google.domain }}" autocomplete="off" maxlength="253">
         <span class="hint">Only Google Workspace accounts of this domain may sign in. Empty: any verified Gmail or Workspace account.</span></label>
     </div>
-    <p class="hint">Use the OffspringInternal <b>Web Client ID</b> and ask that team to add this portal to the client's <b>Authorized JavaScript origins</b>: <code>{{ login_google.origin }}</code>. No client secret is needed. The Google button works only over HTTPS or on localhost.</p>
+    <p class="hint">Use the OffspringInternal <b>Web Client ID</b> and ask that team to add this address to the client's <b>Authorized redirect URIs</b>: <code>{{ login_google.callback }}</code>. No client secret is needed. Google accepts only HTTPS addresses, or localhost for testing.</p>
     <div class="form-row">
       <label class="switch"><input type="checkbox" name="enabled" form="google-login-config" {{ 'checked' if login_google.enabled }}><span>Enable Google login</span></label>
       <button form="google-login-config">{{ icon('check') }}Save Google login</button>
