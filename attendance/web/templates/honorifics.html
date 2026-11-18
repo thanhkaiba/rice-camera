@@ -8,9 +8,10 @@
       {% set en = people|selectattr('greet_language', 'equalto', 'en')|list|length %}{% if en %}<span class="chip">{{ icon('globe') }}<strong>{{ en }}</strong> in English</span>{% endif %}</div></div>
   <div class="actions"><a class="btn" href="{{ url_for('employees') }}">{{ icon('chevron-left') }}People</a></div>
 </div>
-<form method="post" action="{{ url_for('save_honorifics') }}" class="card">
+<form method="post" action="{{ url_for('save_honorifics') }}" class="card">{% include "_csrf.html" %}
   <p class="hint" style="margin-top:0">The greeting at the door for each person: “Chào anh Minh”, “Chào chị Lan”, by name only “Chào Minh”,
     or in English “Good morning, Minh”. Untick Greet to keep the speaker silent for them.</p>
+  <div class="table-wrap">
   <table>
     <thead><tr><th>Name</th><th>Greet</th><th>Language</th><th>Vietnamese: anh / chị</th></tr></thead>
     <tbody>
@@ -26,6 +27,7 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
   <div class="btn-group" style="margin-top:14px"><button class="primary">{{ icon('check') }}Save</button></div>
 </form>
 {% endblock %}

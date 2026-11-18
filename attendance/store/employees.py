@@ -137,7 +137,10 @@ class EmployeeStoreMixin:
         greet = person.greet if greet is None else bool(greet)
         greet_language = normalize_greet_language(greet_language) if greet_language is not None else person.greet_language
         try:
-            self._exec("UPDATE employees SET email = ?, name = ?, active = ?, chat_user = ?, exempt = ?, base_username = ?, role = ?, "
+            with self._lock, self._db:
+                if not active:
+                    self._web_keep_an_admin(employee_id)
+                self._db.execute("UPDATE employees SET email = ?, name = ?, active = ?, chat_user = ?, exempt = ?, base_username = ?, role = ?, "
                        "honorific = ?, greet = ?, greet_language = ? WHERE id = ?",
                        (email, name.strip(), int(active), chat_user,
                         int(exempt if exempt is not None else person.exempt), username, role, honorific, int(greet), greet_language, employee_id))
@@ -184,6 +187,7 @@ class EmployeeStoreMixin:
         images = [r["image"] for r in self._all("SELECT DISTINCT image FROM embeddings WHERE employee_id = ? "
                                                 "AND image IS NOT NULL", (employee_id,))]
         with self._lock, self._db:
+            self._web_keep_an_admin(employee_id)
             self._db.execute("DELETE FROM embeddings WHERE employee_id = ?", (employee_id,))
             self._db.execute("DELETE FROM employees WHERE id = ?", (employee_id,))
         return images

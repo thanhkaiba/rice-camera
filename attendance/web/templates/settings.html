@@ -45,7 +45,7 @@
   <button type="button" data-tab="recognition" title="Recognition">{{ icon('accuracy') }}<span class="lbl">Recognition</span></button>
 </nav>
 
-<form method="post" action="{{ url_for('save_settings') }}" id="settings">
+<form method="post" action="{{ url_for('save_settings') }}" id="settings">{% include "_csrf.html" %}
   <input type="hidden" name="back" value="{{ url_for('settings_page') }}">
 
   <section class="card tab" id="hours">
@@ -406,6 +406,20 @@
         <span class="hint">{% if not cfg.web.password %}Works once the admin password is set{% elif s.web.viewer_password %}Active{% else %}Empty: no read-only login{% endif %}</span></label>
       {% if s.web.viewer_password %}<label class="switch"><input type="checkbox" name="web.viewer_off"><span>Remove the read-only login</span></label>{% endif %}
     </div>
+    <hr>
+    <h2>Google login</h2>
+    <p class="hint">Every active employee can sign in with their employee email as a viewer. Change admin/viewer access on the employee's Details page. This is separate from Google Chat.</p>
+    <div class="form-row">
+      <label class="field grow">Google web client ID<input name="client_id" form="google-login-config" value="{{ login_google.client_id }}" autocomplete="off" maxlength="512" placeholder="….apps.googleusercontent.com"></label>
+      <label class="field grow">Company domain<input name="domain" form="google-login-config" value="{{ login_google.domain }}" autocomplete="off" maxlength="253">
+        <span class="hint">Only Google Workspace accounts of this domain may sign in. Empty: any verified Gmail or Workspace account.</span></label>
+    </div>
+    <p class="hint">Use the OffspringInternal <b>Web Client ID</b> and ask that team to add this address to the client's <b>Authorized redirect URIs</b>: <code>{{ login_google.callback }}</code>. No client secret is needed. Google accepts only HTTPS addresses, or localhost for testing.</p>
+    <div class="form-row">
+      <label class="switch"><input type="checkbox" name="enabled" form="google-login-config" {{ 'checked' if login_google.enabled }}><span>Enable Google login</span></label>
+      <button form="google-login-config">{{ icon('check') }}Save Google login</button>
+    </div>
+    <p class="hint">Before enabling: set an admin recovery password above and designate at least one active employee as Admin. Password login remains available.</p>
     <div class="form-row" style="margin-top:14px">
       {{ field('', 'retention_days', 'Delete camera photos after (days)', 'Reference photos are kept', type='number') }}
       {{ field('', 'late_evidence_days', 'Keep late-day photos (days)', 'Evidence if someone disputes being late', type='number') }}
@@ -622,20 +636,21 @@
     <button class="primary btn-lg">{{ icon('check') }}Save</button>
   </div>
 </form>
-<form method="post" action="{{ url_for('api_key_create') }}" id="api-key-new" hidden></form>
-{% for k in api_keys() %}<form method="post" action="{{ url_for('api_key_revoke', key_id=k.id) }}" id="api-revoke-{{ k.id }}" data-confirm="Revoke the key for {{ k.name }}? That system stops getting data at once." hidden></form>{% endfor %}
-<form method="post" action="{{ url_for('late_background') }}" enctype="multipart/form-data" id="late-bg" hidden></form>
-<form method="post" action="{{ url_for('greeting_voice_upload') }}" enctype="multipart/form-data" id="voice-upload" hidden></form>
-<form method="post" action="{{ url_for('greeting_voice_upload') }}" enctype="multipart/form-data" id="voice-file-upload" hidden></form>
-<form method="post" action="{{ url_for('greeting_preview_text') }}" id="voice-text-test" hidden></form>
-<form method="post" action="{{ url_for('greeting_voice_create') }}" enctype="multipart/form-data" id="voice-create" hidden></form>
-<form method="post" action="{{ url_for('greeting_creation_use') }}" id="voice-use" hidden><input type="hidden" name="job_id" id="voice-creation-id"></form>
-<form method="post" action="{{ url_for('choose_late_background') }}" id="late-bg-choose" hidden></form>
-<form method="post" action="{{ url_for('google_client') }}" enctype="multipart/form-data" id="google-client" hidden></form>
-<form method="post" action="{{ url_for('google_connect') }}" id="google-connect" hidden></form>
-<form method="post" action="{{ url_for('google_paste') }}" id="google-paste" hidden></form>
-<form method="post" action="{{ url_for('google_test') }}" id="google-test" hidden></form>
-<form method="post" action="{{ url_for('google_disconnect') }}" id="google-disconnect" hidden data-confirm="Sign out? The late message is then posted with the webhook, its picture as a link."></form>
+<form method="post" action="{{ url_for('save_google_login') }}" id="google-login-config" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('api_key_create') }}" id="api-key-new" hidden>{% include "_csrf.html" %}</form>
+{% for k in api_keys() %}<form method="post" action="{{ url_for('api_key_revoke', key_id=k.id) }}" id="api-revoke-{{ k.id }}" data-confirm="Revoke the key for {{ k.name }}? That system stops getting data at once." hidden>{% include "_csrf.html" %}</form>{% endfor %}
+<form method="post" action="{{ url_for('late_background') }}" enctype="multipart/form-data" id="late-bg" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('greeting_voice_upload') }}" enctype="multipart/form-data" id="voice-upload" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('greeting_voice_upload') }}" enctype="multipart/form-data" id="voice-file-upload" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('greeting_preview_text') }}" id="voice-text-test" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('greeting_voice_create') }}" enctype="multipart/form-data" id="voice-create" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('greeting_creation_use') }}" id="voice-use" hidden>{% include "_csrf.html" %}<input type="hidden" name="job_id" id="voice-creation-id"></form>
+<form method="post" action="{{ url_for('choose_late_background') }}" id="late-bg-choose" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('google_client') }}" enctype="multipart/form-data" id="google-client" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('google_connect') }}" id="google-connect" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('google_paste') }}" id="google-paste" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('google_test') }}" id="google-test" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('google_disconnect') }}" id="google-disconnect" hidden data-confirm="Sign out? The late message is then posted with the webhook, its picture as a link.">{% include "_csrf.html" %}</form>
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='voice-recorder.js', v=asset_version) }}"></script>

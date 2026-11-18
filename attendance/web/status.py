@@ -21,8 +21,9 @@ def register(app: Flask, core: "App") -> None:
 
     @app.get("/status/diagnostics.zip")
     def diagnostics_zip():
-        data = diagnostics.build(cfg, store, status=health.status(core))
-        store.log(service.now(), current_user(cfg), "download diagnostics", "")
-        name = diagnostics.file_name(service.now())
+        now = service.now()
+        data = diagnostics.build(cfg, store, status=health.status(core), now=now)
+        store.log(now, current_user(cfg), "download diagnostics", "")
+        name = diagnostics.file_name(now)
         return Response(data, mimetype="application/zip",
                         headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})

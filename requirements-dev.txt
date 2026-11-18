@@ -2,6 +2,7 @@
 numpy>=1.26
 opencv-python-headless>=4.9,<=4.11.0.86  # Keep FFmpeg; allow older wheels for macOS 12.
 Flask>=3.1  # request.max_content_length per upload (seed import)
+google-auth[requests]>=2.0
 PyYAML>=6.0
 pytest>=8.0
 tzdata; sys_platform == "win32"

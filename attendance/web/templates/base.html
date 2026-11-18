@@ -4,12 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
+<meta name="csrf-token" content="{{ csrf_token() }}">
 <title>{% block title %}{{ title ~ ' · ' if title }}Attendance{% endblock %}</title>
 <script>
   // Apply the saved theme before the page paints, so it does not flash.
   try { const t = localStorage.getItem('theme'); document.documentElement.dataset.theme =
     t || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) {}
 </script>
+{% include "_app_head.html" %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap">
@@ -19,7 +21,7 @@
 <body class="{{ 'viewer' if role == 'viewer' or (shadow_site and nav != 'settings_page') }}{{ ' readonly' if shadow_site }}" data-camera-check-url="{{ url_for('camera_check') }}" data-models-url="{{ url_for('models_json') }}">
 {% set reports = nav in ('report', 'accuracy', 'audit') %}
 <header class="topbar"><div class="topbar-inner">
-  <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark"></span>Attendance</a>
+  <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">{{ logo() }}</span>Attendance</a>
   <nav class="nav">
     {% if not following %}<a href="{{ url_for('index') }}" class="{{ 'on' if nav == 'index' }}">{{ icon('today', 'i') }}Today</a>
     {% if pending or nav == 'unknowns' %}
@@ -31,6 +33,10 @@
     {% if role != 'viewer' %}<a href="{{ url_for('status_page') }}" class="{{ 'on' if nav == 'status_page' }}">{{ icon('activity', 'i') }}Status</a>{% endif %}
   </nav>
   <div class="topbar-actions">
+    {% if portal_identity %}
+    <span class="hint account-email" title="Signed in as {{ portal_identity.user }}">{{ portal_identity.user }}</span>
+    <form method="post" action="{{ url_for('logout') }}" class="logout-form" style="margin:0">{% include "_csrf.html" %}<button class="btn-sm">Sign out</button></form>
+    {% endif %}
     {% if role == 'viewer' %}<span class="badge info" title="This login can look but not change anything">{{ icon('eye') }}Read-only</span>{% endif %}
     <button class="icon-link" id="theme-toggle" type="button" aria-label="Switch light/dark theme" title="Light / dark"><span class="only-light">{{ icon('moon') }}</span><span class="only-dark">{{ icon('sun') }}</span></button>
     {% if role != 'viewer' and not following %}<a href="{{ url_for('settings_page') }}" class="icon-link {{ 'on' if nav in ('settings_page', 'setup_page') }}"
@@ -62,7 +68,7 @@
     <button class="close" type="button" aria-label="Hide for a day" title="Hide for a day">{{ icon('close') }}</button></div>
   {% endfor %}{% endif %}
   {% if models_status %}
-  <div class="alert warn" id="models-status"><span class="spin"></span><span>{{ models_status }} · faces are recognised once done; everything else already works.</span></div>
+  <div class="alert warn" id="models-status"><span class="logo-tile sm">{{ logo('load') }}</span><span>{{ models_status }} · faces are recognised once done; everything else already works.</span></div>
   {% endif %}
   {% if reports %}
   <nav class="seg icons">
@@ -71,7 +77,7 @@
     <a href="{{ url_for('audit') }}" class="{{ 'on' if nav == 'audit' }}" title="Change log">{{ icon('log') }}<span class="lbl">Change log</span></a>
   </nav>
   {% endif %}
-  {% if shadow_site and nav != 'personal_page' %}<div class="alert info"><span class="ico">{{ icon('eye') }}</span><span>This site only mirrors the office computer for now. Make changes at {{ office.url }}, from the office network.</span></div>{% endif %}
+  {% if shadow_site and nav != 'personal_page' %}<div class="alert info"><span class="ico">{{ icon('eye') }}</span><span>This site only mirrors attendance from the office computer for now. {% if role == 'admin' %}Portal access can be managed here; make other changes at {{ office.url }}, from the office network.{% else %}Attendance changes are made on the office computer.{% endif %}</span></div>{% endif %}
   {% block body %}{% endblock %}
 </main>
 <script>

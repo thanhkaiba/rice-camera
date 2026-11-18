@@ -27,7 +27,7 @@
   <div class="card">
     <h1 class="row">{{ icon('camera') }}Connect the camera</h1>
     <p class="subtitle">Paste the RTSP address; a picture from the camera appears below when it works.</p>
-    <form method="post" action="{{ url_for('setup_save') }}" class="wstack">
+    <form method="post" action="{{ url_for('setup_save') }}" class="wstack">{% include "_csrf.html" %}
       <input type="hidden" name="back" value="{{ url_for('setup_page', step='hours') }}">
       {% if office %}<p class="hint">The camera address is set on the office computer: {{ office.url }}, from {{ office.network }}.</p>{% else %}
       <label class="field">Camera address (RTSP)
@@ -52,7 +52,7 @@
   <div class="card">
     <h1 class="row">{{ icon('clock') }}Working hours</h1>
     <p class="subtitle">When the camera watches, and from when someone is late. 24-hour clock.</p>
-    <form method="post" action="{{ url_for('setup_save') }}" class="wstack">
+    <form method="post" action="{{ url_for('setup_save') }}" class="wstack">{% include "_csrf.html" %}
       <input type="hidden" name="back" value="{{ url_for('setup_page', step='chat') }}">
       <input type="hidden" name="schedule.days_shown" value="1">
       <div class="timeline">
@@ -79,7 +79,7 @@
   <div class="card">
     <h1 class="row">{{ icon('chat') }}Google Chat</h1>
     <p class="subtitle">Late arrivals, the not-seen list, the daily summary and camera problems go to a space.</p>
-    <form method="post" action="{{ url_for('setup_save') }}" class="wstack">
+    <form method="post" action="{{ url_for('setup_save') }}" class="wstack">{% include "_csrf.html" %}
       <label class="field">Webhook URL
         <input name="google_chat.webhook_url" value="{{ cfg.google_chat.webhook_url }}" placeholder="https://chat.googleapis.com/v1/spaces/…" required autocomplete="off">
         <span class="hint">Space name → Apps &amp; integrations → Webhooks → Add webhook. Needs Google Workspace; if Webhooks is missing, ask the admin to allow incoming webhooks.</span></label>
@@ -117,7 +117,7 @@
       {% call item(s.chat) %}<a class="small" href="{{ url_for('setup_page', step='chat') }}">{{ 'Change' if s.chat.done else 'Set up' }}</a>{% endcall %}
       {% call item(s.password) %}
         {% if not s.password.done %}
-        <form method="post" action="{{ url_for('setup_save') }}" class="form-row" style="margin-top:8px">
+        <form method="post" action="{{ url_for('setup_save') }}" class="form-row" style="margin-top:8px">{% include "_csrf.html" %}
           <input type="hidden" name="back" value="{{ url_for('setup_page', step='done') }}">
           <input name="web.password" type="password" autocomplete="new-password" required minlength="6" placeholder="New password (user: {{ cfg.web.username }})">
           <button class="primary">{{ icon('key') }}Save</button>
@@ -126,7 +126,7 @@
       {% endcall %}
       {% call item(s.address) %}
         {% if not s.address.done %}
-        <form method="post" action="{{ url_for('setup_save') }}" class="form-row" style="margin-top:8px">
+        <form method="post" action="{{ url_for('setup_save') }}" class="form-row" style="margin-top:8px">{% include "_csrf.html" %}
           <input type="hidden" name="back" value="{{ url_for('setup_page', step='done') }}">
           <input name="web.public_url" value="{{ suggested_url }}" required style="flex:1 1 220px">
           <button class="primary">{{ icon('globe') }}Use this</button>
@@ -137,7 +137,7 @@
         <div class="btn-group" style="margin-top:8px">
           <a class="btn btn-sm" href="{{ url_for('employees') }}">{{ icon('user-plus') }}Add or import</a>
           {% if not s.employees.done %}
-          <form method="post" action="{{ url_for('setup_action', action='skip-employees') }}"><button class="btn-sm">{{ icon('camera') }}Let the camera collect faces</button></form>
+          <form method="post" action="{{ url_for('setup_action', action='skip-employees') }}">{% include "_csrf.html" %}<button class="btn-sm">{{ icon('camera') }}Let the camera collect faces</button></form>
           {% endif %}
         </div>
       {% endcall %}
@@ -147,7 +147,7 @@
     </div>
 
     <div class="wactions">
-      {% if left %}<form method="post" action="{{ url_for('setup_action', action='later') }}"><button class="ghost">Finish later</button></form>{% else %}<span></span>{% endif %}
+      {% if left %}<form method="post" action="{{ url_for('setup_action', action='later') }}">{% include "_csrf.html" %}<button class="ghost">Finish later</button></form>{% else %}<span></span>{% endif %}
       <a class="btn primary" href="{{ url_for('index') }}">{{ icon('today') }}Today {{ icon('chevron-right') }}</a>
     </div>
   </div>

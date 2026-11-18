@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 from flask import abort, render_template_string, request
 
 from .core import config as config_module
+from .core import settings as settings_module
 from .core.config import Config
 from .core.pipeline import App, _leave_sync_loop
 from .web import PUBLIC, create_app
@@ -85,7 +86,8 @@ def _mute(app: App) -> None:
 
     app.chat.send = muted
     app.chat.kick = lambda now: None  # nor does anything already queued go out
-    app.camera_sync.sync = lambda: None  # late arrivals reported there become fines
+    # Late arrivals reported there become fines; same signature as CameraSync.sync, which the leave loop calls.
+    app.camera_sync.sync = lambda auto=False: {"ok": False, "message": "Shadow mode: nothing is sent to the Camera API."}
 
 
 def _camera_is_at_the_office(application, office_url: str) -> None:
@@ -118,6 +120,7 @@ def build(home: Path, admin_password: str, token_sha256: str, *, admin_user: str
     core = App(cfg, now=now)
     # After App(): saved Settings must not replace the login the server was started with.
     cfg.web.password = admin_password
+    setattr(cfg, settings_module.PINNED_PASSWORD, admin_password)  # Settings, reset and import keep it
     cfg.web.username = admin_user or cfg.web.username
     cfg.web.public_url = public_url or cfg.web.public_url
     if shadow:
@@ -135,7 +138,7 @@ def build(home: Path, admin_password: str, token_sha256: str, *, admin_user: str
     if shadow:
         edge_import.register(application, core)
 
-    writable = edge_api.ENDPOINTS | edge_import.ENDPOINTS
+    writable = edge_api.ENDPOINTS | edge_import.ENDPOINTS | {"password_login", "google_login", "logout", "set_portal_access"}
 
     @application.before_request
     def read_only():

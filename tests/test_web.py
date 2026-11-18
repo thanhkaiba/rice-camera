@@ -46,7 +46,23 @@ def test_password_protects_pages(core):
     c = client(app, password="s3cret")
     assert c.get("/").status_code == 401
     token = base64.b64encode(b"admin:s3cret").decode()
+    page = c.get("/settings", headers={"Accept": "text/html,*/*;q=0.8"})  # a browser goes to the login page
+    assert page.status_code == 302 and page.headers["Location"].endswith("/login?next=/settings")
     assert c.get("/", headers={"Authorization": f"Basic {token}"}).status_code == 200
+
+
+def test_installable_app_files_load_before_signing_in(core):
+    app, _, _ = core
+    c = client(app, password="s3cret")
+    page = c.get("/login").get_data(as_text=True)
+    assert 'rel="manifest"' in page and 'rel="apple-touch-icon"' in page
+    manifest = c.get("/static/manifest.webmanifest")
+    assert manifest.status_code == 200 and manifest.mimetype == "application/manifest+json"
+    data = manifest.get_json(force=True)
+    assert data["start_url"] == "/" and data["display"] == "standalone"
+    for size in ("192x192", "512x512"):
+        icon = next(i for i in data["icons"] if i["sizes"] == size)
+        assert c.get("/static/" + icon["src"]).data.startswith(b"\x89PNG")
 
 
 def png(image) -> bytes:

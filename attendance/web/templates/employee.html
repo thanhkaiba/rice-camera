@@ -28,12 +28,24 @@
     <a class="avatar-link" href="{{ url_for('employee', employee_id=other) }}#reference-{{ other_ref }}" title="Photo #{{ other_ref }} of {{ names.get(other, other) }}">{% if other_image %}<img class="avatar" src="{{ url_for('media', path=other_image) }}" alt="Photo #{{ other_ref }}">{% else %}<span class="avatar empty">#{{ other_ref }}</span>{% endif %}</a>{% endif %}</span></div>
 {% endfor %}
 
+<section class="card" id="portal-access" style="scroll-margin-top:130px">
+  <h2 class="row">{{ icon('shield') }}Portal access</h2>
+  <form method="post" action="{{ url_for('set_portal_access', employee_id=person.id) }}" class="form-row portal-access-form">{% include "_csrf.html" %}
+    <label class="field">Google login role<select name="portal_role">
+      <option value="viewer" {{ 'selected' if portal_role == 'viewer' }}>Viewer — read only</option>
+      <option value="admin" {{ 'selected' if portal_role == 'admin' }}>Admin — full access</option>
+    </select></label>
+    <button class="primary">{{ icon('check') }}Save portal access</button>
+  </form>
+  <p class="hint" style="margin-top:10px">Google login uses this employee's email. Inactive employees cannot sign in. Portal access is managed here even when attendance is mirrored in read-only mode.</p>
+</section>
+
 <div class="grid-2">
   <div>
     <div class="card">
       <div class="card-head"><h2 class="row">{{ icon('image') }}Reference photos</h2>
         {% if not office %}<a class="btn btn-sm" href="{{ url_for('live_page') }}" title="Take a photo with the door camera: open the camera page and use Capture faces">{{ icon('camera') }}From camera</a>{% endif %}</div>
-      <form method="post" action="{{ url_for('upload_photos', employee_id=person.id) }}" enctype="multipart/form-data" id="upload">
+      <form method="post" action="{{ url_for('upload_photos', employee_id=person.id) }}" enctype="multipart/form-data" id="upload">{% include "_csrf.html" %}
         <label id="drop" class="dropzone">
           <input type="file" name="photos" id="photos" accept="image/*" multiple required hidden>
           <div class="ico">{{ icon('upload') }}</div>
@@ -57,7 +69,7 @@
         gap over the closest colleague ≥ {{ '%.2f'|format(recognition_params.min_margin) }}.</p>
     </div>
     <form method="post" action="{{ url_for('delete_photo', employee_id=person.id) }}" id="delete-low-score-photos"
-          class="card" data-confirm="Delete reference photos below the chosen Image score? Their face data will also be removed.">
+          class="card" data-confirm="Delete reference photos below the chosen Image score? Their face data will also be removed.">{% include "_csrf.html" %}
       <div class="form-row">
         <label class="field">Delete photos with an Image score below
           <input type="number" name="below_score" id="below-score" value="20" min="0" max="100" step="1" required></label>
@@ -66,7 +78,7 @@
       <p class="hint" style="margin-bottom:0">Uses the displayed Image score out of 100. Photos at the threshold and photos without a score are kept.</p>
     </form>
     <form method="post" action="{{ url_for('delete_photo', employee_id=person.id) }}" id="bulk-delete-photos"
-          class="row" style="justify-content:space-between; margin-bottom:12px" data-confirm="Delete the selected reference photos?">
+          class="row" style="justify-content:space-between; margin-bottom:12px" data-confirm="Delete the selected reference photos?">{% include "_csrf.html" %}
       <label class="check"><input type="checkbox" id="select-all-photos">Select all photos</label>
       <button class="danger btn-sm" id="delete-selected-photos" disabled>{{ icon('trash') }}Delete selected (<span id="selected-photo-count">0</span>)</button>
     </form>
@@ -89,7 +101,7 @@
         <div class="meta">
           <span>{{ {'upload': 'Uploaded', 'enroll': 'From folder', 'admin': 'Confirmed', 'capture': 'From camera', 'enrol': 'Enrolled at the door', 'collect': 'Collected'}.get(r.source.split(':')[0], r.source) }}{% if r.quality_ok is false %} · <span title="Blurred or turned away: a weaker reference">blurred</span>{% endif %}
             <br><span title="Image clarity: face size, detection, sharpness and pose. Not recognition confidence.">{% if r.image_score is not none %}Image {{ r.image_score }}/100{% elif r.image %}Image not scored yet{% else %}Image score unavailable{% endif %}</span></span>
-          <form method="post" action="{{ url_for('delete_photo', employee_id=person.id) }}" data-confirm="Delete this photo?">
+          <form method="post" action="{{ url_for('delete_photo', employee_id=person.id) }}" data-confirm="Delete this photo?">{% include "_csrf.html" %}
             <input type="hidden" name="{{ 'image' if r.image else 'ref_id' }}" value="{{ r.image or r.id }}">
             <button title="Delete photo" aria-label="Delete photo">{{ icon('trash') }}</button>
           </form>
@@ -119,7 +131,7 @@
   <div>
     <div class="card">
       <h2 class="row">{{ icon('edit') }}Details</h2>
-      <form method="post" action="{{ url_for('update_employee', employee_id=person.id) }}" class="stack" style="margin:0">
+      <form method="post" action="{{ url_for('update_employee', employee_id=person.id) }}" class="stack" style="margin:0">{% include "_csrf.html" %}
         <label class="field">Email<input type="email" name="email" value="{{ person.email }}" required autocomplete="email"></label>
         <label class="field">Name<input name="name" value="{{ person.name }}" required></label>
         <label class="field">Role<select name="role" onchange="document.getElementById('exempt-switch').hidden = this.value === 'support'">{% for value, label in roles.items() %}<option value="{{ value }}" {{ 'selected' if person.role == value }}>{{ label }}</option>{% endfor %}</select>
@@ -135,7 +147,7 @@
         <label class="field">Google Chat user ID<input name="chat_user" value="{{ person.chat_user }}" placeholder="e.g. 112233445566778899000" autocomplete="off">
           <span class="hint">For @mentions · the number at the end of the user's page address in Google Admin.</span></label>
         <label class="switch"><input type="checkbox" name="active" {{ 'checked' if person.active }}><span>Tracked by the camera
-          <span class="hint">Untick for people who left; their data is kept.</span></span></label>
+          <span class="hint">Untick for people who left; their data is kept and Google portal access is removed.</span></span></label>
         <label class="switch" id="exempt-switch" {{ 'hidden' if person.support }}><input type="checkbox" name="exempt" {{ 'checked' if person.exempt }}><span>Never count as late or absent
           <span class="hint">Boss, part-timers, guests: arrival recorded, left out of alerts and reports.</span></span></label>
         <div class="btn-group"><button class="primary">{{ icon('check') }}Save</button>
@@ -192,7 +204,7 @@
         <div><span class="tnum">{{ l.start.strftime('%d %b') }}{% if l.end != l.start %} – {{ l.end.strftime('%d %b') }}{% endif %}
             {% if l.note %}<span class="small muted">· {{ l.note }}</span>{% endif %}</span>
           <span class="row" style="gap:6px"><span class="badge info">{{ leave_label(l.kind) }}</span>
-            {% if l.source == 'manual' %}<form method="post" action="{{ url_for('delete_leave', leave_id=l.id) }}" data-confirm="Remove this leave?">
+            {% if l.source == 'manual' %}<form method="post" action="{{ url_for('delete_leave', leave_id=l.id) }}" data-confirm="Remove this leave?">{% include "_csrf.html" %}
               <input type="hidden" name="back" value="{{ request.path }}">
               <button class="btn-sm icon ghost" title="Remove" aria-label="Remove leave">{{ icon('trash') }}</button></form>
             {% else %}<span class="badge plain" title="From the HR system; change it there">{{ icon('hr') }}HR</span>{% endif %}</span></div>
@@ -200,7 +212,7 @@
       </div>
       <details class="inline" style="margin-top:10px">
         <summary>{{ icon('plus') }} Add leave</summary>
-        <form method="post" action="{{ url_for('add_leave') }}" class="stack" style="margin:8px 0 0; gap:8px">
+        <form method="post" action="{{ url_for('add_leave') }}" class="stack" style="margin:8px 0 0; gap:8px">{% include "_csrf.html" %}
           <input type="hidden" name="employee_id" value="{{ person.id }}">
           <input type="hidden" name="back" value="{{ request.path }}">
           <div class="form-row">
@@ -225,7 +237,7 @@
         <input id="personal-link" value="{{ link }}" readonly aria-label="Personal page link" style="flex:1; min-width:0" onclick="this.select()">
         <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('personal-link').value).then(() => this.textContent = 'Copied')">{{ icon('link') }}Copy</button>
       </div>
-      <form method="post" action="{{ url_for('renew_personal_link', employee_id=person.id) }}" data-confirm="Make a new link? The current one stops working." style="margin-top:8px">
+      <form method="post" action="{{ url_for('renew_personal_link', employee_id=person.id) }}" data-confirm="Make a new link? The current one stops working." style="margin-top:8px">{% include "_csrf.html" %}
         <button class="btn-sm ghost" title="If the link was shared with the wrong person">{{ icon('refresh') }}New link</button>
       </form>
     </div>
@@ -234,7 +246,7 @@
       <summary>{{ icon('trash') }}Delete this person</summary>
       <div>
         <p class="small">Removes {{ title }}, their photos and face data. Past attendance records are kept.</p>
-        <form method="post" action="{{ url_for('delete_employee', employee_id=person.id) }}" class="stack" style="margin:0; gap:8px">
+        <form method="post" action="{{ url_for('delete_employee', employee_id=person.id) }}" class="stack" style="margin:0; gap:8px">{% include "_csrf.html" %}
           <label class="field">Type <strong>{{ person.email }}</strong> to confirm<input name="confirm" required autocomplete="off"></label>
           <div><button class="danger">{{ icon('trash') }}Delete</button></div>
         </form>

@@ -31,9 +31,10 @@ from .schema import (
     normalize_email,
 )
 from .system import SystemStoreMixin
+from .web import WebStoreMixin
 
 
-class Store(EmployeeStoreMixin, AttendanceStoreMixin, SystemStoreMixin, EdgeStoreMixin):
+class Store(EmployeeStoreMixin, AttendanceStoreMixin, SystemStoreMixin, EdgeStoreMixin, WebStoreMixin):
     def __init__(self, path: str | Path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), check_same_thread=False)

@@ -147,6 +147,14 @@ CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+-- Portal access never travels with employee rows in camera sync.
+CREATE TABLE IF NOT EXISTS web_accounts (
+    employee_id TEXT PRIMARY KEY,
+    role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('admin', 'viewer')),
+    subject TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS web_google_subject ON web_accounts(subject) WHERE subject != '';
 """
 
 # Labels for leave types sent by the HR system; other types are shown as sent.
@@ -155,6 +163,8 @@ LEAVE_KINDS = {"leave": "Leave", "business_trip": "Business trip", "remote": "Wo
 
 
 ROLE_EMPLOYEE, ROLE_SUPPORT = "employee", "support"
+PORTAL_ROLES = ("admin", "viewer")
+LAST_ADMIN_ERROR = "Cannot remove the last Google admin."
 ROLES = {ROLE_EMPLOYEE: "Employee", ROLE_SUPPORT: "Support staff"}
 # How the spoken greeting at the door addresses someone: value -> (label, the word said)
 HONORIFICS = {"anh": ("Anh (man)", "anh"), "chi": ("Chị (woman)", "chị")}
@@ -341,3 +351,17 @@ def migrate(db: sqlite3.Connection) -> None:
                          "SELECT day, employee_id, first_seen, source, score, image, "
                          "CASE WHEN source = 'camera' THEN employee_id END FROM checkins")
     db.commit()
+    db.executescript("""
+    DROP TRIGGER IF EXISTS web_last_admin_disabled;  -- the rule moved to the portal edit paths (store/web.py)
+    DROP TRIGGER IF EXISTS web_last_admin_deleted;
+    DROP TRIGGER IF EXISTS web_last_admin_demoted;
+    CREATE TRIGGER IF NOT EXISTS web_employee_changed AFTER UPDATE OF email, active ON employees
+    WHEN lower(coalesce(OLD.email, '')) != lower(coalesce(NEW.email, '')) OR OLD.active != NEW.active
+    BEGIN
+        UPDATE web_accounts SET subject = '', version = version + 1 WHERE employee_id = NEW.id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS web_employee_deleted AFTER DELETE ON employees
+    BEGIN
+        DELETE FROM web_accounts WHERE employee_id = OLD.id;
+    END;
+    """)

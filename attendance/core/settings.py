@@ -13,6 +13,7 @@ from ..store import Store
 
 KEY = "settings"
 BASELINE = "_file_settings"  # attribute on the Config: the values from config.yaml, before overrides
+PINNED_PASSWORD = "_pinned_admin_password"  # attribute on the Config: the server's CHECKIN_ADMIN_PASSWORD, never replaced
 SECRET = {"password", "viewer_password", "token", "webhook_url", "system_webhook_url", "base_api_key", "key"}  # never shown, only "set"/"empty"
 
 # section ("" = top level) -> editable fields
@@ -77,6 +78,8 @@ def apply(cfg: Config, overrides: dict) -> None:
     for section in EDITABLE:
         for name in EDITABLE[section]:
             setattr(_section(cfg, section), name, getattr(_section(trial, section), name))
+    if pinned := getattr(cfg, PINNED_PASSWORD, ""):
+        cfg.web.password = pinned
 
 
 def load(cfg: Config, store: Store) -> None:
@@ -95,8 +98,17 @@ def load(cfg: Config, store: Store) -> None:
                     pass
 
 
+def require_recovery_password(cfg: Config, store: Store, password: str) -> None:
+    """`password` is the admin password a change would leave; the server's pinned one always stays."""
+    if store.get("google_login_enabled") == "1" and not (getattr(cfg, PINNED_PASSWORD, "") or password).strip():
+        raise ValueError("Google login requires an admin recovery password.")
+
+
 def save(cfg: Config, store: Store, changes: dict) -> None:
     """Validate and apply `changes`, then persist them merged with earlier overrides."""
+    if getattr(cfg, PINNED_PASSWORD, "") and changes.get("web", {}).get("password"):
+        raise ValueError("on the server the admin password comes from CHECKIN_ADMIN_PASSWORD; change it there and restart")
+    require_recovery_password(cfg, store, str(changes.get("web", {}).get("password", cfg.web.password)))
     apply(cfg, changes)
     saved = json.loads(store.get(KEY) or "{}")
     for section, fields in changes.items():
@@ -145,6 +157,8 @@ def reset(cfg: Config, store: Store, key: str) -> None:
     file_values = getattr(cfg, BASELINE, None)
     if section not in EDITABLE or name not in EDITABLE[section] or file_values is None:
         raise ValueError(f"unknown setting {key!r}")
+    if key == "web.password":
+        require_recovery_password(cfg, store, file_values[section][name])
     saved = json.loads(store.get(KEY) or "{}")
     saved.get(section, {}).pop(name, None)
     apply(cfg, {section: {name: file_values[section][name]}})

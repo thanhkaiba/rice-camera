@@ -11,6 +11,7 @@ from flask import Flask, abort, flash, jsonify, redirect, render_template, reque
 
 from ..store.schema import GREET_LANGUAGES, HONORIFICS, ROLE_EMPLOYEE, ROLES
 from . import current_user, done, failed, leave_status
+from .auth import check_csrf
 
 if TYPE_CHECKING:
     from ..core.pipeline import App
@@ -51,7 +52,7 @@ def register(app: Flask, core: "App") -> None:
         return render_template("employees.html", roles=ROLES, people=people, counts=counts, thumbs=thumbs, image_scores=image_scores,
                                look_alikes=quality_report["look_alikes"], names=names, quality=library.quality(),
                                good_photos=GOOD_PHOTOS, photo_scores=scores, recognition=recognition,
-                               quality_report=quality_report,
+                               quality_report=quality_report, portal_roles=store.web_roles(),
                                on_leave={**permissions(store, service.now().date())[1],
                                          **store.leaves_on(service.now().date())},
                                seed_status=seed.read_status(core), in_window=service.in_window(service.now()))
@@ -112,6 +113,7 @@ def register(app: Flask, core: "App") -> None:
         from ..cli import seed
 
         request.max_content_length = SEED_UPLOAD_MB * 1024 * 1024  # a seed is bigger than a few photos
+        check_csrf()
         file = request.files.get("file")
         if not file or not file.filename:
             return failed("Choose the seed .zip file.", "employees")
@@ -174,7 +176,8 @@ def register(app: Flask, core: "App") -> None:
                                leaves=store.leaves(employee_id=employee_id, ending_after=today),
                                timeoff_requests=timeoff_requests, timeoff_synced=timeoff_snapshot is not None,
                                timeoff_day=today, timeoff_status=leave_status(core),
-                               base_enabled=bool(cfg.base_api_key), base_upcoming=base_upcoming)
+                               base_enabled=bool(cfg.base_api_key), base_upcoming=base_upcoming,
+                               portal_role=store.web_role(employee_id))
 
     @app.get("/employees/honorifics")
     def honorifics_page():
@@ -216,6 +219,18 @@ def register(app: Flask, core: "App") -> None:
                   f"active={request.form.get('active') == 'on'} exempt={request.form.get('exempt') == 'on'} "
                   f"role={store.employee(employee_id).role}")
         return done("Saved.", "employee", employee_id=employee_id)
+
+    @app.post("/employees/<employee_id>/portal-access")
+    def set_portal_access(employee_id: str):
+        person = store.employee(employee_id) or abort(404)
+        before = store.web_role(employee_id)
+        access = request.form.get("portal_role", "")
+        try:
+            store.web_set_role(employee_id, access)
+        except ValueError as exc:
+            return failed(str(exc), "employee", employee_id=employee_id, _anchor="portal-access")
+        store.log(service.now(), current_user(cfg), "change portal access", f"{person.email}: {before} -> {access}")
+        return done("Portal access saved.", "employee", employee_id=employee_id, _anchor="portal-access")
 
     @app.post("/employees/<employee_id>/test-mention")
     def test_mention(employee_id: str):
@@ -344,6 +359,9 @@ def register(app: Flask, core: "App") -> None:
         person = store.employee(employee_id) or abort(404)
         if not person.email or request.form.get("confirm", "").strip().lower() != person.email:
             return failed("Type the employee email to confirm.", "employee", employee_id=employee_id)
-        library.delete_employee(employee_id)
+        try:
+            library.delete_employee(employee_id)
+        except ValueError as exc:
+            return failed(str(exc), "employee", employee_id=employee_id)
         store.log(service.now(), current_user(cfg), "delete employee", f"{person.email} {person.name}")
         return done(f"{person.name} and their face data were deleted.", "employees")
