@@ -262,3 +262,98 @@ def test_plugged_in_but_not_charging_is_critical_after_a_few_minutes(core):
     readings[0] = Power(on_ac=True, battery=31, charging=True, adapter_w=96, speed_limit=100)
     w.check(t=machine.NOT_CHARGING_FOR_S + 30)
     assert sent[-1] == "✅ The attendance computer is charging again."
+
+
+# --- speaker watch ---------------------------------------------------------------------------------
+
+def speaker_watch(core, state, failed=lambda: None):
+    app, clock, sent = core
+    app.cfg.greeting.enabled, app.cfg.greeting.speaker, app.cfg.greeting.speaker_min_volume = True, "External Headphones", 30
+    w = MachineWatch(app.cfg, app.store, lambda text: sent.append(text), clock, read=lambda: None,
+                     found=lambda: FOUND, read_speaker=lambda: state[0], speak_failed=failed)
+    return w, sent
+
+
+def speaker_reading(device="External Headphones", volume=100, muted=False):
+    return {"device": device, "devices": sorted({device, "MacBook Pro Speakers"}), "volume": volume, "muted": muted}
+
+
+def test_speaker_parsers():
+    from attendance.core import speaker
+    text = ('{"SPAudioDataType":[{"_items":[{"_name":"External Headphones","coreaudio_default_audio_output_device":"spaudio_yes",'
+            '"coreaudio_device_output":2},{"_name":"MacBook Pro Microphone","coreaudio_device_input":1},'
+            '{"_name":"MacBook Pro Speakers","coreaudio_device_output":2}]}]}')
+    assert speaker.parse_devices(text) == ("External Headphones", ["External Headphones", "MacBook Pro Speakers"])
+    assert speaker.parse_devices("not json") == (None, [])
+    assert speaker.parse_volume("output volume:95, input volume:50, alert volume:100, output muted:false") == (95, False)
+    assert speaker.parse_volume("output volume:0, output muted:true") == (0, True)
+
+
+def test_speaker_unplugged_told_once_then_recovery_then_again(core):
+    state = [speaker_reading()]
+    w, sent = speaker_watch(core, state)
+    w.check(t=1000)
+    assert sent == []
+    state[0] = speaker_reading("MacBook Pro Speakers")
+    state[0]["devices"] = ["MacBook Pro Speakers"]
+    w.check(t=1100)  # the last reading is used until the next one is due
+    assert sent == []
+    w.check(t=1700)
+    w.check(t=2400)
+    assert len(sent) == 1 and "not playing on External Headphones" in sent[0] and "check its plug" in sent[0]
+    state[0] = speaker_reading()
+    w.check(t=3100)
+    assert sent[-1].startswith("✅") and len(sent) == 2
+    state[0] = speaker_reading("MacBook Pro Speakers")
+    state[0]["devices"] = ["External Headphones", "MacBook Pro Speakers"]
+    w.check(t=3800)  # wrong again within hours: told at once, not after ALERT_EVERY_S
+    assert len(sent) == 3 and "Choose External Headphones" in sent[-1]
+
+
+def test_speaker_muted_low_volume_and_failed_greeting(core):
+    state = [speaker_reading(muted=True, volume=10)]
+    failed = [None]
+    w, sent = speaker_watch(core, state, lambda: failed[0])
+    w.check(t=1000)
+    assert len(sent) == 1 and "muted" in sent[0]
+    state[0] = speaker_reading(volume=10)
+    w.check(t=1700)
+    assert any("volume is at 10%" in s for s in sent)
+    failed[0] = "09:01 could not speak: PortAudioError: no device"
+    w.check(t=1720)
+    assert any("could not be played" in s and "PortAudioError" in s for s in sent)
+
+
+def test_speaker_not_watched_with_greetings_off_or_no_name(core):
+    state = [speaker_reading("MacBook Pro Speakers", volume=5)]
+    w, sent = speaker_watch(core, state)
+    core[0].cfg.greeting.speaker, core[0].cfg.greeting.speaker_min_volume = "", 0
+    w.check(t=1000)
+    assert sent == []
+    core[0].cfg.greeting.speaker = "External Headphones"
+    core[0].cfg.greeting.enabled = False
+    w.check(t=2000)
+    assert sent == []
+
+
+def test_speaker_test_reports_what_it_played_on(monkeypatch):
+    from attendance.core import speaker
+    monkeypatch.setattr(speaker.sys, "platform", "darwin")
+    monkeypatch.setattr(speaker, "read", lambda: speaker_reading("MacBook Pro Speakers", volume=95))
+    played = []
+    ok = speaker.test("", 30, play=lambda: played.append(1))
+    assert ok["ok"] and played == [1] and "MacBook Pro Speakers · volume 95% · not muted" in ok["message"]
+    wrong = speaker.test("External Headphones", 30, play=lambda: None)
+    assert not wrong["ok"] and "not playing on External Headphones" in wrong["message"]
+
+    def broken():
+        raise OSError("no output")
+    assert not speaker.test("", 0, play=broken)["ok"]
+
+
+def test_speaker_test_button_asks_the_office_computer(core):
+    from attendance.web import create_app
+    app, _, _ = core
+    client = create_app(app).test_client()
+    page = client.get("/settings").get_data(as_text=True)
+    assert 'name="greeting.speaker"' in page and "Test the speaker" in page

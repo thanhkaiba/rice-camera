@@ -493,3 +493,22 @@ def test_base_is_asked_every_five_minutes_while_people_arrive_late(core):
     assert not app.leave_sync.due()  # people have arrived: back to refresh_minutes (15)
     clock.t = late + dt.timedelta(minutes=110)
     assert app.leave_sync.due()
+
+
+def test_a_pending_request_counts_as_approved_when_the_setting_says_so(core, monkeypatch):
+    from attendance.core import greeting
+    from attendance.web import create_app
+
+    app, clock, sent = core
+    app.cfg.schedule.late_after = '09:00'
+    connect(app, monkeypatch, [item()], approved=False)
+    clock.t = at(9, 10, 0)
+    assert app.leave_sync.sync()['ok']
+    app.service.on_identified('B', clock(), .8, None)
+    assert app.service.report(DAY).late and 'B' in greeting.rules_for(app.service, DAY).get('pending', {})
+    app.cfg.leave_api.pending_counts = True  # the same request, not approved yet: it permits already
+    rep = app.service.report(DAY)
+    assert not rep.late and not app.service.late_people(DAY) and '(pending)' in rep.requests['B']
+    assert 'B' not in greeting.rules_for(app.service, DAY).get('pending', {})  # the door does not say "waiting"
+    page = create_app(app).test_client().get('/settings').get_data(as_text=True)
+    assert 'name="leave_api.pending_counts"' in page

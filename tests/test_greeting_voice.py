@@ -247,14 +247,15 @@ def test_zerotts_reads_the_days_sentences_ahead_and_the_door_plays_the_file(core
     app.service.on_identified("C", at(7, 1), 0.9, None)  # already in: no audio needed for them
     while g.render_next():
         pass
-    assert [text for text, _ in made] == ["Chào Alice một!", "Chào Bob một!", "Alice đến rồi!", "Bob đến rồi!"]
+    assert [text for text, _ in made] == ["Chào Alice một!", "Chào Bob một!", "Alice!", "Bob!",  # names, for groups
+                                          "Alice đến rồi!", "Bob đến rồi!"]
     assert g.audio_count(at(7, 0).date()) == 4 and g.status()["audio"] == 4
     person = app.store.employee("A")
     assert {g.sentence(person, at(8, 30)) for _ in range(20)} == {"Chào Alice một!"}  # the variant that has a file
     audio, rate = g._audio("Chào Alice một!", "maichi", at(7, 0).date())
-    assert rate == 48000 and len(audio) == 480 and len(made) == 4  # played from the file, not made again
+    assert rate == 48000 and len(audio) == 480 and len(made) == 6  # played from the file, not made again
     g._audio("Chào cả nhà!", "maichi", at(7, 0).date())  # a sentence nobody expected is made on the spot, and kept
-    assert len(made) == 5 and g.audio_count(at(7, 0).date()) == 5
+    assert len(made) == 7 and g.audio_count(at(7, 0).date()) == 5
     g.arrived("A", at(8, 30))
     assert not g.render_next()  # someone is waiting to be greeted: the speaker comes first
 
@@ -479,8 +480,8 @@ def test_today_offers_to_hear_a_greeting_again_in_a_chosen_voice_but_not_to_a_vi
     app.cfg.greeting.elevenlabs_key, app.cfg.greeting.elevenlabs_voice = "sk_test", "VoiceId123"
     page = create_app(app).test_client().get("/").get_data(as_text=True)
     assert 'class="link listen" data-say="Chào Alice!"' in page and 'id="listen-bar"' in page
-    assert '<option value="elevenlabs:VoiceId123">ElevenLabs · the saved voice' in page and "ZeroTTS · maichi" in page
-    assert '<option value="elevenlabs:6Xq32rHt6oAu98TBDKfr">ElevenLabs · Tram' in page and "sk_test" not in page
+    assert '<option value="elevenlabs:VoiceId123">ElevenLabs · the saved Vietnamese voice' in page and "ZeroTTS · maichi" in page
+    assert '<option value="elevenlabs:6Xq32rHt6oAu98TBDKfr">ElevenLabs · Việt · Tram' in page and "ElevenLabs · English · Brittney" in page and "sk_test" not in page
     assert '<option value="[surprised]">surprised</option>' in page
     app.cfg.web.password, app.cfg.web.viewer_password = "admin-password", "viewer-password"
     viewer = create_app(app).test_client().get("/", auth=(app.cfg.web.viewer_username, "viewer-password"))
@@ -583,3 +584,131 @@ def test_the_today_listen_request_asks_for_claudes_emotions(core, monkeypatch):
     form = {"text": "Chào anh", "voice": "elevenlabs", "cloud_voice": "Other", "cloud_prefix": "", "cloud_emotions": "auto"}
     assert client.post("/settings/greeting/preview-text", data=form).status_code == 200
     assert seen[0][2]["emotions"] == "auto" and seen[0][2]["voice"] == "Other" and seen[0][2]["prefix"] == ""
+
+
+def test_people_greeted_in_english_get_the_english_elevenlabs_voice(speech):
+    app, g, calls = speech
+    asked = _elevenlabs(app, g)
+    app.cfg.greeting.engine_en, app.cfg.greeting.elevenlabs_voice_en = "elevenlabs", "EnglishVoice"
+    assert g.voice_for("vi") == "elevenlabs:vi:VoiceId123" and g.voice_for("en") == "elevenlabs:en:EnglishVoice"
+    g._say("Xin chào")
+    g._say("Good morning", "en")
+    assert [(a[0], a[2]) for a in asked] == [("Xin chào", "VoiceId123"), ("Good morning", "EnglishVoice")]
+    app.cfg.greeting.elevenlabs_voice_en = ""  # none: the same voice reads both
+    g._say("Hello there", "en")
+    assert asked[-1][2] == "VoiceId123"
+    system = g.prompt([app.store.employee("A")], g.now().date())[0]
+    assert "stand-up comedian" in system and "[gasps]" in system and "[cheerfully]" in system and "[mischievously]" in system
+
+
+def test_claude_looks_up_what_is_in_fashion_once_a_week_and_the_greetings_get_it(speech):
+    import datetime as dt
+
+    app, g, _ = speech
+    day = g.now().date()
+    app.cfg.greeting.key, app.cfg.greeting.trends = "k", "ổn áp nha"
+    asked = []
+    g._find_trends = lambda d: asked.append(d) or ["đỉnh nóc kịch trần — over the top, said when impressed"]
+    assert g.refresh_trends(day) and not g.refresh_trends(day + dt.timedelta(days=3)) and len(asked) == 1
+    assert g.trends(day) == ["ổn áp nha", "đỉnh nóc kịch trần — over the top, said when impressed"]
+    system = g.prompt([app.store.employee("A")], day)[0]
+    assert "đỉnh nóc kịch trần" in system and "ổn áp nha" in system and "one greeting in four" in system
+    assert g.status()["trends"]["lines"] == ["đỉnh nóc kịch trần — over the top, said when impressed"]
+    assert g.refresh_trends(day + dt.timedelta(days=7)) and len(asked) == 2  # a week later: again
+    app.cfg.greeting.trends_research = False
+    assert g.trends(day) == ["ổn áp nha"] and not g.refresh_trends(day + dt.timedelta(days=30))
+
+
+def test_a_failed_trend_search_keeps_last_weeks_and_waits_before_trying_again(speech):
+    import datetime as dt
+
+    app, g, _ = speech
+    day = g.now().date()
+    app.cfg.greeting.key = "k"
+    g._find_trends = lambda d: ["ổn áp — fine, all good"]
+    assert g.refresh_trends(day)
+    calls = []
+
+    def down(d):
+        calls.append(d)
+        raise RuntimeError("no network")
+
+    g._find_trends = down
+    later = day + dt.timedelta(days=8)
+    assert not g.refresh_trends(later) and not g.refresh_trends(later) and len(calls) == 1
+    assert g.trends(later) == ["ổn áp — fine, all good"] and "no network" in g.status()["trends"]["error"]
+
+
+def test_coordinates_come_out_of_what_google_maps_gives():
+    from attendance.integrations import weather
+
+    assert weather.coordinates("21.028511, 105.804817") == "21.02851,105.80482"
+    assert weather.coordinates("(21.0285, 105.8542)") == "21.0285,105.8542"
+    assert weather.coordinates("https://www.google.com/maps/place/Lotte/@21.0300,105.8100,17z/data=!3m1!4b1!4m6!3d21.0318!4d105.8122") == "21.0318,105.8122"
+    assert weather.coordinates("https://www.google.com/maps/@10.7769,106.7009,15z") == "10.7769,106.7009"
+    assert weather.coordinates("https://maps.google.com/?q=10.7769,106.7009") == "10.7769,106.7009"
+    assert weather.coordinates("Hà Nội") is None and weather.coordinates("https://maps.app.goo.gl/abc") is None
+    assert weather.place("21.0285, 105.8542") == (21.0285, 105.8542, "the office's area")
+
+
+def test_the_weather_is_asked_again_and_then_from_a_second_source(monkeypatch):
+    import datetime as dt
+    from attendance.integrations import weather
+
+    day, asked = dt.date(2026, 11, 19), []
+
+    def fetch(url, params):
+        asked.append(url)
+        if "open-meteo" in url:
+            raise OSError("handshake timed out")
+        return {"weather": [{"date": "2026-11-19", "mintempC": "20", "maxtempC": "27", "hourly": [
+            {"time": "600", "tempC": "21", "weatherDesc": [{"value": "Light rain"}], "chanceofrain": "70"},
+            {"time": "900", "tempC": "23", "weatherDesc": [{"value": "Partly Cloudy "}], "chanceofrain": "20"}]}]}
+
+    text = weather.forecast(21.03, 105.85, "the office's area", day, 8, fetch)
+    assert text == "Weather in the office's area today: partly cloudy around 08:00, 23°C; 20-27°C over the day, 70% chance of rain."
+    assert "wttr.in" in asked[-1]
+    tries = []
+
+    class Answer:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self, *a): return b'{"ok": true}'
+
+    def flaky(request, timeout):
+        tries.append(1)
+        if len(tries) < 3:
+            raise OSError("no answer")
+        return Answer()
+
+    monkeypatch.setattr(weather.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(weather.time, "sleep", lambda s: None)
+    monkeypatch.setattr(weather.json, "load", lambda r: {"ok": True})
+    assert weather._get("https://example.org", {}) == {"ok": True} and len(tries) == 3
+
+
+def test_playful_forms_of_address_are_offered_and_said(core):
+    from attendance.store.schema import HONORIFICS, normalize_honorific
+
+    app, _, _ = core
+    assert normalize_honorific("sep") == "sep" and greeting.SAID["su-huynh"] == "sư huynh" and "shark" in HONORIFICS
+    assert greeting.addressed("Dean", "sep") == "sếp Dean" and greeting.plain("Dean", "sep", False) == "Chào sếp Dean! Chúc một ngày làm việc vui vẻ."
+    with pytest.raises(ValueError):
+        normalize_honorific("boss")
+    page = create_app(app).test_client().get("/employees/honorifics").get_data(as_text=True)
+    assert 'value="sep"' in page and "Sư huynh" in page
+
+
+def test_the_door_can_play_louder_without_clipping(speech):
+    app, g, calls = speech
+    quiet = np.array([0.1, -0.2, 0.9, -1.0], dtype=np.float32)
+    assert greeting.louder(quiet, 1.0) is quiet
+    out = greeting.louder(quiet, 2.0)
+    assert abs(float(out[0]) - 0.197) < 0.01 and float(np.abs(out).max()) < 1.0 and out[2] > 0.9  # raised, never over full scale
+    app.cfg.greeting.loudness = 2.0
+    g._say("Xin chào")
+    played = [c for c in calls if c[0] == "play"][-1][1]
+    assert abs(float(played[0]) - float(np.tanh(2.0))) < 1e-5  # the test voice is all ones
+    app.cfg.greeting.loudness = 5
+    with pytest.raises(ValueError, match="loudness"):
+        app.cfg.validate()

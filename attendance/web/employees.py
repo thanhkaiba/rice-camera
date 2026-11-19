@@ -53,7 +53,7 @@ def register(app: Flask, core: "App") -> None:
                                look_alikes=quality_report["look_alikes"], names=names, quality=library.quality(),
                                good_photos=GOOD_PHOTOS, photo_scores=scores, recognition=recognition,
                                quality_report=quality_report, portal_roles=store.web_roles(),
-                               on_leave={**permissions(store, service.now().date())[1],
+                               on_leave={**permissions(store, service.now().date(), cfg.leave_api.pending_counts)[1],
                                          **store.leaves_on(service.now().date())},
                                seed_status=seed.read_status(core), in_window=service.in_window(service.now()))
 
@@ -211,7 +211,8 @@ def register(app: Flask, core: "App") -> None:
                                   role=request.form.get("role", person.role),
                                   honorific=request.form.get("honorific", person.honorific),
                                   greet=request.form.get("greet") == "on" if "greet_shown" in request.form else None,
-                                  greet_language=request.form.get("greet_language", person.greet_language))
+                                  greet_language=request.form.get("greet_language", person.greet_language),
+                                  about=request.form.get("about") if "about" in request.form else None)
         except ValueError as exc:
             return failed(str(exc), "employee", employee_id=employee_id)
         library.reload()
@@ -353,6 +354,84 @@ def register(app: Flask, core: "App") -> None:
         delete_references(selected)
         message = "Photo deleted." if len(selected) == 1 else f"{len(selected)} photos deleted."
         return done(message, "employee", employee_id=employee_id)
+
+    REVIEW_KEPT_KEY = "photo_review_kept"  # reference ids someone chose to keep: not shown for review again
+    REVIEW_MIN_LEFT = 3  # "Select all safe" never leaves anyone with fewer photos than this
+
+    def kept_reviews() -> set[int]:
+        return set(json.loads(store.get(REVIEW_KEPT_KEY) or "[]"))
+
+    @app.get("/photos/review")
+    def photo_review():
+        """Every reference photo the last quality check flagged ("review"), across everyone, to delete or keep.
+        After photos change the saved report is stale: its flags are still shown (for photos that still exist),
+        with a note to re-evaluate, so a batch can be deleted without pressing the button between batches."""
+        from ..vision.faces import ReferenceCheck
+
+        report = library.saved_quality()
+        checks, stale_results = report["checks"], False
+        if not checks and report["checked_at"]:
+            saved = json.loads(store.get("reference_quality") or "{}")
+            checks = {int(k): ReferenceCheck(**v) for k, v in saved.get("checks", {}).items()}
+            stale_results = bool(checks)
+        kept = kept_reviews()
+        refs = store.references(cfg.recognition.model_id())
+        names = service.shown_names(active_only=False)
+        active = set(store.employees())
+        total: dict[str, int] = {}
+        thumbs: dict[str, str] = {}
+        for r in refs:
+            total[r.employee_id] = total.get(r.employee_id, 0) + 1
+            check = checks.get(r.id)
+            if r.image and r.employee_id not in thumbs and check is not None and check.status == "useful":
+                thumbs[r.employee_id] = r.image
+        for r in refs:  # someone with no consistent photo still gets a picture
+            if r.image and r.employee_id not in thumbs:
+                thumbs[r.employee_id] = r.image
+        groups: dict[str, list] = {}
+        for r in refs:
+            check = checks.get(r.id)
+            if check and check.status == "review" and r.id not in kept and r.employee_id in active:
+                groups.setdefault(r.employee_id, []).append((r, check))
+        people = []
+        for emp, items in groups.items():
+            items.sort(key=lambda rc: rc[1].margin if rc[1].margin is not None else -9.0)
+            people.append({"id": emp, "name": names.get(emp, emp), "items": items, "total": total.get(emp, 0),
+                           "left": total.get(emp, 0) - len(items)})
+        people.sort(key=lambda p: (-len(p["items"]), p["name"].lower()))
+        return render_template("photo_review.html", people=people, names=names, thumbs=thumbs,
+                               quality_report=report, stale_results=stale_results,
+                               quality_report_time=(report["checked_at"] or "")[:16].replace("T", " "),
+                               checked=bool(report["checked_at"]), kept=len(kept), min_left=REVIEW_MIN_LEFT,
+                               flagged=sum(len(p["items"]) for p in people))
+
+    def review_selection() -> list:
+        """The reference photos ticked on the review page, or a 400 for an empty or unknown selection."""
+        try:
+            ids = {int(value) for value in request.form.getlist("ref_id")}
+        except ValueError:
+            abort(400)
+        selected = [r for r in store.references(cfg.recognition.model_id()) if r.id in ids]
+        if not ids or len(selected) != len(ids):
+            abort(400)
+        return selected
+
+    @app.post("/photos/review/delete")
+    def photo_review_delete():
+        selected = review_selection()
+        delete_references(selected)
+        people = len({r.employee_id for r in selected})
+        return done(f"{len(selected)} {'photo' if len(selected) == 1 else 'photos'} of {people} "
+                    f"{'person' if people == 1 else 'people'} deleted.", "photo_review")
+
+    @app.post("/photos/review/keep")
+    def photo_review_keep():
+        selected = review_selection()
+        store.put(REVIEW_KEPT_KEY, json.dumps(sorted(kept_reviews() | {r.id for r in selected})))
+        store.log(service.now(), current_user(cfg), "keep flagged photos", f"{len(selected)} reference photos")
+        return done(f"{len(selected)} {'photo' if len(selected) == 1 else 'photos'} kept: not shown for review again.",
+                    "photo_review")
+
 
     @app.post("/employees/<employee_id>/delete")
     def delete_employee(employee_id: str):

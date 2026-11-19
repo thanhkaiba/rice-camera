@@ -261,8 +261,8 @@
         <span class="hint">Only for people greeted in English (People → Greetings). ZeroTTS reads English with a Vietnamese accent.</span>{{ src('greeting.engine_en') }}
       </label>
     </div>
-    {% macro reads(engine, macos_voice) %}{% if engine == 'elevenlabs' %}{% if s.greeting.elevenlabs_key and s.greeting.elevenlabs_voice %}ElevenLabs · {{ s.greeting.elevenlabs_model }} · voice {{ s.greeting.elevenlabs_voice }}{% else %}ZeroTTS · {{ s.greeting.zerotts_voice }} (ElevenLabs is chosen but has no {{ 'voice ID' if s.greeting.elevenlabs_key else 'API key' }} yet){% endif %}{% elif engine == 'zerotts' %}ZeroTTS · {{ s.greeting.zerotts_voice }}{% else %}macOS · {{ macos_voice }}{% endif %}{% endmacro %}
-    <p class="reads-now">{{ icon('wave') }}<span><strong>Saved now</strong> · Vietnamese: {{ reads(s.greeting.engine, s.greeting.voice) }} · English: {{ reads(s.greeting.engine_en, s.greeting.voice_en) }}</span></p>
+    {% macro reads(engine, macos_voice, english=false) %}{% if engine == 'elevenlabs' %}{% if s.greeting.elevenlabs_key and s.greeting.elevenlabs_voice %}ElevenLabs · {{ s.greeting.elevenlabs_model }} · voice {{ (s.greeting.elevenlabs_voice_en if english else '') or s.greeting.elevenlabs_voice }}{% else %}ZeroTTS · {{ s.greeting.zerotts_voice }} (ElevenLabs is chosen but has no {{ 'voice ID' if s.greeting.elevenlabs_key else 'API key' }} yet){% endif %}{% elif engine == 'zerotts' %}ZeroTTS · {{ s.greeting.zerotts_voice }}{% else %}macOS · {{ macos_voice }}{% endif %}{% endmacro %}
+    <p class="reads-now">{{ icon('wave') }}<span><strong>Saved now</strong> · Vietnamese: {{ reads(s.greeting.engine, s.greeting.voice) }} · English: {{ reads(s.greeting.engine_en, s.greeting.voice_en, true) }}</span></p>
     <p class="hint">Only the settings of the voices chosen here are shown below. A change counts once you press Save.</p>
 
     <div class="engine-box" data-engine="zerotts">
@@ -290,12 +290,18 @@
         <label class="field grow">API key<input name="greeting.elevenlabs_key" type="password" autocomplete="off"
           placeholder="{{ 'saved · leave empty to keep' if s.greeting.elevenlabs_key else 'sk_…' }}">
           <span class="hint">elevenlabs.io → Developers → API keys. {% if not s.greeting.elevenlabs_key %}<strong>Paste it and press Save before listening.</strong>{% endif %}</span>{{ src('greeting.elevenlabs_key') }}</label>
-        <label class="field">Voice ID
+        <label class="field">Vietnamese voice ID
           <input name="greeting.elevenlabs_voice" value="{{ s.greeting.elevenlabs_voice }}" list="elevenlabs-voices" autocomplete="off">
           <datalist id="elevenlabs-voices">
             {% for id, label in cloud_voices %}<option value="{{ id }}">{{ label }}</option>{% endfor %}
           </datalist>
           <span class="hint">Click the box for suggestions, or paste an ID: voice’s menu (⋯) → Copy voice ID. Library voices need a paid ElevenLabs plan.</span>{{ src('greeting.elevenlabs_voice') }}</label>
+        <label class="field">English voice ID
+          <input name="greeting.elevenlabs_voice_en" value="{{ s.greeting.elevenlabs_voice_en }}" list="elevenlabs-voices-en" autocomplete="off">
+          <datalist id="elevenlabs-voices-en">
+            {% for id, label in cloud_voices_en %}<option value="{{ id }}">{{ label }}</option>{% endfor %}
+          </datalist>
+          <span class="hint">For people greeted in English, when English is read by ElevenLabs. Empty: the same voice as Vietnamese.</span>{{ src('greeting.elevenlabs_voice_en') }}</label>
       </div>
       <div class="form-row">
         <label class="field">Model
@@ -342,6 +348,29 @@
       <p class="hint">A macOS voice cannot be heard in this browser, only at the office.</p>
     </div>
 
+    <div class="form-row">
+      {{ field('greeting', 'loudness', 'Louder at the door', '1.0 = as made · 1.5 a good deal louder · up to 3 · for ZeroTTS and ElevenLabs, when the speaker is at full volume and still too quiet. Higher sounds harsher.', type='number', step='0.1') }}
+    </div>
+
+    {% set sp = (edge_beat or {}).get('speaker') %}
+    <div class="engine-box" id="speaker-watch">
+      <h4>Speaker watch</h4>
+      <p class="hint" style="margin:0 0 8px">Every 10 minutes the office computer checks, without a sound, where it plays, its volume and mute, and tells the system space when something is wrong. A speaker that is switched off or turned down by its own knob cannot be seen: use the test.</p>
+      <div class="form-row">
+        <label class="field">Speaker the greetings play on
+          <input name="greeting.speaker" value="{{ s.greeting.speaker }}" list="speaker-names" placeholder="any" maxlength="80" autocomplete="off">
+          <datalist id="speaker-names">{% for name in (sp.devices if sp else []) %}<option value="{{ name }}">{% endfor %}</datalist>
+          <span class="hint">As macOS names it, e.g. External Headphones (the headphone socket). Empty: where it plays is not checked.</span>{{ src('greeting.speaker') }}
+        </label>
+        {{ field('greeting', 'speaker_min_volume', 'Alert below volume (%)', '0 = volume not checked', type='number') }}
+      </div>
+      <div class="row between">
+        <span class="hint">{% if sp %}Office computer now: <strong>{{ sp.device or 'unknown output' }}</strong> · {{ 'volume ' ~ sp.volume ~ '%' if sp.volume is not none else 'volume unknown' }} · {% if sp.muted %}<span class="badge bad">muted</span>{% else %}not muted{% endif %}{% else %}No speaker reading from the office computer yet (greetings on, version 1.1.83 or later).{% endif %}</span>
+        <button formaction="{{ url_for('speaker_test') }}" formnovalidate title="The office computer plays one short sound; what it played on is written to Audit">{{ icon('play') }}Test the speaker</button>
+        <span class="plays" title="You hear nothing in this browser: someone has to be at the office">{{ icon('wave') }}Plays on the office speaker</span>
+      </div>
+    </div>
+
     <div class="listen-box">
       <h4>Listen <span class="plays" title="The office computer makes the audio and sends it here; the office speaker stays silent">{{ icon('play') }}Plays in this browser, not at the office</span></h4>
       <label class="field">Text to read
@@ -380,9 +409,25 @@
             <span class="hint">From console.anthropic.com → API keys. Only names and anh/chị are sent, never photos.</span>{{ src('greeting.key') }}</label>
           {{ field('greeting', 'model', 'Model', 'claude-opus-5-5, or claude-haiku-5-5 for a cheaper one') }}
         </div>
+        <label class="field">In fashion at the office
+          <textarea name="greeting.trends" rows="3" maxlength="800" placeholder="One per line, e.g.&#10;đỉnh nóc kịch trần bay phấp phới&#10;“ổn áp” thay cho “ổn”">{{ s.greeting.trends }}</textarea>
+          <span class="hint">Optional: your office's own catchphrases, in-jokes or songs. Claude works one of these, or of the ones it finds itself, into about one greeting in four.</span>{{ src('greeting.trends') }}</label>
+        <label class="field">About the office
+          <textarea name="greeting.office" rows="3" maxlength="600" placeholder="One per line, e.g.&#10;No printer, no sticky notes&#10;Everyone has lunch together at 12">{{ s.greeting.office }}</textarea>
+          <span class="hint">Optional: what the office has and does, so the greetings never invent things that are not there.</span>{{ src('greeting.office') }}</label>
+        <div class="stack">
+          {{ check('greeting', 'trends_research', 'Claude looks up what is in fashion', 'Once a week Claude searches the web for catchphrases and memes people in Vietnam are saying now, keeps only the harmless ones, and uses them in the greetings. A few web searches a week on the Claude key.') }}
+        </div>
+        {% if gs and gs.trends and (gs.trends.lines or gs.trends.error) %}
+        <p class="hint">{% if gs.trends.lines %}Found on {{ gs.trends.day }}:{% for line in gs.trends.lines %}<br>· {{ line }}{% endfor %}{% endif %}
+          {% if gs.trends.error %}<br><span class="badge bad">Problem</span> {{ gs.trends.error }}{% endif %}</p>
+        {% endif %}
         {{ field('greeting', 'style', 'Extra wishes for the sentences', 'Optional, e.g. "nhắc uống nước", "hài hước hơn"', cls='grow') }}
         <div class="form-row">
-          {{ field('greeting', 'location', 'Office location, for the weather', 'A city, e.g. "Hà Nội", or latitude,longitude "21.03,105.85" · the morning forecast from open-meteo.com · empty: no weather', cls='grow') }}
+          <label class="field grow">Office location, for the weather
+            <input name="greeting.location" value="{{ s.greeting.location }}" placeholder="21.0285, 105.8542">
+            <span class="hint">In Google Maps, right-click the office and click the numbers to copy them, then paste here (a Google Maps link works too). A city name such as “Hà Nội” also works · the morning forecast comes from open-meteo.com · empty: no weather.
+              {% if gs and gs.weather %}<br>Office computer: {{ gs.weather }}{% endif %}</span>{{ src('greeting.location') }}</label>
         </div>
       </div>
     </details>
@@ -658,6 +703,9 @@
     <label class="field">Base Timeoff token (V2)<input name="base_api_key" type="password" autocomplete="off"
       placeholder="{{ 'saved · leave empty to keep' if s['']['base_api_key'] else 'none' }}">{{ src('base_api_key') }}
       <span class="hint">Requires Timeoff read scope. Save settings, then Load now to check. Keep API address below empty when using Base.</span></label>
+    <div class="stack" style="margin:10px 0">
+      {{ check('leave_api', 'pending_counts', 'Requests waiting for approval count as approved', 'A Base request to come late, to be away or to work from home counts from the moment it is sent: the person is not late or missing, the late message and the fines leave them out, and the door greets them as on time. Off: only approved requests count. A request refused later is not counted back by itself.') }}
+    </div>
     <p class="hint" style="margin-top:0">Holidays, make-up days and leave. API format: docs/hr-api.md</p>
     <div class="form-row">
       <label class="field grow">API address<input name="leave_api.url" value="{{ s.leave_api.url }}" placeholder="https://hr.example.com/api/attendance-calendar">{{ src('leave_api.url') }}</label>
@@ -887,6 +935,12 @@
     textStatus.textContent = 'Generating audio… Waiting for the camera computer; this may take up to two minutes.';
     try {
       let response = await fetch(textForm.action, {method: 'POST', body: data});
+      for (let tries = 0; response.status === 409 && tries < 45; tries++) {  // an earlier request is still being made
+        textStatus.textContent = 'Waiting for an earlier request to finish…';
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        response = await fetch(textForm.action, {method: 'POST', body: data});
+      }
+      if (response.status === 202) textStatus.textContent = 'Generating audio… Waiting for the camera computer; this may take up to two minutes.';
       while (response.status === 202) {
         const pending = await response.json();
         await new Promise(resolve => setTimeout(resolve, 1000));

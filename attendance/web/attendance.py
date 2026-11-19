@@ -118,11 +118,13 @@ def register(app: Flask, core: "App") -> None:
         first = [g.zerotts_voice] if g.zerotts_voice in names else []
         voices = [(name, f"ZeroTTS · {name}") for name in first + sorted(names - set(first))]
         if g.elevenlabs_key:  # the saved voice, then the suggested ones: each listen costs credits
-            from ..core.greeting import CLOUD_VOICES
+            from ..core.greeting import CLOUD_VOICES, CLOUD_VOICES_EN
 
-            saved = [("elevenlabs:" + g.elevenlabs_voice, "ElevenLabs · the saved voice")] if g.elevenlabs_voice else []
-            cloud = saved + [("elevenlabs:" + id, "ElevenLabs · " + label) for id, label in CLOUD_VOICES
-                             if id != g.elevenlabs_voice]
+            saved = [("elevenlabs:" + id, f"ElevenLabs · the saved {what} voice") for id, what in
+                     ((g.elevenlabs_voice, "Vietnamese"), (g.elevenlabs_voice_en, "English")) if id]
+            cloud = saved + [("elevenlabs:" + id, f"ElevenLabs · {language} · {label}")
+                             for language, listed in (("Việt", CLOUD_VOICES), ("English", CLOUD_VOICES_EN))
+                             for id, label in listed if id not in (g.elevenlabs_voice, g.elevenlabs_voice_en)]
             voices = cloud + voices if g.engine == "elevenlabs" else voices + cloud
         return voices
 

@@ -19,6 +19,8 @@ import urllib.parse
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Callable
 
+from . import speaker as speaker_state
+
 if TYPE_CHECKING:
     from .config import Config
     from ..store import Store
@@ -221,10 +223,15 @@ class MachineWatch:
     background thread) and posts to chat once per problem in ALERT_EVERY_S, plus once when it is over."""
 
     def __init__(self, cfg: "Config", store: "Store", alert: Callable[[str], None], now: Callable,
-                 read: Callable[[], Power | None] = read_power, found: Callable[[], dict] = addresses):
+                 read: Callable[[], Power | None] = read_power, found: Callable[[], dict] = addresses,
+                 read_speaker: Callable[[], dict | None] = speaker_state.read,
+                 speak_failed: Callable[[], str | None] = lambda: None):
         self.cfg, self.store, self.alert, self.now = cfg, store, alert, now
         self.read, self.found = read, found
+        self.read_speaker, self.speak_failed = read_speaker, speak_failed
         self.power: Power | None = None
+        self.speaker: dict | None = None  # the last speaker reading
+        self._speaker_read = 0.0
         self._since: dict[str, float] = {}  # problem -> first seen in this run
         self._running = False
         self._last_start = 0.0
@@ -256,10 +263,13 @@ class MachineWatch:
     def check(self, t: float | None = None) -> None:
         t = time.time() if t is None else t
         power = self.read()
+        found: dict[str, str] = {}
         if power is not None:
             power.checked_at = power.checked_at or t
             self.power = power
             found = problems(power)
+        found.update(self._speaker_problems(t))
+        if power is not None or self.speaker is not None:
             for key in list(self._since):
                 if key not in found:
                     del self._since[key]
@@ -275,6 +285,8 @@ class MachineWatch:
                 if key in CRITICAL:
                     if entry.get("open") and t - entry["sent"] < CRITICAL_EVERY_S:
                         continue  # repeated until fixed, and at once each time it happens again
+                elif key in speaker_state.RECOVERED and not entry.get("open"):
+                    pass  # the speaker went wrong again after it was fine: told at once
                 elif "sent" in entry and t - entry["sent"] < ALERT_EVERY_S:
                     continue  # told a short while ago; a problem that lasts is repeated now and then
                 self.alert(text)
@@ -282,7 +294,7 @@ class MachineWatch:
                 changed = True
             for key, entry in list(state.items()):
                 if entry.get("open") and key not in found:
-                    self.alert(RECOVERED.get(key, "✅ The attendance computer is fine again."))
+                    self.alert({**RECOVERED, **speaker_state.RECOVERED}.get(key, "✅ The attendance computer is fine again."))
                     entry["open"] = False
                     changed = True
             if changed:
@@ -292,6 +304,20 @@ class MachineWatch:
         if problem and self.cfg.google_chat.webhook_url and self.store.get(URL_ALERT_KEY) != today:
             self.alert("🔗 " + problem["text"])
             self.store.put(URL_ALERT_KEY, today)
+
+    def _speaker_problems(self, t: float) -> dict[str, str]:
+        """What is wrong with the speaker, while the door greets: the state is read every CHECK_EVERY_S
+        (reading makes no sound) and the last reading is used in between."""
+        g = self.cfg.greeting
+        if not g.enabled:
+            self.speaker = None
+            return {}
+        if self.speaker is None or t - self._speaker_read >= speaker_state.CHECK_EVERY_S:
+            self._speaker_read = t
+            self.speaker = self.read_speaker()
+        if self.speaker is None:
+            return {}
+        return speaker_state.problems(self.speaker, g.speaker, g.speaker_min_volume, self.speak_failed())
 
     def status(self) -> dict | None:
         """For the Status page: the last power reading, or None where there is none."""

@@ -132,8 +132,10 @@ def fetch_upcoming(start: dt.date, end: dt.date, token: str, *, post=_post) -> d
     return result
 
 
-def permissions(store, day: dt.date) -> tuple[dict, dict, dict]:
-    """Approved arrival permissions (label, deadline), approved absences, and all request labels."""
+def permissions(store, day: dt.date, pending_counts: bool = False) -> tuple[dict, dict, dict]:
+    """Approved arrival permissions (label, deadline), approved absences, and all request labels. With
+    `pending_counts` (leave_api.pending_counts) a request still waiting for approval permits like an approved one;
+    its label keeps saying "(pending)"."""
     snapshot = json.loads(store.get(f'base_timeoffs:{day}') or '{}')
     late, absent, requests = {}, {}, {}
     for person in store.all_employees():
@@ -141,7 +143,7 @@ def permissions(store, day: dt.date) -> tuple[dict, dict, dict]:
         for entry in entries:
             label = entry['kind'] + ('' if entry['approved'] else ' (pending)') + ': ' + entry['shift']
             requests[person.id] = requests[person.id] + '; ' + label if person.id in requests else label
-            if not entry['approved']:
+            if not entry['approved'] and not pending_counts:
                 continue
             if entry['absence']:
                 absent[person.id] = label
@@ -155,8 +157,11 @@ def permissions(store, day: dt.date) -> tuple[dict, dict, dict]:
     return late, absent, requests
 
 
-def pending_arrivals(store, day: dt.date) -> dict[str, str]:
-    """employee -> the interval (9:00-09:20) of a "coming late" request still waiting for approval."""
+def pending_arrivals(store, day: dt.date, pending_counts: bool = False) -> dict[str, str]:
+    """employee -> the interval (9:00-09:20) of a "coming late" request still waiting for approval; nobody when
+    such requests count as approved (`pending_counts`): they are in permissions() then."""
+    if pending_counts:
+        return {}
     snapshot = json.loads(store.get(f'base_timeoffs:{day}') or '{}')
     out = {}
     for person in store.all_employees():

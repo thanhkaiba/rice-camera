@@ -97,6 +97,8 @@ class App:
             self.greeter.on_greeted = self.edge.greeted
         self.edge.on_arrived = self.service.set_arrived
         self.edge.on_say = self.greeter.say_test
+        self.machine.speak_failed = lambda: self.greeter.speak_failed
+        self.edge.on_speaker = self.speaker_test
         self.edge.render_text = self.greeter.render_text
         from .remote_voice_creation import run_on_camera
 
@@ -128,6 +130,14 @@ class App:
 
         return self.library.add_photo(employee_id, decode_image(data), source=source)
 
+    def speaker_test(self) -> dict:
+        """Asked from the Settings page: a short sound on the office speaker, and what it played on."""
+        from . import speaker
+
+        result = speaker.test(self.cfg.greeting.speaker, self.cfg.greeting.speaker_min_volume)
+        log.log(logging.INFO if result["ok"] else logging.WARNING, "Speaker test: %s", result["message"])
+        return result
+
     def _edge_status(self) -> dict:
         from .. import __version__
         from .voice import voice_names
@@ -137,7 +147,7 @@ class App:
             greeting["daily_voice"] = {"name": self.greeter.zerotts_voice("auto"),
                                        "at": self.service.now().isoformat()}
         return {"camera_ok": self.live.camera_state == "ok", "camera_state": self.live.camera_state, "version": __version__,
-                "greeting": greeting}
+                "greeting": greeting, "speaker": self.machine.speaker}
 
     def recognizer(self):
         if self._recognizer is None:

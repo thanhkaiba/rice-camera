@@ -87,6 +87,17 @@ def _greeting_status(value) -> dict | None:
     return result
 
 
+def _speaker_status(value) -> dict | None:
+    """The office computer's speaker reading, cleaned for the Settings page."""
+    if not isinstance(value, dict):
+        return None
+    names = [str(n)[:80] for n in value.get("devices", [])[:20]] if isinstance(value.get("devices"), list) else []
+    volume = value.get("volume")
+    return {"device": str(value.get("device") or "")[:80], "devices": names,
+            "volume": int(volume) if isinstance(volume, (int, float)) and 0 <= volume <= 100 else None,
+            "muted": bool(value.get("muted"))}
+
+
 def heartbeat(store) -> dict | None:
     raw = store.get(HEARTBEAT_KEY)
     return json.loads(raw) if raw else None
@@ -201,7 +212,8 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
                                              "camera_state": str(beat.get("camera_state", ""))[:200],
                                              "version": str(beat.get("version", ""))[:40],
                                              "backlog": int(beat.get("backlog") or 0),
-                                             "greeting": _greeting_status(beat.get("greeting"))}))
+                                             "greeting": _greeting_status(beat.get("greeting")),
+                                             "speaker": _speaker_status(beat.get("speaker"))}))
         return jsonify(ok=True, mode="shadow" if shadow else "live")
 
     def mac_config() -> dict:
@@ -307,6 +319,10 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
             return jsonify(ok=True)
         if payload.get("kind") == "create_voice":
             core.voice_creator.complete(payload, result)
+            return jsonify(ok=True)
+        if payload.get("kind") == "speaker":
+            store.log(service.now(), "office computer", "test speaker",
+                      ("ok: " if result.get("ok") else "problem: ") + str(result.get("message", ""))[:400])
             return jsonify(ok=True)
         if payload.get("kind") == "say":
             store.log(service.now(), "office computer", "test greeting",

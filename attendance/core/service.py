@@ -939,8 +939,9 @@ class AttendanceService:
         employees = self.store.employees()
         checkins = self.store.checkins(day)
         leave = self.store.leaves_on(day)
-        permitted_late, permitted_absence, rep.requests = base_permissions(self.store, day)
-        pending_late = base_pending_arrivals(self.store, day)
+        counts = self.cfg.leave_api.pending_counts
+        permitted_late, permitted_absence, rep.requests = base_permissions(self.store, day, counts)
+        pending_late = base_pending_arrivals(self.store, day, counts)
         enrolled = self.gallery.counts()
         exempt, support = self.store.exempt_ids(), self.store.support_ids()
         # Late or not seen, but their appeal was accepted: on time.

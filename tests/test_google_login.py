@@ -677,3 +677,24 @@ def test_pages_viewed_without_a_session_set_no_cookie(portal):
     page = client.get("/", headers={"Authorization": f"Basic {basic}"})
     assert page.status_code == 200 and "Set-Cookie" not in page.headers
     assert "Set-Cookie" in client.get("/login").headers  # the password form still gets its token
+
+
+def test_a_server_without_the_google_library_refuses_the_token_with_a_clear_message(monkeypatch):
+    import builtins
+
+    from flask import Flask
+
+    from attendance.web import auth
+
+    real = builtins.__import__
+
+    def missing(name, *args, **kwargs):
+        if name == "requests" or name.startswith("google"):
+            raise ModuleNotFoundError(f"No module named {name!r}")
+        return real(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", missing)
+    with Flask(__name__).app_context():
+        with pytest.raises(auth.GoogleLoginError, match="not installed") as caught:
+            auth.verify("client-id", "some-token")
+    assert caught.value.status == 503

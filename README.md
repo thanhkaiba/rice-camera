@@ -6,24 +6,94 @@ Local Vietnamese speech and custom voice packs: [ZeroTTS setup](docs/voice.md).
 
 Google sign-in and employee admin/viewer access: [setup guide](docs/google-login.md).
 
+## How it is deployed today
+
+One office, one door camera, 52 people. Live since 20 Oct 2026.
+
 ```mermaid
 flowchart LR
-  cam[Door camera<br>RTSP] --> mac[Office Mac<br>recognises faces<br>greets at the door]
-  mac -->|arrivals, photos| srv[Server portal<br>people · reports · settings]
-  srv -->|people, faces, settings| mac
-  hr[Base<br>holidays · leave] --> srv
-  srv --> chat[Google Chat<br>late · not seen]
+  subgraph office[Office network]
+    cam[Door camera<br>RTSP]
+    mac[Office Mac · Wi-Fi<br>face recognition<br>greeting voice]
+    spk[External speaker<br>at the door]
+    cam --> mac --> spk
+  end
+  subgraph cloud[Server · https]
+    srv[Portal<br>Today · Review · People<br>Reports · Settings]
+  end
+  mac <-->|outbound https only<br>arrivals up · settings down<br>within a minute| srv
+  staff[Admins and employees<br>Google sign-in] --> srv
+  base[Base HR<br>leave · holidays] --> srv
+  srv --> chat[Google Chat<br>attendance space<br>system/monitor space]
+  srv --> fines[Late fines tool<br>Apps Script Camera API]
+  mac -.-> ai[Claude · writes greetings<br>ElevenLabs / ZeroTTS · voice<br>weather]
 ```
 
 | Where | What runs there |
 |---|---|
-| **Office Mac** (same network as the camera) | camera, face recognition, the greeting at the door; its own page `http://<mac>:8000` keeps only the Camera page (live view, detection area) |
-| **Server** (internet, https) | the portal: Today, Review, People, Reports, Settings; Base, Google Chat, Camera API |
+| **Office Mac** (same network as the camera) | camera, face recognition, the greeting at the door, speaker and power watch; its own page keeps only the Camera view |
+| **Server** (internet, https) | the portal, Base, Google Chat, late fines report, Google sign-in |
 
-Settings are made on the server; the Mac takes them within a minute.
-
+No inbound port to the office: the Mac calls the server. Settings are made on the server.
 Development conventions: [Mac Camera vs web server responsibilities](docs/architecture.md).
-Camera/voice inference runs on the Mac; the server queues work and serves its results.
+
+## What it does every work day
+
+```mermaid
+flowchart LR
+  a[Before 08:00<br>Claude writes one greeting<br>per person, read ahead<br>into audio] --> b[08:00–10:00<br>camera recognises faces<br>records first arrival<br>speaker greets by name]
+  b --> c[from 09:01<br>arrival counts as late<br>unless Base has leave or<br>a late permission]
+  c --> d[10:00<br>late and not-seen people<br>reported to the fines tool]
+  d --> e[10:05<br>late list posted<br>to Google Chat]
+```
+
+```mermaid
+flowchart TD
+  face[Face at the door] --> q{Recognised?}
+  q -->|yes| rec[Arrival recorded<br>greeting spoken]
+  q -->|unsure| rev[Review page<br>admin confirms or ignores]
+  rev -->|confirmed| rec
+  rec --> today[Today page]
+  hr[Base: leave · WFH · late permission] --> today
+  today --> late[Late / not seen]
+  late --> chat[Google Chat]
+  late --> fine[Fines tool]
+  mon[Mac watch: power · camera · speaker] -->|problem| sys[System space in Chat]
+```
+
+| Use case | State |
+|---|---|
+| Attendance from the door camera, late and not-seen lists | live |
+| Leave, WFH and late permissions from Base (pending requests can count as approved) | live |
+| Late list in Google Chat | live, 10:05 |
+| Late fines report to the Camera API | live, once a day at 10:00, no human confirmation step yet |
+| Spoken greeting per person (Claude text, ElevenLabs v3 voice with emotions, weather, trends) | live |
+| Review page for unsure faces, photo collection for new references | live |
+| Alerts: charger, battery, camera, speaker output / mute / volume | live |
+| Google sign-in for employees, installable web app | deployed; real sign-in not yet confirmed by us |
+| Fine notice with appeals before the report | built, switched off |
+
+## Results so far
+
+Measured on the office Mac and the portal, 19 Nov 2026.
+
+| | |
+|---|---|
+| People enrolled | 52, all with reference faces (1,459 face vectors) |
+| Camera arrivals per day, last full days | 31 · 36 · 30 · 35 (13, 17, 18, 19 Nov) |
+| 19 Nov on the portal | 19 on time · 5 late · 2 not seen · 20 on leave · 3 WFH · 18 with a late permission |
+| Faces left for a person to check, 19 Nov | 7 in Review; 1 arrival confirmed by hand |
+| Greetings spoken | 29 on 18 Nov · 35 on 19 Nov |
+| Fines report, 19 Nov | 23 events accepted, 1 rejected by the fines tool |
+| Camera stream, 08:00–10:00 on 19 Nov | 11 drops of 1–8 s, about 31 s in total; reconnects by itself |
+| Typical match score of an accepted face | 0.51–0.56 daily average |
+
+Known weak points, from real days:
+
+- **16 Nov**: the camera could not be opened for most of the morning; 4 arrivals recorded. A long outage still needs a person.
+- The stream drops every 30 minutes (camera side) and the Mac is on Wi-Fi.
+- A speaker switched off at its own button is invisible to the Mac; the Settings page has a test button.
+- A wrong or missing reference photo sends a face to Review instead of recording it.
 
 ## Server
 

@@ -226,7 +226,7 @@ def test_people_arriving_together_get_one_greeting_per_language(core, monkeypatc
     for emp in "ABC":
         app.service.on_identified(emp, at(10, 20), 0.9, None)  # late, but together: one cheerful line
     assert g.speak_next(timeout=0)
-    assert said == ["Chào chị Alice và anh Bob! Chúc cả nhà một ngày làm việc vui vẻ.",
+    assert said == [f"Chị Alice! {greeting.PART} Anh Bob! {greeting.PART} {greeting.TOGETHER_PLAIN_VI[0]}",
                     ("en", "Carol is here! Let's have a great day.")]  # alone in English: her own (late) line
     assert g.spoken == {DAY.isoformat(): 3}
 
@@ -308,7 +308,7 @@ def test_the_weather_at_the_office():
                            "weather_code": [3, 61]},
                 "daily": {"temperature_2m_min": [20.2], "temperature_2m_max": [26.7], "precipitation_probability_max": [80]}}
 
-    assert weather.place("21.03, 105.85", fetch) == (21.03, 105.85, "21.03, 105.85") and asked == []
+    assert weather.place("21.03, 105.85", fetch) == (21.03, 105.85, "the office's area") and asked == []
     lat, lon, name = weather.place("Ha Noi", fetch)
     assert (lat, lon, name) == (21.03, 105.85, "Hà Nội")
     text = weather.forecast(lat, lon, name, dt.date(2026, 11, 12), 8, fetch)
@@ -541,7 +541,7 @@ def test_what_the_door_said_is_kept_and_sent_to_the_server(core):
     g.arrived("C", clock.t)
     assert g.speak_next(timeout=0)
     kept = app.store.greetings(DAY)
-    assert kept["B"]["kind"] == kept["C"]["kind"] == "together" and kept["B"]["text"] == kept["C"]["text"] == said[1]
+    assert kept["B"]["kind"] == kept["C"]["kind"] == "together" and kept["B"]["text"] == kept["C"]["text"] == said[1].replace(f" {greeting.PART}", "")
     from attendance.web import create_app
 
     page = create_app(app).test_client().get(f"/?day={DAY}").get_data(as_text=True)

@@ -19,7 +19,7 @@ from werkzeug.utils import secure_filename
 from .. import __version__
 from ..cli import updater
 from ..core import latephoto, occasions, settings, transfer
-from ..core.greeting import CLOUD_VOICES
+from ..core.greeting import CLOUD_VOICES, CLOUD_VOICES_EN
 from ..integrations import base_timeoff, camera_api, chat_api
 from ..vision.faces import decode_image, encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
@@ -204,7 +204,7 @@ def register(app: Flask, core: "App") -> None:
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
                                update=updater.read_status(core.data_dir), backup=core.backup.status(),
                                versions=versions(), base_kinds=base_timeoff.KINDS, edge_beat=beat,
-                               zerotts_voices=sorted(names), cloud_voices=CLOUD_VOICES,
+                               zerotts_voices=sorted(names), cloud_voices=CLOUD_VOICES, cloud_voices_en=CLOUD_VOICES_EN,
                                unavailable_voices=unavailable,
                                voice_creation=creation_status(), fine=fine_status())
 
@@ -389,6 +389,25 @@ def register(app: Flask, core: "App") -> None:
         store.edge_job_add("say", {"kind": "say"}, service.now())
         store.log(service.now(), current_user(cfg), "test greeting", "asked the office computer")
         return done("The office computer says a test greeting within a minute, Claude included; the result is in Audit.", "settings_page")
+
+    @app.post("/settings/speaker/test")
+    def speaker_test():
+        if service.greeter is not None:  # the camera runs on this computer
+            who = current_user(cfg)
+
+            def play():
+                from ..core import speaker
+
+                result = speaker.test(cfg.greeting.speaker, cfg.greeting.speaker_min_volume)
+                store.log(service.now(), who, "test speaker",
+                          ("ok: " if result.get("ok") else "problem: ") + str(result.get("message", ""))[:400])
+
+            threading.Thread(target=play, name="speaker-test", daemon=True).start()
+            return done("Playing a test sound on the speaker now; what it played on is in Audit.", "settings_page", _anchor="greeting")
+        store.edge_job_add("speaker", {"kind": "speaker"}, service.now())
+        store.log(service.now(), current_user(cfg), "test speaker", "asked the office computer")
+        return done("The office computer plays a test sound within a minute; what it played on is in Audit.",
+                    "settings_page", _anchor="greeting")
 
     def background_gallery() -> dict:
         """The pictures to choose from on the Settings page, which one is selected, and today's."""

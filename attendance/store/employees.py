@@ -123,7 +123,8 @@ class EmployeeStoreMixin:
     def update_employee(self, employee_id: str, name: str, active: bool, chat_user: str | None = None,
                         exempt: bool | None = None, *, email: str | None = None,
                         base_username: str | None = None, role: str | None = None, honorific: str | None = None,
-                        greet: bool | None = None, greet_language: str | None = None) -> None:
+                        greet: bool | None = None, greet_language: str | None = None,
+                        about: str | None = None) -> None:
         if not name.strip():
             raise ValueError("name is required")
         person = self.employee(employee_id)
@@ -136,14 +137,16 @@ class EmployeeStoreMixin:
         honorific = normalize_honorific(honorific) if honorific is not None else person.honorific
         greet = person.greet if greet is None else bool(greet)
         greet_language = normalize_greet_language(greet_language) if greet_language is not None else person.greet_language
+        about = " ".join(str(about).split())[:400] if about is not None else person.about
         try:
             with self._lock, self._db:
                 if not active:
                     self._web_keep_an_admin(employee_id)
                 self._db.execute("UPDATE employees SET email = ?, name = ?, active = ?, chat_user = ?, exempt = ?, base_username = ?, role = ?, "
-                       "honorific = ?, greet = ?, greet_language = ? WHERE id = ?",
+                       "honorific = ?, greet = ?, greet_language = ?, about = ? WHERE id = ?",
                        (email, name.strip(), int(active), chat_user,
-                        int(exempt if exempt is not None else person.exempt), username, role, honorific, int(greet), greet_language, employee_id))
+                        int(exempt if exempt is not None else person.exempt), username, role, honorific, int(greet), greet_language,
+                        about, employee_id))
         except sqlite3.IntegrityError:
             raise ValueError('employee email or Base username already exists') from None
 
@@ -199,7 +202,7 @@ class EmployeeStoreMixin:
     @staticmethod
     def _employee(r) -> Employee:
         return Employee(r["id"], r["name"], bool(r["active"]), r["chat_user"] or "", bool(r["exempt"]), r["email"] or "", r['base_username'] or '', r["role"], r["honorific"] or "",
-                        bool(r["greet"]), r["greet_language"] or "vi")
+                        bool(r["greet"]), r["greet_language"] or "vi", (r["about"] if "about" in r.keys() else "") or "")
 
     def all_employees(self) -> list[Employee]:
         return [self._employee(r) for r in self._all("SELECT * FROM employees ORDER BY active DESC, name")]

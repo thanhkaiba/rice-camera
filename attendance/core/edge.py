@@ -62,6 +62,7 @@ class EdgeClient:
         self.on_rules = lambda rules: None
         self.on_arrived = lambda arrived: None
         self.on_say = lambda: {"ok": False, "message": "no greetings on this computer"}
+        self.on_speaker = None  # plays a test sound and tells what it played on
         self.render_text = None
         self.on_create_voice = None
         self._preview_results = {}
@@ -307,7 +308,11 @@ class EdgeClient:
                 else:
                     result = pending["result"]
             else:
-                result = self.on_say() if job.get("kind") == "say" else self._add_uploaded(job["payload"])
+                if job.get("kind") == "speaker":
+                    result = (self.on_speaker() if self.on_speaker is not None else
+                              {"ok": False, "message": "The speaker test is not available on this camera. Update the app."})
+                else:
+                    result = self.on_say() if job.get("kind") == "say" else self._add_uploaded(job["payload"])
             unsent[key] = result
             self.store.put(JOBS_KEY, json.dumps(dict(list(unsent.items())[-JOBS_REMEMBERED:])))
             self._creation_jobs.pop(key, None)

@@ -281,6 +281,9 @@ class LeaveApiConfig:
     url: str = ""  # empty: no leave data, only work_days decide who is expected
     token: str = ""  # sent as "Authorization: Bearer <token>"
     refresh_minutes: int = 15
+    # Base requests still waiting for approval count as approved: someone who asked to come late or to be away is
+    # not late or missing even before anybody approved it. A request refused later is not counted back by itself.
+    pending_counts: bool = False
     days_back: int = 7  # range fetched around today
     days_ahead: int = 60
 
@@ -361,7 +364,8 @@ class GreetingConfig:
     # Up to three accounts, tried in this order: when one's key is refused or its credits are used up, the next
     # reads. Each has its own voice ID (a voice belongs to an account); empty: the voice ID of the first.
     elevenlabs_key: str = field(default="", repr=False)
-    elevenlabs_voice: str = ""  # the voice ID from the ElevenLabs voice library
+    elevenlabs_voice: str = "6Xq32rHt6oAu98TBDKfr"  # the voice ID from the ElevenLabs voice library (Tram)
+    elevenlabs_voice_en: str = "IKne3meq5aSn9XLyUdCD"  # the voice for people greeted in English (Charlie, Australian); empty: the same voice
     elevenlabs_key2: str = field(default="", repr=False)
     elevenlabs_voice2: str = ""
     elevenlabs_key3: str = field(default="", repr=False)
@@ -372,11 +376,31 @@ class GreetingConfig:
     # brackets) in square brackets before the part of a sentence it fits, e.g. "[surprised] Ủa, anh Minh!"; only
     # ElevenLabs is given the tags, everything shown or read by another voice is without them.
     elevenlabs_emotions: bool = True
-    elevenlabs_tags: str = "excited, cheerfully, surprised, laughs, playfully, warmly"
+    # Sounds (gasps, laughs...) and deliveries (excited, whispers...) the voice may be given, as Eleven v3 tags.
+    elevenlabs_tags: str = ("gasps, laughs, chuckles, giggles, sighs happily, clears throat, applause, excited, "
+                            "cheerfully, surprised, mischievously, whispers")
     elevenlabs_stability: float = 0.5  # 0 = most expressive, changes most between readings; 1 = most even
     elevenlabs_speed: float = 1.0  # 0.7 to 1.2, as ElevenLabs takes it
+    # How much louder the door plays ZeroTTS and ElevenLabs audio than it was made (1.0 = as made, up to 3.0), for
+    # a small speaker that is at full volume already: the quiet parts are raised, the peaks are rounded off, not cut.
+    loudness: float = 1.0
+    # The sound output the greetings should play on, as macOS names it ("External Headphones"); empty: any.
+    # Playing on another device, a muted computer or a volume below speaker_min_volume (0 = not checked) is
+    # told to the system space (see speaker.py).
+    speaker: str = ""
+    speaker_min_volume: int = 30
     style: str = ""  # extra wishes for the sentences, e.g. "mention the weather" (any language)
-    location: str = ""  # the office, for the morning weather: a place ("Hà Nội") or "21.03,105.85"; empty: no weather
+    # The office, for the morning weather: coordinates as Google Maps gives them ("21.0285, 105.8542", or the
+    # address of a place there: kept as "lat,lon"), or a place name ("Hà Nội"); empty: no weather.
+    location: str = ""
+    # What is in fashion to say right now (catchphrases, memes, a song everyone hums), one per line: Claude works one
+    # into about one greeting in four, where it fits. Empty: none.
+    trends: str = ""
+    # Claude looks up on the web, once a week, what is in fashion to say in Vietnam right now (workplace-safe
+    # catchphrases and memes), and uses those too. Needs the Claude key; costs a few web searches a week.
+    trends_research: bool = True
+    # Facts about the office Claude keeps to, so it invents nothing ("no printer", "lunch together at 12"), any language.
+    office: str = ""
     unknown: bool = True  # a short hello without a name for a face the camera cannot name (at most one every 2 minutes)
     # Jokes about how someone has arrived lately ("often late lately", "on time 6 work days in a row"): that label,
     # never a time, is sent to Claude with the name. Off: nothing about anyone's attendance leaves the office.
@@ -504,6 +528,9 @@ class Config:
         g.engine_en = g.engine_en.strip().lower()
         if g.engine_en not in ("macos", "zerotts", "elevenlabs"):
             raise ValueError("greeting.engine_en must be macos, zerotts or elevenlabs")
+        g.elevenlabs_voice_en = g.elevenlabs_voice_en.strip()
+        if not re.fullmatch(r"[A-Za-z0-9]{0,64}", g.elevenlabs_voice_en):
+            raise ValueError("greeting.elevenlabs_voice_en must be a voice ID (letters and numbers)")
         for n in ("", "2", "3"):
             setattr(g, f"elevenlabs_key{n}", getattr(g, f"elevenlabs_key{n}").strip())
             voice = getattr(g, f"elevenlabs_voice{n}").strip()
@@ -516,6 +543,15 @@ class Config:
         if len(g.elevenlabs_prefix) > 60:
             raise ValueError("greeting.elevenlabs_prefix must be at most 60 characters")
         g.elevenlabs_stability, g.elevenlabs_speed = float(g.elevenlabs_stability), float(g.elevenlabs_speed)
+        g.loudness = float(g.loudness)
+        if not 1.0 <= g.loudness <= 3.0:
+            raise ValueError("greeting.loudness must be between 1 and 3")
+        g.speaker = " ".join(str(g.speaker).split())
+        if len(g.speaker) > 80:
+            raise ValueError("greeting.speaker must be at most 80 characters")
+        g.speaker_min_volume = int(g.speaker_min_volume)
+        if not 0 <= g.speaker_min_volume <= 100:
+            raise ValueError("greeting.speaker_min_volume must be between 0 and 100")
         tags = list(dict.fromkeys(" ".join(t.strip(" []").lower().split()) for t in str(g.elevenlabs_tags).split(",")))
         tags = [t for t in tags if t]
         if len(tags) > 12 or not all(re.fullmatch(r"[a-z][a-z ]{0,23}", t) for t in tags):
@@ -532,7 +568,11 @@ class Config:
         g.key = g.key.strip()
         g.model, g.voice, g.style = g.model.strip() or "claude-opus-5-5", g.voice.strip() or "Linh", g.style.strip()[:300]
         g.voice_en = g.voice_en.strip() or "Samantha"
-        g.location = g.location.strip()[:100]
+        from ..integrations.weather import coordinates
+
+        g.location = (coordinates(g.location) or g.location.strip())[:300]
+        g.trends = "\n".join(line.strip() for line in str(g.trends).splitlines() if line.strip())[:800]
+        g.office = "\n".join(line.strip() for line in str(g.office).splitlines() if line.strip())[:600]
         if not 90 <= g.rate <= 360:
             raise ValueError("greeting.rate must be between 90 and 360 words per minute")
         g.until = str(g.until or "").strip()

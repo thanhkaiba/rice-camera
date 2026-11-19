@@ -142,6 +142,8 @@
         <input type="hidden" name="greet_shown" value="1">
         <label class="switch"><input type="checkbox" name="greet" {{ 'checked' if person.greet }}><span>Greet at the door
           <span class="hint">Untick: the speaker stays silent when they arrive.</span></span></label>
+        <label class="field">Fun facts for the greeting<textarea name="about" rows="2" maxlength="400" placeholder="e.g. runs every morning, team Design, always says “ổn áp”">{{ person.about }}</textarea>
+          <span class="hint">Optional, only with their consent: their team, a hobby, a catchphrase. Claude uses it in a greeting now and then.</span></label>
         <label class="field">Base username<input name="base_username" value="{{ person.base_username }}" autocomplete="off">
           <span class="hint">From Base Account; used to match Timeoff requests.</span></label>
         <label class="field">Google Chat user ID<input name="chat_user" value="{{ person.chat_user }}" placeholder="e.g. 112233445566778899000" autocomplete="off">

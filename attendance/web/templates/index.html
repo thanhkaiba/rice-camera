@@ -252,6 +252,12 @@
           else data.set('cloud_prefix', emotion.value);
         } else data.set('voice', voice.value);
         let response = await fetch(url, {method: 'POST', body: data});
+        for (let tries = 0; response.status === 409 && tries < 45; tries++) {  // an earlier request is still being made
+          status.textContent = 'Waiting for an earlier request to finish…';
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          response = await fetch(url, {method: 'POST', body: data});
+        }
+        status.textContent = 'Generating audio… Waiting for the camera computer; this may take up to two minutes.';
         while (response.status === 202) {
           const queued = await response.json();
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -370,9 +376,10 @@
   setFilter(filter);
 
   {% if rep.day == today %}
-  // Keep today's page current while it is open (not while someone is editing or searching).
+  // Keep today's page current while it is open (not while someone is editing, searching or listening to a greeting).
   setInterval(() => {
-    if (!document.hidden && !edit.open && !search.value) location.reload();
+    const listening = document.getElementById('listen-bar');
+    if (!document.hidden && !edit.open && !search.value && !(listening && !listening.hidden)) location.reload();
   }, 60000);
   {% endif %}
 </script>

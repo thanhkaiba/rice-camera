@@ -45,10 +45,15 @@ def callback_url() -> str:
 def verify(client_id: str, credential: str) -> dict:
     """The claims of an ID token from Google, checked here: Google's signature, issuer, expiry
     and that it was issued to `client_id`. Only Google's public keys are fetched."""
-    import requests
-    from google.auth.exceptions import GoogleAuthError, TransportError
-    from google.auth.transport.requests import Request
-    from google.oauth2 import id_token
+    try:
+        import requests
+        from google.auth.exceptions import GoogleAuthError, TransportError
+        from google.auth.transport.requests import Request
+        from google.oauth2 import id_token
+    except ImportError as exc:  # the server's libraries lack google-auth: say so instead of a bare error 500
+        current_app.logger.error("Google login cannot verify tokens: %s", exc)
+        raise GoogleLoginError("Google login is not installed on this server yet (google-auth is missing). "
+                               "Use password login and tell the administrator.", 503) from None
 
     if not credential:
         raise GoogleLoginError("Google did not return a sign-in token. Try again.")

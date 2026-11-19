@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% set title = 'Photos to review' %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>Photos to review</h1>
+    <div class="chips">
+      <span class="chip">{{ icon('alert') }}<strong>{{ flagged }}</strong> flagged</span>
+      <span class="chip">{{ icon('employees') }}<strong>{{ people|length }}</strong> {{ 'person' if people|length == 1 else 'people' }}</span>
+      {% if kept %}<span class="chip" title="Photos someone chose to keep: they are not shown again">{{ icon('check') }}<strong>{{ kept }}</strong> kept</span>{% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('employees') }}">{{ icon('chevron-left') }}People</a>
+  </div>
+</div>
+
+<div class="card">
+  {% include '_reference_quality.html' %}
+  <p class="hint" style="margin:8px 0 0">Reference photos the quality check says may be of someone else, or too close to another person.
+    Each one is shown next to a photo of the person it looks like. Delete the wrong ones; keep the ones that are right
+    (they are not shown again). Deleting also removes them from the camera computer at its next sync.</p>
+  {% if stale_results %}<p class="hint" style="margin:6px 0 0"><strong>These results are from {{ quality_report_time }}.</strong>
+    Photos changed since then: re-evaluate quality to refresh the list.</p>{% endif %}
+</div>
+
+{% if not people %}
+  <div class="card"><div class="empty-state">{% if checked %}Nothing to review. Every reference photo matches its own person.{% else %}Not evaluated yet. Use Re-evaluate quality above.{% endif %}</div></div>
+{% else %}
+<form method="post" id="review-photos">{% include "_csrf.html" %}
+  <div class="card row" style="gap:8px;flex-wrap:wrap;align-items:center">
+    <button type="button" id="select-safe" title="Select every flagged photo except where the person would keep fewer than {{ min_left }} photos">{{ icon('check') }}Select all safe</button>
+    <button type="button" id="select-none">Clear selection</button>
+    <span class="hint" id="selected-count">0 selected</span>
+    <span style="flex:1"></span>
+    <button type="submit" formaction="{{ url_for('photo_review_keep') }}">{{ icon('check') }}Keep selected</button>
+    <button type="submit" class="danger" formaction="{{ url_for('photo_review_delete') }}" data-confirm="Delete the selected reference photos? Their face data will also be removed.">{{ icon('trash') }}Delete selected</button>
+  </div>
+
+  {% for p in people %}
+  <section class="card" aria-labelledby="person-{{ p.id }}">
+    <div class="card-head">
+      <h3 id="person-{{ p.id }}"><a href="{{ url_for('employee', employee_id=p.id) }}">{{ p.name }}</a></h3>
+      <span class="hint">{{ p['items']|length }} of {{ p.total }} photos flagged
+        {% if p.left < min_left %} · <span class="badge late" title="Deleting all of them would leave fewer than {{ min_left }} photos">would keep only {{ p.left }}</span>{% endif %}</span>
+    </div>
+    <div class="photo-grid reference-grid">
+    {% for r, check in p['items'] %}
+      <div class="reference-card" id="reference-{{ r.id }}">
+        <div class="row" style="gap:4px">
+          <div class="photo" style="flex:1">
+            <label class="face-select" title="Select this photo">
+              <input type="checkbox" class="photo-select" name="ref_id" value="{{ r.id }}" data-safe="{{ 1 if p.left >= min_left else 0 }}" aria-label="Select reference photo {{ r.id }} of {{ p.name }}">
+            </label>
+            {% if r.image %}<img src="{{ url_for('media', path=r.image) }}" alt="Flagged photo of {{ p.name }}" loading="lazy">
+            {% else %}<div class="empty-state" style="height:100%">No image</div>{% endif %}
+          </div>
+          {% if check.other_id and thumbs.get(check.other_id) %}
+          <div class="photo" style="flex:1;opacity:.85" title="A photo of {{ names.get(check.other_id, check.other_id) }}">
+            <img src="{{ url_for('media', path=thumbs[check.other_id]) }}" alt="Photo of {{ names.get(check.other_id, check.other_id) }}" loading="lazy">
+          </div>
+          {% endif %}
+        </div>
+        <div class="reference-check">
+          <div>{{ check.reason }}</div>
+          <div class="small tnum" title="Similarity scores, not probabilities. Same matching rule and thresholds as recognition.">
+            Same person: {{ '%.2f'|format(check.own) if check.own is not none else '–' }}
+            {% if check.other is not none %}<br>Looks like: <a href="{{ url_for('employee', employee_id=check.other_id) }}">{{ names.get(check.other_id, check.other_id) }}</a> · {{ '%.2f'|format(check.other) }}{% endif %}
+            <br>{{ {'upload': 'Uploaded', 'enroll': 'From folder', 'admin': 'Confirmed', 'capture': 'From camera', 'enrol': 'Enrolled at the door', 'collect': 'Collected'}.get(r.source.split(':')[0], r.source) }}{% if r.image_score is not none %} · Image {{ r.image_score }}/100{% endif %}
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</form>
+<script>
+(() => {
+  const boxes = [...document.querySelectorAll('#review-photos .photo-select')];
+  const count = document.getElementById('selected-count');
+  const update = () => { count.textContent = boxes.filter(b => b.checked).length + ' selected'; };
+  boxes.forEach(b => b.addEventListener('change', update));
+  document.getElementById('select-safe').addEventListener('click', () => { boxes.forEach(b => { b.checked = b.dataset.safe === '1'; }); update(); });
+  document.getElementById('select-none').addEventListener('click', () => { boxes.forEach(b => { b.checked = false; }); update(); });
+  document.getElementById('review-photos').addEventListener('submit', (e) => {
+    if (!boxes.some(b => b.checked)) { e.preventDefault(); count.textContent = 'Select at least one photo'; return; }
+    const button = e.submitter;  // the form has two actions: only Delete asks first
+    if (button && button.dataset.confirm && !confirm(button.dataset.confirm)) e.preventDefault();
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}
