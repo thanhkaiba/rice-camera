@@ -20,7 +20,7 @@ from .. import __version__
 from ..cli import updater
 from ..core import latephoto, occasions, settings, transfer
 from ..core.greeting import CLOUD_VOICES, CLOUD_VOICES_EN
-from ..integrations import base_timeoff, camera_api, chat_api
+from ..integrations import base_account, base_timeoff, camera_api, chat_api
 from ..vision.faces import decode_image, encode_jpeg
 from . import current_user, done, failed, first_setup, leave_status
 from .edge_api import heartbeat as edge_heartbeat
@@ -199,6 +199,7 @@ def register(app: Flask, core: "App") -> None:
                                gallery=background_gallery(), occasion_list=occasions.OCCASIONS,
                                occasion_names={o.key: o.name for o in occasions.OCCASIONS},
                                google=core.chat.api.status(), camera_api_status=core.camera_sync.status(),
+                               birthdays_status={k: v for k, v in base_account.status(store).items() if k != "given"},
                                occasion=occasions.occasion_on(service.now().date()),
                                upcoming=occasions.upcoming(service.now().date()),
                                pose=core.pose.describe(), version=__version__, packaged=getattr(sys, "frozen", False),
@@ -441,7 +442,7 @@ def register(app: Flask, core: "App") -> None:
                 value = current[section][name]
                 if name in ("elevenlabs_key2", "elevenlabs_key3") and form.get(f"{key}_off"):
                     changes.setdefault(section, {})[name] = ""  # a spare account is taken out
-                elif name in ("password", "token", "viewer_password", "base_api_key", "key", "elevenlabs_key",
+                elif name in ("password", "token", "viewer_password", "base_api_key", "base_account_key", "key", "elevenlabs_key",
                               "elevenlabs_key2", "elevenlabs_key3"):
                     if form.get(key):
                         changes.setdefault(section, {})[name] = form[key]

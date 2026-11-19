@@ -252,6 +252,7 @@ def create_app(core: "App") -> "Flask":
     from . import capture as capture_routes
     from . import employees as employees_routes
     from . import fines as fines_routes
+    from . import greetings as greetings_routes
     from . import leave as leave_routes
     from . import personal as personal_routes
     from . import reports as reports_routes
@@ -262,6 +263,7 @@ def create_app(core: "App") -> "Flask":
     capture_routes.register(app, core)
     employees_routes.register(app, core)
     fines_routes.register(app, core)
+    greetings_routes.register(app, core)
     leave_routes.register(app, core)
     personal_routes.register(app, core)
     reports_routes.register(app, core)

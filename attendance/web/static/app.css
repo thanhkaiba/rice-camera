@@ -629,3 +629,17 @@ button.listen { margin-left: 6px; white-space: nowrap; color: var(--muted); } bu
 .engine-box[hidden] { display: none; } .engine-box h4, .listen-box h4 { margin: 0 0 8px; font-size: 1em; display: flex; align-items: center; gap: 10px; }
 .listen-box { background: var(--card); } .listen-box audio { max-width: 100%; }
 .reads-now { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 10px; background: var(--soft-2); margin: 10px 0 4px; } .reads-now svg { width: 15px; height: 15px; flex: none; }
+
+/* Greetings page: what the door said, rated */
+.greet-list { padding: 4px 16px; }
+.greet-row { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.greet-row:last-child { border-bottom: 0; }
+.greet-said { flex: 1 1 320px; min-width: 0; }
+.greet-text { font-size: 1.04em; line-height: 1.45; overflow-wrap: anywhere; }
+.greet-rate { flex: 0 1 360px; display: flex; flex-direction: column; gap: 6px; min-width: 240px; }
+.greet-rate .seg { margin-bottom: 0; align-self: flex-start; }
+.greet-rate .seg button.on.good { color: var(--ok-text); background: var(--ok-bg); }
+.greet-rate .seg button.on.bad { color: var(--bad-text); background: var(--bad-bg); }
+.greet-comment { width: 100%; }
+.greet-state { min-height: 1.2em; }
+@media (max-width: 640px) { .greet-rate { flex-basis: 100%; } }

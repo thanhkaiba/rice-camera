@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for
 
-from ..store.schema import GREET_LANGUAGES, HONORIFICS, ROLE_EMPLOYEE, ROLES
+from ..store.schema import GREET_LANGUAGES, HONORIFICS, ROLE_EMPLOYEE, ROLES, birthday_shown
 from . import current_user, done, failed, leave_status
 from .auth import check_csrf
 
@@ -165,7 +165,7 @@ def register(app: Flask, core: "App") -> None:
                           sorted(weeks[start], key=lambda r: (r.created_at.timestamp(), r.id), reverse=True))
                          for start in sorted(weeks, reverse=True)]
         quality_report = library.saved_quality()
-        return render_template("employee.html", roles=ROLES, honorifics=HONORIFICS, languages=GREET_LANGUAGES, person=person, refs=refs, photo_groups=photo_groups, good_photos=GOOD_PHOTOS,
+        return render_template("employee.html", birthday_shown=birthday_shown, roles=ROLES, honorifics=HONORIFICS, languages=GREET_LANGUAGES, person=person, refs=refs, photo_groups=photo_groups, good_photos=GOOD_PHOTOS,
                                good=sum(r.quality_ok is True for r in refs),
                                checks=quality_report["checks"], quality_report=quality_report,
                                recognition_params=cfg.recognition,
@@ -212,7 +212,8 @@ def register(app: Flask, core: "App") -> None:
                                   honorific=request.form.get("honorific", person.honorific),
                                   greet=request.form.get("greet") == "on" if "greet_shown" in request.form else None,
                                   greet_language=request.form.get("greet_language", person.greet_language),
-                                  about=request.form.get("about") if "about" in request.form else None)
+                                  about=request.form.get("about") if "about" in request.form else None,
+                                  birthday=request.form.get("birthday") if "birthday" in request.form else None)
         except ValueError as exc:
             return failed(str(exc), "employee", employee_id=employee_id)
         library.reload()

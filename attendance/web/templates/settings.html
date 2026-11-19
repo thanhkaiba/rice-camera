@@ -232,6 +232,7 @@
     <div class="stack">
       {{ check('greeting', 'enabled', 'Greet people at the door', 'Off: silent') }}
       {{ check('greeting', 'unknown', 'Say hello to faces the camera cannot name', '“Xin chào!” without a name, at most once every 2 minutes') }}
+      {{ check('greeting', 'birthdays', 'Wish a happy birthday', 'On their birthday (People page, or from Base Account) the greeting is a birthday wish, also when they come late; only when they come in that day; a Saturday birthday is wished on the Friday before, a Sunday one on Monday; once per birthday') }}
       {{ check('greeting', 'tease', 'Joke about how people have arrived lately', 'Someone often late who comes early, or on time many days in a row. Only that label goes to Claude with the name, never a time. A late arrival is never teased about the habit.') }}
     </div>
     <details class="panel" style="margin-top:14px" {{ 'open' if s.greeting.until_people }}>
@@ -560,8 +561,10 @@
           <option value="face" {{ 'selected' if s.tracking.mode == 'face' }}>Faces only (lighter)</option>
           <option value="person" {{ 'selected' if s.tracking.mode == 'person' }}>Whole people (better for groups)</option>
         </select>
-        <span class="hint">{% if not cfg.path(cfg.tracking.person_model).exists() %}<b>Model missing:</b> run
-          <code>python -m attendance download-models --person</code>{% else %}Whole people needs a faster computer{% endif %}</span>{{ src('tracking.mode') }}</label>
+        {# The model is used where the camera runs: on the office computer when there is one, not on this server. #}
+        {% set person_model = edge_beat.get('person_model') if edge_beat is not none else cfg.path(cfg.tracking.person_model).exists() %}
+        <span class="hint">{% if person_model is none %}Whole people needs a faster computer. Whether the office computer has the model is known from version 1.1.87 on{% elif not person_model %}<b>Model missing{{ ' on the office computer' if edge_beat is not none }}:</b> run
+          <code>python -m attendance download-models --person</code>{{ ' there' if edge_beat is not none }}{% else %}Whole people needs a faster computer{{ ' · model is on the office computer' if edge_beat is not none }}{% endif %}</span>{{ src('tracking.mode') }}</label>
       {{ field('tracking', 'person_conf', 'Person confidence', 'Raise if bags or chairs get followed', type='number', step='0.05') }}
       {{ field('tracking', 'full_frame_every', 'Full frame every N frames', 'Higher = faster', type='number') }}
     </div>
@@ -703,6 +706,10 @@
     <label class="field">Base Timeoff token (V2)<input name="base_api_key" type="password" autocomplete="off"
       placeholder="{{ 'saved · leave empty to keep' if s['']['base_api_key'] else 'none' }}">{{ src('base_api_key') }}
       <span class="hint">Requires Timeoff read scope. Save settings, then Load now to check. Keep API address below empty when using Base.</span></label>
+    <label class="field">Base Account token (V2) · birthdays<input name="base_account_key" type="password" autocomplete="off"
+      placeholder="{{ 'saved · leave empty to keep' if s['']['base_account_key'] else 'none' }}">{{ src('base_account_key') }}
+      <span class="hint">Optional, a different token from the Timeoff one. Once a day the server reads Base Account and keeps only each person's day and month of birth (never the year, nothing else), matched by Base username. This token can also change accounts in Base: it stays on this server and is never sent to the office computer.
+        {% if birthdays_status and birthdays_status.at %}<br>Last read {{ birthdays_status.at[:16].replace('T', ' ') }} · {{ 'OK' if birthdays_status.ok else 'Needs attention' }} · {{ birthdays_status.message }}{% endif %}</span></label>
     <div class="stack" style="margin:10px 0">
       {{ check('leave_api', 'pending_counts', 'Requests waiting for approval count as approved', 'A Base request to come late, to be away or to work from home counts from the moment it is sent: the person is not late or missing, the late message and the fines leave them out, and the door greets them as on time. Off: only approved requests count. A request refused later is not counted back by itself.') }}
     </div>

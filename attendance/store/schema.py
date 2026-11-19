@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS employees (
     honorific TEXT NOT NULL DEFAULT '',  -- anh / chi: how the greeting at the door addresses them; empty: by name only
     greet INTEGER NOT NULL DEFAULT 1,  -- 0: the greeting at the door stays silent for them
     greet_language TEXT NOT NULL DEFAULT 'vi',  -- vi / en, see GREET_LANGUAGES
-    about TEXT NOT NULL DEFAULT ''  -- what colleagues know and like about them, for the greetings (given with consent)
+    about TEXT NOT NULL DEFAULT '',  -- what colleagues know and like about them, for the greetings (given with consent)
+    birthday TEXT NOT NULL DEFAULT ''  -- "MM-DD", never the year: for the birthday greeting at the door
 );
 -- Mac: camera events not yet confirmed by the server. Server: events already applied, so a resend is harmless.
 CREATE TABLE IF NOT EXISTS edge_outbox (
@@ -166,6 +167,17 @@ CREATE TABLE IF NOT EXISTS greetings (  -- what the door said to someone: for th
     kind TEXT NOT NULL,  -- on_time, late, pending (request waiting for approval) or together (one for several)
     PRIMARY KEY (day, employee_id)
 );
+-- What the office thinks of a sentence the door said: Claude is shown it when it writes the next days'.
+CREATE TABLE IF NOT EXISTS greeting_feedback (
+    day TEXT NOT NULL,
+    employee_id TEXT NOT NULL,
+    text TEXT NOT NULL,  -- the sentence as it was said, kept here: the greetings table is cleaned up sooner
+    rating TEXT NOT NULL,  -- good, ok or bad
+    comment TEXT NOT NULL DEFAULT '',
+    rated_by TEXT NOT NULL,
+    rated_at TEXT NOT NULL,
+    PRIMARY KEY (day, employee_id)
+);
 CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -213,6 +225,31 @@ def normalize_honorific(value: str | None) -> str:
     return value
 
 
+def normalize_birthday(value: str | None) -> str:
+    """What a person types, day first as written in Vietnam ("14/3", "14-03", "14.3.", a year after it is
+    dropped) -> the stored "MM-DD"; empty stays empty."""
+    import datetime as dt
+    import re
+
+    text = (value or "").strip()
+    if not text:
+        return ""
+    typed = re.fullmatch(r"(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?:\s*[/.\-]\s*\d{2,4})?\.?", text)
+    if not typed:
+        raise ValueError("birthday must be day/month, e.g. 14/3")
+    day, month = int(typed.group(1)), int(typed.group(2))
+    try:
+        dt.date(2024, month, day)  # a leap year: 29 February is a birthday too
+    except ValueError:
+        raise ValueError("birthday must be a real day/month, e.g. 14/3") from None
+    return f"{month:02d}-{day:02d}"
+
+
+def birthday_shown(stored: str) -> str:
+    """"03-14" -> "14/3", for pages and forms."""
+    return f"{int(stored[3:])}/{int(stored[:2])}" if stored else ""
+
+
 @dataclass
 class Employee:
     id: str
@@ -227,6 +264,7 @@ class Employee:
     greet: bool = True
     greet_language: str = "vi"  # see GREET_LANGUAGES
     about: str = ""  # material for the greetings at the door
+    birthday: str = ""  # "MM-DD" (no year), or empty
 
     @property
     def support(self) -> bool:
@@ -360,7 +398,7 @@ def _blob(vector) -> bytes | None:
 def migrate(db: sqlite3.Connection) -> None:
     """Add columns introduced after a database was created."""
     added = {"embeddings": [("image", "TEXT"), ("quality_ok", "INTEGER"), ("quality_score", "REAL")], "unknowns": [("group_id", "INTEGER"), ("ignored_day", "TEXT"), ("sha256", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'camera'"), ("quality", "REAL")],
-             "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT"), ("base_username", "TEXT NOT NULL DEFAULT ''"), ("role", "TEXT NOT NULL DEFAULT 'employee'"), ("honorific", "TEXT NOT NULL DEFAULT ''"), ("greet", "INTEGER NOT NULL DEFAULT 1"), ("greet_language", "TEXT NOT NULL DEFAULT 'vi'"), ("about", "TEXT NOT NULL DEFAULT ''")],
+             "employees": [("chat_user", "TEXT NOT NULL DEFAULT ''"), ("exempt", "INTEGER NOT NULL DEFAULT 0"), ("email", "TEXT"), ("base_username", "TEXT NOT NULL DEFAULT ''"), ("role", "TEXT NOT NULL DEFAULT 'employee'"), ("honorific", "TEXT NOT NULL DEFAULT ''"), ("greet", "INTEGER NOT NULL DEFAULT 1"), ("greet_language", "TEXT NOT NULL DEFAULT 'vi'"), ("about", "TEXT NOT NULL DEFAULT ''"), ("birthday", "TEXT NOT NULL DEFAULT ''")],
              "sightings": [("camera_id", "TEXT"), ("model", "TEXT"), ("vector", "BLOB"), ("sha256", "TEXT")],
              "calendar": [("source", "TEXT NOT NULL DEFAULT 'hr'")], "leaves": [("source", "TEXT NOT NULL DEFAULT 'hr'")]}
     for table, columns in added.items():

@@ -144,6 +144,8 @@
           <span class="hint">Untick: the speaker stays silent when they arrive.</span></span></label>
         <label class="field">Fun facts for the greeting<textarea name="about" rows="2" maxlength="400" placeholder="e.g. runs every morning, team Design, always says “ổn áp”">{{ person.about }}</textarea>
           <span class="hint">Optional, only with their consent: their team, a hobby, a catchphrase. Claude uses it in a greeting now and then.</span></label>
+        <label class="field">Birthday (day/month)<input name="birthday" value="{{ birthday_shown(person.birthday) }}" placeholder="e.g. 14/3" maxlength="10" autocomplete="off" inputmode="numeric">
+          <span class="hint">No year. On that day the door wishes them a happy birthday (a Saturday birthday on the Friday before, a Sunday one on Monday; only when they come in that day, and once a year). Empty: no wish. Filled from Base Account when its token is set; what you type here is kept.</span></label>
         <label class="field">Base username<input name="base_username" value="{{ person.base_username }}" autocomplete="off">
           <span class="hint">From Base Account; used to match Timeoff requests.</span></label>
         <label class="field">Google Chat user ID<input name="chat_user" value="{{ person.chat_user }}" placeholder="e.g. 112233445566778899000" autocomplete="off">

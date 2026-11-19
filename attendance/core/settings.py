@@ -14,7 +14,7 @@ from ..store import Store
 KEY = "settings"
 BASELINE = "_file_settings"  # attribute on the Config: the values from config.yaml, before overrides
 PINNED_PASSWORD = "_pinned_admin_password"  # attribute on the Config: the server's CHECKIN_ADMIN_PASSWORD, never replaced
-SECRET = {"password", "viewer_password", "token", "webhook_url", "system_webhook_url", "approver_webhook_url", "base_api_key", "key", "elevenlabs_key", "elevenlabs_key2", "elevenlabs_key3"}  # never shown, only "set"/"empty"
+SECRET = {"password", "viewer_password", "token", "webhook_url", "system_webhook_url", "approver_webhook_url", "base_api_key", "base_account_key", "key", "elevenlabs_key", "elevenlabs_key2", "elevenlabs_key3"}  # never shown, only "set"/"empty"
 
 # section ("" = top level) -> editable fields
 EDITABLE: dict[str, list[str]] = {
@@ -41,9 +41,9 @@ EDITABLE: dict[str, list[str]] = {
     "greeting": ["enabled", "key", "model", "engine", "engine_en", "zerotts_voice", "zerotts_voices_dir",
                  "voice", "voice_en", "rate", "until", "until_people", "zerotts_speed", "zerotts_liveliness",
                  "elevenlabs_key", "elevenlabs_voice", "elevenlabs_voice_en", "elevenlabs_key2", "elevenlabs_voice2",
-                 "elevenlabs_key3", "elevenlabs_voice3", "elevenlabs_model", "elevenlabs_prefix", "elevenlabs_stability", "elevenlabs_speed", "loudness", "speaker", "speaker_min_volume", "elevenlabs_emotions", "elevenlabs_tags", "style", "trends", "trends_research", "office", "location",
+                 "elevenlabs_key3", "elevenlabs_voice3", "elevenlabs_model", "elevenlabs_prefix", "elevenlabs_stability", "elevenlabs_speed", "loudness", "birthdays", "speaker", "speaker_min_volume", "elevenlabs_emotions", "elevenlabs_tags", "style", "trends", "trends_research", "office", "location",
                  "unknown", "tease"],
-    "": ["retention_days", "late_evidence_days", "healthcheck_url", "base_api_key"],
+    "": ["retention_days", "late_evidence_days", "healthcheck_url", "base_api_key", "base_account_key"],
 }
 
 

@@ -13,7 +13,7 @@ from collections import Counter, defaultdict
 import numpy as np
 
 from .schema import (CHAT_COLUMNS, ROLE_EMPLOYEE, ROLE_SUPPORT, Employee, Reference, _blob, _vec, normalize_chat_user,
-                     normalize_email, normalize_greet_language, normalize_honorific, normalize_role)
+                     normalize_birthday, normalize_email, normalize_greet_language, normalize_honorific, normalize_role)
 
 
 class EmployeeStoreMixin:
@@ -124,7 +124,7 @@ class EmployeeStoreMixin:
                         exempt: bool | None = None, *, email: str | None = None,
                         base_username: str | None = None, role: str | None = None, honorific: str | None = None,
                         greet: bool | None = None, greet_language: str | None = None,
-                        about: str | None = None) -> None:
+                        about: str | None = None, birthday: str | None = None) -> None:
         if not name.strip():
             raise ValueError("name is required")
         person = self.employee(employee_id)
@@ -138,17 +138,23 @@ class EmployeeStoreMixin:
         greet = person.greet if greet is None else bool(greet)
         greet_language = normalize_greet_language(greet_language) if greet_language is not None else person.greet_language
         about = " ".join(str(about).split())[:400] if about is not None else person.about
+        birthday = normalize_birthday(birthday) if birthday is not None else person.birthday
         try:
             with self._lock, self._db:
                 if not active:
                     self._web_keep_an_admin(employee_id)
                 self._db.execute("UPDATE employees SET email = ?, name = ?, active = ?, chat_user = ?, exempt = ?, base_username = ?, role = ?, "
-                       "honorific = ?, greet = ?, greet_language = ?, about = ? WHERE id = ?",
+                       "honorific = ?, greet = ?, greet_language = ?, about = ?, birthday = ? WHERE id = ?",
                        (email, name.strip(), int(active), chat_user,
                         int(exempt if exempt is not None else person.exempt), username, role, honorific, int(greet), greet_language,
-                        about, employee_id))
+                        about, birthday, employee_id))
         except sqlite3.IntegrityError:
             raise ValueError('employee email or Base username already exists') from None
+
+    def set_birthday(self, employee_id: str, stored: str) -> None:
+        """`stored` is "MM-DD" (from Base) or empty."""
+        with self._lock, self._db:
+            self._db.execute("UPDATE employees SET birthday = ? WHERE id = ?", (stored, employee_id))
 
     def set_greetings(self, values: dict[str, dict]) -> int:
         """employee id -> {"honorific": anh / chi / "", "greet": bool, "language": vi / en} for many people at once;
@@ -202,7 +208,8 @@ class EmployeeStoreMixin:
     @staticmethod
     def _employee(r) -> Employee:
         return Employee(r["id"], r["name"], bool(r["active"]), r["chat_user"] or "", bool(r["exempt"]), r["email"] or "", r['base_username'] or '', r["role"], r["honorific"] or "",
-                        bool(r["greet"]), r["greet_language"] or "vi", (r["about"] if "about" in r.keys() else "") or "")
+                        bool(r["greet"]), r["greet_language"] or "vi", (r["about"] if "about" in r.keys() else "") or "",
+                        (r["birthday"] if "birthday" in r.keys() else "") or "")
 
     def all_employees(self) -> list[Employee]:
         return [self._employee(r) for r in self._all("SELECT * FROM employees ORDER BY active DESC, name")]

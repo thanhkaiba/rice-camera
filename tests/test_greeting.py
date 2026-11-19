@@ -504,8 +504,9 @@ def test_a_coming_late_request_still_waiting_moves_the_late_time_for_the_door_on
     assert "B" not in permissions(app.store, DAY)[0] and "C" in permissions(app.store, DAY)[0]  # the record: approved only
 
 
-def test_someone_whose_request_waits_for_approval_hears_so_at_the_door(core):
-    """After the late time, inside the interval they asked for: in time by their request, which still waits."""
+def test_someone_whose_request_waits_for_approval_hears_their_usual_greeting(core):
+    """Inside the interval they asked for they are not late, and the door no longer says that the request
+    still waits: the office found that out of place at the door."""
     app, clock, g, said, _ = make(core)
     app.store.import_base_usernames("Email,Username\nbob@example.com,bob\n")
     app.store.update_employee("B", "Bob", True)
@@ -513,17 +514,14 @@ def test_someone_whose_request_waits_for_approval_hears_so_at_the_door(core):
     app.store.put(f"base_timeoffs:{DAY}", json.dumps({"bob": [entry]}))
     g.set_rules(rules_for(app.service, DAY))
     bob = app.store.employee("B")
-    assert not g.waits_for_approval(bob, at(9, 50))  # before the late time: an ordinary on-time greeting
     assert g.sentence(bob, at(9, 50)) == plain("Bob", "", False)
-    assert g.waits_for_approval(bob, at(10, 20)) and not g.is_late(bob, at(10, 20))
+    assert not g.waits_for_approval(bob, at(10, 20)) and not g.is_late(bob, at(10, 20))
     text = g.sentence(bob, at(10, 20))
-    assert "khung giờ đã xin đi muộn" in text and "chờ" in text and "Bob" in text
-    assert text == greeting.waiting_sentence(bob, DAY) == g.sentence(bob, at(10, 25))  # the same all day: read ahead once
+    assert text == plain("Bob", "", False) and "chờ" not in text and "duyệt" not in text
     assert g.is_late(bob, at(10, 31)) and g.sentence(bob, at(10, 31)) == plain("Bob", "", True)  # after the interval: late
-    # Arriving with others, they still hear their own sentence; the others share one.
+    # Arriving with others, they share the group's sentence like anyone else.
     plan = g._plan([(bob, at(10, 20), 0.0), (app.store.employee("A"), at(10, 20), 0.0), (app.store.employee("C"), at(10, 20), 0.0)])
-    assert [(t == text, [p.id for p, _, _ in group]) for t, _, group in plan] == [(True, ["B"]), (False, ["A", "C"])]
-    assert g.waits_for_approval(app.store.employee("A"), at(10, 20)) is False
+    assert [sorted(p.id for p, _, _ in group) for _, _, group in plan] == [["A", "B", "C"]]
 
 
 def test_what_the_door_said_is_kept_and_sent_to_the_server(core):
@@ -641,3 +639,32 @@ def test_keep_greeting_after_the_camera_hours_for_chosen_people_says_hello_once_
     assert not app.service.greets_after(after + dt.timedelta(minutes=2))
     with pytest.raises(ValueError):
         settings.save(app.cfg, app.store, {"greeting": {"until": "soon"}})
+
+
+def test_only_two_or_three_of_the_longest_streaks_are_cheered_each_day(core):
+    """Counting days for everybody bored the office: a few a day, from the longest streaks, the same all day."""
+    import datetime as dt
+
+    from attendance.core.greeting import STREAK_POOL, person_habits
+
+    app, clock, g, _, _ = make(core)
+    fresh = [app.store.add_employee(f"p{n}@example.com", f"P{n}") for n in range(10)]
+    days, d = [], DAY
+    while len(days) < 9:
+        d -= dt.timedelta(days=1)
+        if app.service.is_workday(d):
+            days.append(d)
+    length = {emp: 5 + k // 2 for k, emp in enumerate(fresh)}  # streaks of 5 to 9 days, two people each
+    for n, d in enumerate(days):
+        app.store.mark_notice(d, "camera_ok", at(8, 0, day=d))
+        for emp in fresh:
+            app.service.on_identified(emp, at(8, 40, day=d) if n < length[emp] else at(10, 30, day=d), 0.9, None, None, None)
+    habits = person_habits(app.service, DAY)
+    cheered = {e for e, h in habits.items() if h.startswith("on time")}
+    assert 2 <= len(cheered) <= 3
+    longest = sorted(fresh, key=lambda e: -length[e])[:STREAK_POOL]
+    assert cheered <= set(longest)  # never someone with a shorter streak than the longest few
+    for e in cheered:
+        assert habits[e] == f"on time {length[e]} work days in a row"
+    app.service._greeting_habits = None
+    assert person_habits(app.service, DAY) == habits  # the same few all day

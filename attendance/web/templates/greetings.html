@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% set title = 'Greetings' %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>Greetings</h1>
+    <p class="subtitle">What the door said. Mark each sentence and add a remark if you like: Claude reads the marks of the last weeks when it writes the next morning's sentences, writes more like the good ones and, now and then, gives a good one to someone else.</p>
+  </div>
+</div>
+
+<div class="row between" style="margin-bottom:14px; flex-wrap:wrap; gap:10px">
+  <form method="get" class="row" style="gap:8px">
+    <label class="hint" for="greet-day">Day</label>
+    <select id="greet-day" name="day" onchange="this.form.submit()">
+      {% for d in days %}<option value="{{ d }}" {{ 'selected' if d == day.isoformat() }}>{{ d }}{{ ' · today' if d == today.isoformat() }}</option>{% endfor %}
+      {% if day.isoformat() not in days %}<option value="{{ day.isoformat() }}" selected>{{ day.isoformat() }}</option>{% endif %}
+    </select>
+  </form>
+  <span class="hint" id="greet-counts">{{ rows|length }} said · <span data-count="good">{{ counts.good }}</span> good · <span data-count="ok">{{ counts.ok }}</span> so-so · <span data-count="bad">{{ counts.bad }}</span> not good</span>
+</div>
+
+{% if not rows %}
+<div class="panel"><p class="hint" style="margin:0">Nothing was said at the door on {{ day.strftime('%d %b %Y') }}.</p></div>
+{% else %}
+<div class="panel greet-list">
+  {% for r in rows %}
+  <div class="greet-row" data-employee="{{ r.id }}" data-rating="{{ r.rating }}">
+    <div class="greet-said">
+      <div class="greet-text">“{{ r.text }}”</div>
+      <div class="hint">{{ r.time.strftime('%H:%M') }} · {{ r.name }} · {{ r.kind }}</div>
+    </div>
+    <div class="greet-rate">
+      <div class="seg" role="group" aria-label="Rating">
+        {% for key, label in ratings.items() %}<button type="button" data-rate="{{ key }}" class="{{ 'on ' ~ key if r.rating == key }}" aria-pressed="{{ 'true' if r.rating == key else 'false' }}">{{ label }}</button>{% endfor %}
+      </div>
+      <input type="text" class="greet-comment" maxlength="300" placeholder="Remark for Claude (optional)" value="{{ r.comment }}" aria-label="Remark for {{ r.name }}'s greeting">
+      <span class="hint greet-state" aria-live="polite"></span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<details class="panel group" style="margin-top:18px">
+  <summary><span>What Claude is shown tomorrow</span><span class="sum">{{ (learned.liked or [])|length }} good · {{ (learned.disliked or [])|length }} not good · {{ (learned.so_so or [])|length }} remarks</span></summary>
+  <div>
+    <p class="hint" style="margin:0 0 8px">The newest marks of the last 45 days, each sentence once, at most 20 of each kind. Names are part of the sentences.</p>
+    {% for key, label in (('liked', 'Good'), ('disliked', 'Not good'), ('so_so', 'So-so, with a remark')) %}{% if learned.get(key) %}
+    <p style="margin:10px 0 4px; font-weight:500">{{ label }}</p>
+    <ul style="margin:0; padding-left:18px">{% for e in learned[key] %}<li>“{{ e.text }}”{% if e.remark %} <span class="hint">— {{ e.remark }}</span>{% endif %}</li>{% endfor %}</ul>
+    {% endif %}{% endfor %}
+    {% if not learned %}<p class="hint" style="margin:0">Nothing marked yet.</p>{% endif %}
+  </div>
+</details>
+
+<script>
+(() => {
+  const token = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+  const day = {{ day.isoformat()|tojson }};
+  const recount = () => ['good', 'ok', 'bad'].forEach(key => {
+    const el = document.querySelector('[data-count="' + key + '"]');
+    if (el) el.textContent = document.querySelectorAll('.greet-row[data-rating="' + key + '"]').length;
+  });
+  const save = async row => {
+    const state = row.querySelector('.greet-state');
+    const data = new URLSearchParams({ csrf_token: token, day, employee_id: row.dataset.employee,
+                                       rating: row.dataset.rating || '', comment: row.querySelector('.greet-comment').value });
+    state.textContent = 'Saving…';
+    try {
+      const answer = await fetch({{ url_for('rate_greeting')|tojson }}, { method: 'POST', body: data, headers: { 'X-CSRF-Token': token } });
+      const result = await answer.json();
+      if (!result.ok) throw new Error(result.message || 'not saved');
+      row.dataset.rating = result.rating;
+      row.querySelectorAll('[data-rate]').forEach(b => {
+        const on = b.dataset.rate === result.rating;
+        b.className = on ? 'on ' + result.rating : '';
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      state.textContent = 'Saved';
+      recount();
+    } catch (error) {
+      state.textContent = 'Not saved: ' + error.message;
+    }
+  };
+  document.querySelectorAll('.greet-row').forEach(row => {
+    row.querySelectorAll('[data-rate]').forEach(button => button.addEventListener('click', () => {
+      row.dataset.rating = row.dataset.rating === button.dataset.rate ? '' : button.dataset.rate;  // a second click takes it back
+      save(row);
+    }));
+    row.querySelector('.greet-comment').addEventListener('change', () => save(row));
+  });
+})();
+</script>
+{% endblock %}

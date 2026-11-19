@@ -23,14 +23,14 @@ if TYPE_CHECKING:
 LOG_TAIL_BYTES = 2_000_000
 DAYS = 30
 HIDDEN = "***"
-SECRET_FIELDS = {"password", "viewer_password", "token", "key", "elevenlabs_key", "elevenlabs_key2", "elevenlabs_key3", "webhook_url", "system_webhook_url", "approver_webhook_url", "healthcheck_url", "base_api_key", "access_token_v2", "client_secret", "id_token", "code_verifier", "csrf_token"}
+SECRET_FIELDS = {"password", "viewer_password", "token", "key", "elevenlabs_key", "elevenlabs_key2", "elevenlabs_key3", "webhook_url", "system_webhook_url", "approver_webhook_url", "healthcheck_url", "base_api_key", "base_account_key", "access_token_v2", "client_secret", "id_token", "code_verifier", "csrf_token"}
 
 _SECRETS = [
-    (re.compile(r"(?i)\b(key|token|secret|password|access_token|access_token_v2|base_api_key|client_secret|id_token|code|state|code_verifier|csrf_token)=([^&\s\"'<>]+)"), rf"\1={HIDDEN}"),
+    (re.compile(r"(?i)\b(key|token|secret|password|access_token|access_token_v2|base_api_key|base_account_key|client_secret|id_token|code|state|code_verifier|csrf_token)=([^&\s\"'<>]+)"), rf"\1={HIDDEN}"),
     (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)([^/\s:@\"']+):([^@\s\"']+)@"), rf"\1\2:{HIDDEN}@"),  # rtsp://user:pass@
     (re.compile(r"(?i)(hc-ping\.com/)[\w-]+"), rf"\1{HIDDEN}"),
     (re.compile(r"(?i)(bearer\s+)[\w.~+/=-]+"), rf"\1{HIDDEN}"),
-    (re.compile(r"(?im)^(\s*(?:password|viewer_password|token|key|webhook_url|system_webhook_url|approver_webhook_url|healthcheck_url|base_api_key|access_token_v2)\s*:\s*).+$"), rf"\1{HIDDEN}"),
+    (re.compile(r"(?im)^(\s*(?:password|viewer_password|token|key|webhook_url|system_webhook_url|approver_webhook_url|healthcheck_url|base_api_key|base_account_key|access_token_v2)\s*:\s*).+$"), rf"\1{HIDDEN}"),
 ]
 
 
@@ -45,7 +45,7 @@ def redact_settings(value, name: str = ""):
     if isinstance(value, dict):
         return {k: redact_settings(v, k) for k, v in value.items()}
     if name in SECRET_FIELDS and value:
-        return HIDDEN if name in ("password", "viewer_password", "token", "key", "elevenlabs_key", "elevenlabs_key2", "elevenlabs_key3", "base_api_key", "access_token_v2", "client_secret", "id_token", "code_verifier", "csrf_token") else redact(re.sub(r"\?.*", f"?{HIDDEN}", str(value)))
+        return HIDDEN if name in ("password", "viewer_password", "token", "key", "elevenlabs_key", "elevenlabs_key2", "elevenlabs_key3", "base_api_key", "base_account_key", "access_token_v2", "client_secret", "id_token", "code_verifier", "csrf_token") else redact(re.sub(r"\?.*", f"?{HIDDEN}", str(value)))
     return redact(value) if isinstance(value, str) else value
 
 

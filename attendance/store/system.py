@@ -96,6 +96,35 @@ class SystemStoreMixin:
         self._exec("INSERT OR REPLACE INTO greetings (day, employee_id, said_at, text, kind) VALUES (?, ?, ?, ?, ?)",
                    (day.isoformat(), employee_id, said_at.isoformat(), text, kind))
 
+    def rate_greeting(self, day: dt.date, employee_id: str, rating: str, comment: str, who: str, now: dt.datetime) -> dict:
+        """The office's opinion of what the door said to someone on `day`; an empty rating without a comment
+        takes it back. Returns what is kept."""
+        said = self.greetings(day).get(employee_id)
+        if said is None:
+            raise ValueError("no greeting was said to this person on that day")
+        if rating not in ("good", "ok", "bad", ""):
+            raise ValueError("rating must be good, ok or bad")
+        comment = " ".join(str(comment).split())[:300]
+        if not rating and not comment:
+            self._exec("DELETE FROM greeting_feedback WHERE day = ? AND employee_id = ?", (day.isoformat(), employee_id))
+            return {"rating": "", "comment": ""}
+        self._exec("INSERT OR REPLACE INTO greeting_feedback (day, employee_id, text, rating, comment, rated_by, rated_at) "
+                   "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                   (day.isoformat(), employee_id, said["text"], rating or "ok", comment, who, now.isoformat()))
+        return {"rating": rating or "ok", "comment": comment}
+
+    def greeting_feedback(self, day: dt.date) -> dict[str, dict]:
+        return {r["employee_id"]: dict(r) for r in
+                self._all("SELECT * FROM greeting_feedback WHERE day = ?", (day.isoformat(),))}
+
+    def greeting_feedback_since(self, since: dt.date) -> list[dict]:
+        """Newest first."""
+        return [dict(r) for r in self._all("SELECT * FROM greeting_feedback WHERE day >= ? ORDER BY day DESC, rated_at DESC",
+                                           (since.isoformat(),))]
+
+    def greeting_days(self, limit: int = 30) -> list[str]:
+        return [r["day"] for r in self._all("SELECT DISTINCT day FROM greetings ORDER BY day DESC LIMIT ?", (limit,))]
+
     def greetings(self, day: dt.date) -> dict[str, dict]:
         return {r["employee_id"]: dict(r) for r in self._all("SELECT * FROM greetings WHERE day = ?", (day.isoformat(),))}
 

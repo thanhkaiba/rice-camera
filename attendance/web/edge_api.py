@@ -160,6 +160,10 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
             for employee_id in event["employee_ids"][:20]:
                 if store.employee(str(employee_id)) is not None:
                     store.add_greeting(ts.date(), str(employee_id), ts, str(event["text"])[:500], said)
+            if said != "together":  # a group hears one line for all: not a birthday wish
+                from ..core.greeting import note_birthday_wished
+
+                note_birthday_wished(service, [str(e) for e in event["employee_ids"][:20]], ts.date())
         else:
             raise ValueError("unknown kind")
 
@@ -213,7 +217,8 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
                                              "version": str(beat.get("version", ""))[:40],
                                              "backlog": int(beat.get("backlog") or 0),
                                              "greeting": _greeting_status(beat.get("greeting")),
-                                             "speaker": _speaker_status(beat.get("speaker"))}))
+                                             "speaker": _speaker_status(beat.get("speaker")),
+                                             "person_model": (bool(beat["person_model"]) if "person_model" in beat else None)}))
         return jsonify(ok=True, mode="shadow" if shadow else "live")
 
     def mac_config() -> dict:

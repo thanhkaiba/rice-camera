@@ -147,7 +147,8 @@ class App:
             greeting["daily_voice"] = {"name": self.greeter.zerotts_voice("auto"),
                                        "at": self.service.now().isoformat()}
         return {"camera_ok": self.live.camera_state == "ok", "camera_state": self.live.camera_state, "version": __version__,
-                "greeting": greeting, "speaker": self.machine.speaker}
+                "greeting": greeting, "speaker": self.machine.speaker,
+                "person_model": self.cfg.path(self.cfg.tracking.person_model).exists()}
 
     def recognizer(self):
         if self._recognizer is None:
@@ -239,6 +240,11 @@ def _leave_sync_loop(app: App) -> None:
                 continue
             if app.leave_sync.due():
                 app.leave_sync.sync()
+            from ..integrations import base_account
+
+            if base_account.due(app.cfg, app.store, app.service.now()):
+                base_account.sync(app.cfg, app.store, app.service.now())
+                app.library.reload()
         except Exception:
             log.exception("Leave data update crashed")
         try:

@@ -387,6 +387,7 @@ class GreetingConfig:
     # The sound output the greetings should play on, as macOS names it ("External Headphones"); empty: any.
     # Playing on another device, a muted computer or a volume below speaker_min_volume (0 = not checked) is
     # told to the system space (see speaker.py).
+    birthdays: bool = True  # someone whose birthday it is hears a birthday wish instead of the usual greeting
     speaker: str = ""
     speaker_min_volume: int = 30
     style: str = ""  # extra wishes for the sentences, e.g. "mention the weather" (any language)
@@ -421,6 +422,9 @@ class Config:
     employees_file: str = "employees.csv"  # email,name CSV, imported initially or once to attach legacy emails
     healthcheck_url: str = ""
     base_api_key: str = field(default='', repr=False)  # Base Timeoff V2; BASE_ACCESS_TOKEN overrides this
+    # Base Account V2 token, for birthdays only (see integrations/base_account.py). It can read and change
+    # accounts: it stays on the server, and only the day and month of birth are taken.
+    base_account_key: str = field(default='', repr=False)
     retention_days: int = 90  # face photos of arrivals and unknown faces are deleted after this
     # Snapshots of a day on which someone was late are kept this long instead, as evidence in case
     # the person disputes it (never shorter than retention_days).
@@ -685,6 +689,7 @@ def load(path: str | Path) -> Config:
         data = yaml.safe_load(f) or {}
     cfg = _build(Config, data)
     cfg.base_api_key = os.environ.get('BASE_ACCESS_TOKEN', cfg.base_api_key).strip()
+    cfg.base_account_key = str(cfg.base_account_key or '').strip()
     cfg.base_dir = path.resolve().parent
     cfg.validate()
     return cfg
