@@ -134,6 +134,19 @@ CREATE TABLE IF NOT EXISTS notices (
     sent_at TEXT NOT NULL,
     PRIMARY KEY (day, kind)
 );
+-- A group at the door (crowd.py): how many people were in the picture at once, and how many were named.
+CREATE TABLE IF NOT EXISTS crowds (
+    id TEXT PRIMARY KEY,
+    day TEXT NOT NULL,
+    start TEXT NOT NULL,
+    end TEXT NOT NULL,
+    people INTEGER NOT NULL,  -- most at once: bodies when `bodies`, else faces
+    faces INTEGER NOT NULL,   -- most faces found at once
+    named INTEGER NOT NULL,   -- distinct people named while the group was in the picture, at most `people`
+    names TEXT NOT NULL DEFAULT '[]',  -- their employee ids, JSON
+    bodies INTEGER NOT NULL DEFAULT 0,  -- 1: people were counted as bodies (tracking.mode person)
+    image TEXT
+);
 CREATE TABLE IF NOT EXISTS outages (
     day TEXT NOT NULL,
     start TEXT NOT NULL,

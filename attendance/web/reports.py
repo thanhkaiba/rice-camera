@@ -47,6 +47,17 @@ def register(app: Flask, core: "App") -> None:
         return render_template("report.html", rep=service.period_report(start, end), start=start, end=end,
                                ranges=ranges)
 
+    @app.get("/groups")
+    def groups_page():
+        """Groups at the door, counted on the office computer: how many of each group were named."""
+        today = service.now().date()
+        days = store.crowd_days(today - dt.timedelta(days=30))
+        day = _date(request.args.get("day"), dt.date.fromisoformat(days[0]["day"]) if days else today)
+        names = {p.id: p.name for p in store.all_employees()}
+        groups = [{**g, "start": dt.datetime.fromisoformat(g["start"]), "end": dt.datetime.fromisoformat(g["end"]),
+                   "who": [names.get(n, n) for n in g["names"]]} for g in store.crowds(day)]
+        return render_template("groups.html", days=days, day=day, groups=groups, today=today)
+
     @app.get("/accuracy")
     def accuracy():
         from ..core.accuracy import accuracy_report

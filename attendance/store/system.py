@@ -96,6 +96,29 @@ class SystemStoreMixin:
         self._exec("INSERT OR REPLACE INTO greetings (day, employee_id, said_at, text, kind) VALUES (?, ?, ?, ?, ?)",
                    (day.isoformat(), employee_id, said_at.isoformat(), text, kind))
 
+    # groups at the door (crowd.py) --------------------------------------------------------
+    def add_crowd(self, row: dict) -> None:
+        self._exec("INSERT OR REPLACE INTO crowds (id, day, start, end, people, faces, named, names, bodies, image) "
+                   "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   (row["id"], row["day"], row["start"], row["end"], int(row["people"]), int(row["faces"]),
+                    int(row["named"]), json.dumps(list(row.get("names") or [])), int(bool(row.get("bodies"))), row.get("image")))
+
+    def crowds(self, day: dt.date) -> list[dict]:
+        return [{**dict(r), "names": json.loads(r["names"] or "[]")} for r in
+                self._all("SELECT * FROM crowds WHERE day = ? ORDER BY start", (day.isoformat(),))]
+
+    def crowd_days(self, since: dt.date) -> list[dict]:
+        """Per day, newest first: groups, people in them, faces found, people named."""
+        return [dict(r) for r in self._all(
+            "SELECT day, COUNT(*) AS groups, SUM(people) AS people, SUM(MIN(faces, people)) AS faces, SUM(named) AS named, "
+            "MIN(bodies) AS bodies FROM crowds WHERE day >= ? GROUP BY day ORDER BY day DESC", (since.isoformat(),))]
+
+    def expire_crowds(self, cutoff: dt.date) -> list[str]:
+        """Forget the groups before `cutoff`; returns their pictures, for the caller to delete."""
+        images = [r["image"] for r in self._all("SELECT image FROM crowds WHERE day < ? AND image IS NOT NULL", (cutoff.isoformat(),))]
+        self._exec("DELETE FROM crowds WHERE day < ?", (cutoff.isoformat(),))
+        return images
+
     def rate_greeting(self, day: dt.date, employee_id: str, rating: str, comment: str, who: str, now: dt.datetime) -> dict:
         """The office's opinion of what the door said to someone on `day`; an empty rating without a comment
         takes it back. Returns what is kept."""

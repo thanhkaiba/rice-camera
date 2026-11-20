@@ -643,3 +643,9 @@ button.listen { margin-left: 6px; white-space: nowrap; color: var(--muted); } bu
 .greet-comment { width: 100%; }
 .greet-state { min-height: 1.2em; }
 @media (max-width: 640px) { .greet-rate { flex-basis: 100%; } }
+
+/* Groups page: one picture per group at the door */
+.crowd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.crowd-card { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.crowd-card img { display: block; width: 100%; height: auto; }
+.crowd-card figcaption { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }

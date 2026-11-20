@@ -101,11 +101,12 @@ def test_viewer_can_look_but_not_change_anything(core):
     clock.t = at(10, 30)
     uid = app.service.on_unknown(at(9, 20), "crops/u.jpg", None, "B", 0.4)
     c = client(app, password="s3cret", viewer="look")
-    for path in ("/", "/unknowns", "/report", "/accuracy", "/audit", "/report/summary.csv"):
+    for path in ("/", "/account"):  # the read-only login: the Today page and its own account, nothing else
         assert c.get(path, headers=VIEWER).status_code == 200, path
     page = c.get("/", headers=VIEWER).get_data(as_text=True)
     assert "Read-only" in page and 'class="editable"' not in page and ">People<" not in page
-    for path in ("/employees", "/employees/A", "/settings", "/live", "/calendar", "/setup"):
+    for path in ("/employees", "/employees/A", "/settings", "/live", "/calendar", "/setup",
+                 "/unknowns", "/report", "/accuracy", "/audit", "/report/summary.csv", "/media/crops/u.jpg"):
         assert c.get(path, headers=VIEWER).status_code == 403, path
     posts = [f"/unknowns/{uid}/assign", f"/unknowns/{uid}/ignore", "/unknowns/delete", "/day/2026-10-14/A/set",
              "/leave", "/calendar/day", "/settings", "/employees", "/employees/A/personal-link", "/leave/sync"]

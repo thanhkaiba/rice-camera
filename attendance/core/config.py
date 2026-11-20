@@ -330,6 +330,9 @@ class CollectConfig:
     # A clear face the camera does not recognise (often someone with few reference photos) goes to
     # Review, at most this many a day; naming it there teaches the face, without recording an arrival.
     review_per_day: int = 10  # 0 = never
+    # Employee ids (comma separated) nothing is collected for: someone who always wears a mask, whose masked
+    # photos make other people's hidden or turned faces look like them.
+    skip_people: str = ""
 
 
 @dataclass
@@ -378,7 +381,7 @@ class GreetingConfig:
     elevenlabs_emotions: bool = True
     # Sounds (gasps, laughs...) and deliveries (excited, whispers...) the voice may be given, as Eleven v3 tags.
     elevenlabs_tags: str = ("gasps, laughs, chuckles, giggles, sighs happily, clears throat, applause, excited, "
-                            "cheerfully, surprised, mischievously, whispers")
+                            "cheerfully, happily, playfully, surprised")
     elevenlabs_stability: float = 0.5  # 0 = most expressive, changes most between readings; 1 = most even
     elevenlabs_speed: float = 1.0  # 0.7 to 1.2, as ElevenLabs takes it
     # How much louder the door plays ZeroTTS and ElevenLabs audio than it was made (1.0 = as made, up to 3.0), for
@@ -390,6 +393,14 @@ class GreetingConfig:
     birthdays: bool = True  # someone whose birthday it is hears a birthday wish instead of the usual greeting
     speaker: str = ""
     speaker_min_volume: int = 30
+    # A mains speaker that goes to sleep without a signal swallows a greeting, or its first words. On work
+    # days at speaker_awake_from a soft low hum of a few seconds wakes it (it can be heard); from then until
+    # the door stops greeting, whenever the speaker had no sound for speaker_awake_every minutes, a 20 Hz tone
+    # nobody hears is played. speaker_awake_level: percent of full scale, 1-50, of the hum.
+    speaker_awake: bool = False
+    speaker_awake_from: str = "07:30"
+    speaker_awake_every: int = 120
+    speaker_awake_level: int = 6
     style: str = ""  # extra wishes for the sentences, e.g. "mention the weather" (any language)
     # The office, for the morning weather: coordinates as Google Maps gives them ("21.0285, 105.8542", or the
     # address of a place there: kept as "lat,lon"), or a place name ("Hà Nội"); empty: no weather.
@@ -556,6 +567,12 @@ class Config:
         g.speaker_min_volume = int(g.speaker_min_volume)
         if not 0 <= g.speaker_min_volume <= 100:
             raise ValueError("greeting.speaker_min_volume must be between 0 and 100")
+        g.speaker_awake_from = parse_clock(g.speaker_awake_from).strftime("%H:%M")
+        g.speaker_awake_every, g.speaker_awake_level = int(g.speaker_awake_every), int(g.speaker_awake_level)
+        if not 1 <= g.speaker_awake_every <= 480:
+            raise ValueError("greeting.speaker_awake_every must be between 1 and 480 minutes")
+        if not 1 <= g.speaker_awake_level <= 50:
+            raise ValueError("greeting.speaker_awake_level must be between 1 and 50")
         tags = list(dict.fromkeys(" ".join(t.strip(" []").lower().split()) for t in str(g.elevenlabs_tags).split(",")))
         tags = [t for t in tags if t]
         if len(tags) > 12 or not all(re.fullmatch(r"[a-z][a-z ]{0,23}", t) for t in tags):
@@ -581,6 +598,7 @@ class Config:
             raise ValueError("greeting.rate must be between 90 and 360 words per minute")
         g.until = str(g.until or "").strip()
         g.until_people = ",".join(dict.fromkeys(v.strip() for v in str(g.until_people).split(",") if v.strip()))
+        self.collect.skip_people = ",".join(dict.fromkeys(v.strip() for v in str(self.collect.skip_people).split(",") if v.strip()))
         if g.until:
             g.until = parse_clock(g.until).strftime("%H:%M")
         g.zerotts_speed, g.zerotts_liveliness = round(float(g.zerotts_speed), 2), round(float(g.zerotts_liveliness), 2)

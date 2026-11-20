@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% set title = 'Today' if rep.day == today else rep.day.strftime('%d %b') %}
 {% set SRC_ICON = {'camera': 'camera', 'admin': 'user-check', 'manual': 'edit', 'corrected': 'swap'} %}
-{% macro avatar(path, name) %}{% if path %}<a class="avatar-link" href="{{ url_for('media', path=path) }}" target="_blank"><img class="avatar" src="{{ url_for('media', path=path) }}" alt=""></a>{% else %}<span class="avatar empty">{{ name[:1] }}</span>{% endif %}{% endmacro %}
+{# The read-only login sees no camera picture: everyone has the same plain initial. #}
+{% macro avatar(path, name) %}{% if path and role != 'viewer' %}<a class="avatar-link" href="{{ url_for('media', path=path) }}" target="_blank"><img class="avatar" src="{{ url_for('media', path=path) }}" alt=""></a>{% else %}<span class="avatar empty">{{ name[:1] }}</span>{% endif %}{% endmacro %}
 {% set GREETED = {'on_time': 'on-time greeting', 'late': 'late greeting', 'pending': 'request waiting for approval', 'together': 'greeted with others'} %}
 {% macro row(status, emp_id, name, a=None, note='') %}
   <tr data-status="{{ status }}" data-name="{{ name|lower }} {{ employee_emails.get(emp_id, '') }}" data-emp="{{ emp_id }}" data-display="{{ name }}" data-requests="{{ request_memberships.get(emp_id, '') }}"
@@ -22,7 +23,7 @@
       {% if status != 'on_leave' and (note or rep.requests.get(emp_id)) %}<div class="cell-sub"><span class="badge info">{{ note or rep.requests[emp_id] }}</span></div>{% endif %}
     </td>
     <td class="num tnum">{{ a.time if a else '–' }}</td>
-    <td class="hide-sm">{% if a %}<span class="src" title="{{ SOURCES.get(a.source, a.source) }}">{{ icon(SRC_ICON.get(a.source, 'info')) }}{% if a.score %}<span class="tnum">{{ '%.0f'|format(a.score * 100) }}%</span>{% endif %}</span>{% endif %}</td>
+    {% if role != 'viewer' %}<td class="hide-sm">{% if a %}<span class="src" title="{{ SOURCES.get(a.source, a.source) }}">{{ icon(SRC_ICON.get(a.source, 'info')) }}{% if a.score %}<span class="tnum">{{ '%.0f'|format(a.score * 100) }}%</span>{% endif %}</span>{% endif %}</td>{% endif %}
     <td class="num">{% if status != 'on_leave' and role != 'viewer' %}<button class="btn-sm ghost icon" type="button" title="Correct" aria-label="Correct">{{ icon('edit') }}</button>{% endif %}</td>
   </tr>
 {% endmacro %}
@@ -58,8 +59,8 @@
   {% for a, b in rep.outages %}{{ a.strftime('%H:%M') }}–{{ b.strftime('%H:%M') }}{{ ', ' if not loop.last }}{% endfor %}
   · arrivals then may be missing.</span></div>{% endif %}
 {% if leave.warning %}<div class="alert warn"><span class="ico">{{ icon('alert') }}</span><span>{{ leave.warning|replace("⚠️ ", "") }}{% if leave.message and not leave.ok %} ({{ leave.message }}){% endif %}</span></div>{% endif %}
-{% if backup_warning %}<div class="alert warn"><span class="ico">{{ icon('database') }}</span><span>{{ backup_warning }} <a href="{{ url_for('settings_page') }}#admin">Settings</a></span></div>{% endif %}
-{% if rep.no_photos %}<div class="alert warn"><span class="ico">{{ icon('image') }}</span><span>No photos, cannot be recognised:
+{% if backup_warning and role != 'viewer' %}<div class="alert warn"><span class="ico">{{ icon('database') }}</span><span>{{ backup_warning }} <a href="{{ url_for('settings_page') }}#admin">Settings</a></span></div>{% endif %}
+{% if rep.no_photos and role != 'viewer' %}<div class="alert warn"><span class="ico">{{ icon('image') }}</span><span>No photos, cannot be recognised:
   {% for id, name in rep.no_photos %}<a href="{{ url_for('employee', employee_id=id) }}">{{ name }}</a>{{ ', ' if not loop.last }}{% endfor %}</span></div>{% endif %}
 {% if rep.day == today and rep.workday and not started %}<div class="alert info"><span class="ico">{{ icon('clock') }}</span><span>Camera starts at {{ rep.window.start.strftime('%H:%M') }}.</span></div>{% endif %}
 
@@ -72,12 +73,12 @@
   <button class="tile info" type="button" data-filter="coming_late"><div class="n">{{ request_groups.coming_late|length }}</div><div class="l">Coming late</div></button>
   <button class="tile info" type="button" data-filter="wfh"><div class="n">{{ request_groups.wfh|length }}</div><div class="l">WFH</div></button>
   {% if rep.support %}<button class="tile info" type="button" data-filter="support"><div class="n">{{ rep.support|length }}</div><div class="l">Support staff</div></button>{% endif %}
-  {% if rep.pending_unknowns %}<a class="tile bad" href="{{ url_for('unknowns') }}" title="Faces to review"><div class="n">{{ rep.pending_unknowns }}</div><div class="l">Review {{ icon('chevron-right') }}</div></a>{% endif %}
+  {% if rep.pending_unknowns and role != 'viewer' %}<a class="tile bad" href="{{ url_for('unknowns') }}" title="Faces to review"><div class="n">{{ rep.pending_unknowns }}</div><div class="l">Review {{ icon('chevron-right') }}</div></a>{% endif %}
 </div>
 
 <div class="row between" style="margin-bottom:12px">
   <div class="search" style="flex: 0 1 340px"><input type="search" id="search" placeholder="Search…" aria-label="Search by name or email"></div>
-  {% if leave.enabled %}
+  {% if leave.enabled and role != 'viewer' %}
   <form method="post" action="{{ url_for('leave_sync') }}" class="row" style="gap:6px">{% include "_csrf.html" %}
     <input type="hidden" name="back" value="{{ request.full_path }}">
     <span class="chip" title="Leave &amp; holidays from the HR system{% if leave.last_success %}, updated {{ leave.last_success.strftime('%H:%M') }}{% endif %}">{{ icon('hr') }}HR{% if leave.last_success %} · {{ leave.last_success.strftime('%H:%M') }}{% endif %}</span>
@@ -91,7 +92,7 @@
 
 <div class="table-wrap">
   <table id="people">
-    <thead><tr><th style="width:60px"></th><th>Person</th><th>Status</th><th class="num">Arrived</th><th class="hide-sm">Source</th><th></th></tr></thead>
+    <thead><tr><th style="width:60px"></th><th>Person</th><th>Status</th><th class="num">Arrived</th>{% if role != 'viewer' %}<th class="hide-sm">Source</th>{% endif %}<th></th></tr></thead>
     <tbody>
       {% for a in rep.late %}{{ row('late', a.employee_id, a.name, a) }}{% endfor %}
       {% for id, name in rep.not_seen %}{{ row('not_seen', id, name) }}{% endfor %}
@@ -107,7 +108,7 @@
   <div class="empty-state" id="empty" hidden><span class="ico">{{ icon('search') }}</span>Nobody matches.</div>
 </div>
 
-{% if late_msg.enabled and rep.workday %}
+{% if late_msg.enabled and rep.workday and role != 'viewer' %}
 <div class="card" style="margin-top:16px">
   <div class="card-head">
     <h2 class="row">{{ icon('chat') }}Late message</h2>
@@ -136,7 +137,7 @@
 </div>
 {% endif %}
 
-{% if remind.enabled %}
+{% if remind.enabled and role != 'viewer' %}
 <div class="card" style="margin-top:16px">
   <div class="card-head">
     <h2 class="row">{{ icon('clock') }}Base requests to approve</h2>

@@ -452,6 +452,9 @@ def register(app: Flask, core: "App") -> None:
                 elif key == "greeting.until_people":
                     if "greeting.until_people_shown" in form:  # no box ticked = nobody is greeted after the hours
                         changes.setdefault(section, {})[name] = ",".join(form.getlist(key))
+                elif key == "collect.skip_people":
+                    if "collect.skip_people_shown" in form:  # no box ticked = photos are collected for everyone
+                        changes.setdefault(section, {})[name] = ",".join(form.getlist(key))
                 elif key == "fine_notice.approvers":
                     if "fine_notice.approvers_shown" in form:  # no box ticked = nobody approves
                         changes.setdefault(section, {})[name] = ",".join(form.getlist(key))

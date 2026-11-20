@@ -748,3 +748,45 @@ def test_on_macos_a_greeting_is_played_by_afplay_in_a_process_of_its_own(monkeyp
     greeting.play_audio(np.zeros(24000, dtype="float32"), 24000)
     assert played == [(__file__, 24000, 24000, 1 + greeting.SAY_TIMEOUT_S)]
     assert not list(tmp_path.iterdir())  # the file is gone once heard
+
+
+def test_group_greeting_is_as_loud_as_one_persons(monkeypatch):
+    """The names and the line of a group greeting are brought to the line's own loudness, not to a fixed low
+    one: a group heard its greeting about 10 dB quieter than one person heard theirs."""
+    import numpy as np
+    from attendance.core import greeting
+
+    rate = 24000
+    tone = lambda level, seconds: (np.sin(np.arange(int(rate * seconds)) * 0.2) * level * np.sqrt(2)).astype(np.float32)
+    made = {"Anh An!": tone(0.36, 0.5), "Chị Lan!": tone(0.12, 0.5), "Cả nhà tới rồi!": tone(0.30, 1.5)}
+
+    class G(greeting.Greeter):
+        def __init__(self):
+            pass
+
+        def _audio(self, said, voice, day, ahead=False, keep=False):
+            return made[said], rate
+
+    said = f" {greeting.PART} ".join(made)
+    audio, r = G()._joined(said, "voice", None)
+    assert r == rate and float(np.abs(audio).max()) <= 0.98
+    line = audio[-int(rate * 1.4):]
+    name_1, name_2 = audio[:int(rate * 0.45)], None
+    assert abs(greeting.voiced_level(line) - 0.30) < 0.02  # the line as it was made
+    assert abs(greeting.voiced_level(name_1) - 0.30) < 0.04  # a loud name brought down to it
+    gap = int(rate * (0.5 + greeting.NAME_GAP_S))
+    assert abs(greeting.voiced_level(audio[gap:gap + int(rate * 0.45)]) - 0.30) < 0.04  # a quiet name brought up
+
+
+def test_a_sentence_without_a_tag_is_opened_with_a_cheerful_one():
+    from attendance.core.greeting import BRIGHT, brightened, untagged
+
+    tags = ["laughs", "cheerfully", "excited", "happily", "playfully"]
+    said = brightened("Anh Minh tới rồi nè!", tags)
+    assert said.endswith("] Anh Minh tới rồi nè!") and said[1:said.index("]")] in BRIGHT
+    assert said == brightened("Anh Minh tới rồi nè!", tags)  # the same every time: its audio file is found again
+    assert untagged(said) == "Anh Minh tới rồi nè!"
+    assert brightened("[gasps] Ủa anh Minh!", tags) == "[gasps] Ủa anh Minh!"  # opens with a tag already
+    assert brightened("Anh Minh tới rồi nè!", ["laughs", "gasps"]) == "Anh Minh tới rồi nè!"  # the office took them out
+    assert brightened("", tags) == ""
+    assert {brightened(f"Câu số {n}!", tags).split("]")[0] for n in range(40)} == {f"[{t}" for t in BRIGHT}

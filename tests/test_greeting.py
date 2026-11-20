@@ -1,7 +1,10 @@
 """The greeting at the door: spoken once a day per person, late or on time by the server's rules, never in the camera's way."""
+import datetime as dt
 import json
 import re
 import time
+
+import pytest
 
 from attendance import server
 from attendance.core import greeting
@@ -668,3 +671,88 @@ def test_only_two_or_three_of_the_longest_streaks_are_cheered_each_day(core):
         assert habits[e] == f"on time {length[e]} work days in a row"
     app.service._greeting_habits = None
     assert person_habits(app.service, DAY) == habits  # the same few all day
+
+
+def test_the_speaker_is_kept_awake_between_greetings(core):
+    """A mains speaker that sleeps without a signal: a hum from "from" on, again whenever it had no sound for
+    "every" minutes, only on work days, only while the door greets, and never while someone waits."""
+    import numpy as np
+
+    app, clock, g, said, _ = make(core)
+    s = app.cfg.greeting
+    played = []
+    play = lambda audio, rate: played.append((len(audio) / rate, float(np.abs(audio).max())))
+    clock.t = at(7, 45)
+    assert g.awake_due(clock.t) is None and not g.keep_awake(play)  # switched off
+    s.speaker_awake, s.speaker_awake_from, s.speaker_awake_every, s.speaker_awake_level = True, "07:30", 5, 6
+    clock.t = at(7, 29)
+    assert not g.keep_awake(play)
+    clock.t = at(7, 30)
+    assert g.keep_awake(play) and played == [(greeting.AWAKE_FIRST_S, pytest.approx(0.18, abs=0.02))]  # the wake-up: longer, louder
+    clock.t = at(7, 34)
+    assert not g.keep_awake(play)
+    clock.t = at(7, 35)
+    assert g.keep_awake(play) and played[-1] == (greeting.AWAKE_S, pytest.approx(0.18, abs=0.02))  # the tone nobody hears
+    g._sound_at = at(7, 38)  # a greeting was said: the speaker had its signal
+    clock.t = at(7, 41)
+    assert not g.keep_awake(play)
+    clock.t = at(7, 43)
+    g.arrived("A", clock.t)  # someone waits to be greeted: the greeting goes first
+    assert not g.keep_awake(play)
+    assert g.speak_next(timeout=0)
+    end = app.cfg.schedule.clocks()[2]
+    clock.t = at(end.hour, end.minute)  # the camera has stopped
+    assert g.awake_due(clock.t) is None
+    clock.t = at(end.hour - 1, 59)
+    assert g.awake_due(clock.t) == "again"
+    g.set_rules({"day": DAY.isoformat(), "workday": False, "people": {}})
+    clock.t = at(8, 30)
+    assert g.awake_due(clock.t) is None  # a day off
+
+    def broken(audio, rate):
+        raise OSError("no output device")
+    g.set_rules({"day": DAY.isoformat(), "workday": True, "people": {}})
+    g._sound_at = None
+    assert g.keep_awake(broken) and "no output device" in g.awake_error and not g.keep_awake(broken)  # not tried again at once
+
+
+def test_the_speaker_is_not_woken_twice_when_the_app_starts_again(core):
+    app, clock, g, _, _ = make(core)
+    s = app.cfg.greeting
+    s.speaker_awake, s.speaker_awake_from, s.speaker_awake_every = True, "07:30", 5
+    played = []
+    clock.t = at(8, 0)
+    assert g.keep_awake(lambda audio, rate: played.append(len(audio) / rate)) and played == [greeting.AWAKE_FIRST_S]
+    again = Greeter(app.cfg, app.store, clock, lambda d: app.service.window(d).late_from, speak=lambda *a, **k: None,
+                    write=lambda people, day: {}, sleep=lambda s: None)  # the app has started again
+    clock.t = at(8, 2)
+    assert again.awake_due(clock.t) is None
+    clock.t = at(8, 5)
+    assert again.awake_due(clock.t) == "again"  # the short hum, not the wake-up
+    clock.t = at(8, 0) + dt.timedelta(days=1)
+    assert again.awake_due(clock.t) == "first"  # a new day: woken again
+
+
+def test_only_the_wake_up_can_be_heard():
+    import numpy as np
+
+    def loudest_hz(audio):
+        spectrum = np.abs(np.fft.rfft(audio))
+        return float(np.fft.rfftfreq(len(audio), 1 / greeting.AWAKE_RATE)[spectrum.argmax()])
+
+    assert loudest_hz(greeting.awake_signal(6, first=True)) == pytest.approx(55, abs=2)
+    silent = greeting.awake_signal(6)
+    assert loudest_hz(silent) == pytest.approx(20, abs=1) and abs(float(silent[0])) < 1e-6 and abs(float(silent[-1])) < 1e-3
+    spectrum = np.abs(np.fft.rfft(silent)) ** 2
+    hz = np.fft.rfftfreq(len(silent), 1 / greeting.AWAKE_RATE)
+    assert spectrum[hz > 60].sum() / spectrum.sum() < 1e-4  # nothing of it where a small speaker plays
+
+
+def test_awake_settings_are_checked(core):
+    app, _, _ = core
+    app.cfg.greeting.speaker_awake_every = 481
+    with pytest.raises(ValueError):
+        app.cfg.validate()
+    app.cfg.greeting.speaker_awake_every, app.cfg.greeting.speaker_awake_level = 5, 80
+    with pytest.raises(ValueError):
+        app.cfg.validate()

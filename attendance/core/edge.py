@@ -98,6 +98,12 @@ class EdgeClient:
         """What the door said to these people, for the server's Today page."""
         self._enqueue({"kind": "greeted", "ts": ts.isoformat(), "employee_ids": employee_ids, "text": text, "said": said})
 
+    def crowd(self, row: dict) -> None:
+        """A group at the door and how many of it were named (crowd.py), for the server's Groups page."""
+        self._enqueue({"kind": "crowd", "ts": row["start"], "until": row["end"], "people": row["people"],
+                       "faces": row["faces"], "named": row["named"], "names": row["names"], "bodies": row["bodies"],
+                       "image": row["image"]})
+
     def _enqueue(self, event: dict) -> None:
         try:
             self.store.edge_enqueue({"id": uuid.uuid4().hex, **event}, dt.datetime.now(dt.timezone.utc))

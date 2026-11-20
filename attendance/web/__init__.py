@@ -30,8 +30,9 @@ PUBLIC = {"personal_page", "personal_note", "static", "late_photo",  # late_phot
           # the fine notice's pages: guarded by the day's token and their opening hours (web/fines.py)
           "fines_page", "fines_appeal", "fines_photo", "fines_review", "fines_decide", "fines_review_photo"}
 # What the read-only login may open; it may never send a form.
-VIEWER_PAGES = {"index", "evidence_page", "evidence_zip", "unknowns", "report", "accuracy", "audit",
-                "report_summary_csv", "report_details_csv", "media", "models_json"}
+# What the read-only login may open: the Today page and its own account page, nothing else (no camera pictures,
+# no reports, no review); it may never send a form, except to sign out.
+VIEWER_PAGES = {"index", "account_page", "models_json"}
 
 
 def _date(value: str | None, default: dt.date) -> dt.date:

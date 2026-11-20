@@ -37,11 +37,11 @@ EDITABLE: dict[str, list[str]] = {
     "web": ["public_url", "password", "viewer_username", "viewer_password"],
     "updates": ["enabled"],
     "backup": ["folder", "time", "keep_days", "include_photos"],
-    "collect": ["enabled", "start", "end", "min_score", "per_day", "enough", "fps", "review_per_day"],
+    "collect": ["enabled", "start", "end", "min_score", "per_day", "enough", "fps", "review_per_day", "skip_people"],
     "greeting": ["enabled", "key", "model", "engine", "engine_en", "zerotts_voice", "zerotts_voices_dir",
                  "voice", "voice_en", "rate", "until", "until_people", "zerotts_speed", "zerotts_liveliness",
                  "elevenlabs_key", "elevenlabs_voice", "elevenlabs_voice_en", "elevenlabs_key2", "elevenlabs_voice2",
-                 "elevenlabs_key3", "elevenlabs_voice3", "elevenlabs_model", "elevenlabs_prefix", "elevenlabs_stability", "elevenlabs_speed", "loudness", "birthdays", "speaker", "speaker_min_volume", "elevenlabs_emotions", "elevenlabs_tags", "style", "trends", "trends_research", "office", "location",
+                 "elevenlabs_key3", "elevenlabs_voice3", "elevenlabs_model", "elevenlabs_prefix", "elevenlabs_stability", "elevenlabs_speed", "loudness", "birthdays", "speaker", "speaker_min_volume", "speaker_awake", "speaker_awake_from", "speaker_awake_every", "speaker_awake_level", "elevenlabs_emotions", "elevenlabs_tags", "style", "trends", "trends_research", "office", "location",
                  "unknown", "tease"],
     "": ["retention_days", "late_evidence_days", "healthcheck_url", "base_api_key", "base_account_key"],
 }

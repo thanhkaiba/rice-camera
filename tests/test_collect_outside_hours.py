@@ -169,3 +169,24 @@ def test_naming_it_teaches_the_face_but_records_no_arrival(collect):
     assert "no attendance recorded" in reply.get_data(as_text=True)
     assert app.gallery.counts()["C"] == 2
     assert "C" not in app.store.checkins(DAY)
+
+
+def test_nothing_is_collected_for_someone_switched_off_in_settings(collect):
+    """Someone who always wears a mask: their photos would make other hidden faces look like them."""
+    app, clock, c = collect
+    app.cfg.collect.skip_people = "A"
+    assert seen(app, c, alice(0), 0.0) == 0 and seen(app, c, alice(1), 0.5) == 0
+    assert collected(app) == []
+    app.cfg.collect.skip_people = "B,C"
+    assert seen(app, c, alice(2), 10.0) == 0 and seen(app, c, alice(3), 10.5) == 1
+
+
+def test_people_without_collection_are_saved_from_the_settings_form(core):
+    from attendance.web import create_app
+    app, _, _ = core
+    client = create_app(app).test_client()
+    page = client.get("/settings").get_data(as_text=True)
+    assert 'name="collect.skip_people" value="A"' in page and 'name="collect.skip_people_shown"' in page
+    app.cfg.collect.skip_people = "A, A ,B"
+    app.cfg.validate()
+    assert app.cfg.collect.skip_people == "A,B"

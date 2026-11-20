@@ -19,16 +19,16 @@
 <style>:root[data-theme="dark"] .only-light, :root:not([data-theme="dark"]) .only-dark { display: none; }</style>
 </head>
 <body class="{{ 'viewer' if role == 'viewer' or (shadow_site and nav != 'settings_page') }}{{ ' readonly' if shadow_site }}" data-camera-check-url="{{ url_for('camera_check') }}" data-models-url="{{ url_for('models_json') }}">
-{% set reports = nav in ('report', 'accuracy', 'audit') %}
+{% set reports = nav in ('report', 'accuracy', 'groups_page', 'audit') %}
 <header class="topbar"><div class="topbar-inner">
   <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">{{ logo() }}</span>Attendance</a>
   <nav class="nav">
     {% if not following %}<a href="{{ url_for('index') }}" class="{{ 'on' if nav == 'index' }}">{{ icon('today', 'i') }}Today</a>
-    {% if pending or nav == 'unknowns' %}
+    {% if (pending or nav == 'unknowns') and role != 'viewer' %}
     <a href="{{ url_for('unknowns') }}" class="{{ 'on' if nav == 'unknowns' }}">{{ icon('review', 'i') }}Review{% if pending %} <span class="count">{{ pending }}</span>{% endif %}</a>
     {% endif %}
     {% if role != 'viewer' %}<a href="{{ url_for('employees') }}" class="{{ 'on' if nav in ('employees', 'employee', 'calendar_page') }}">{{ icon('employees', 'i') }}People</a>{% endif %}
-    <a href="{{ url_for('report') }}" class="{{ 'on' if reports }}">{{ icon('report', 'i') }}Reports</a>{% endif %}
+    {% if role != 'viewer' %}<a href="{{ url_for('report') }}" class="{{ 'on' if reports }}">{{ icon('report', 'i') }}Reports</a>{% endif %}{% endif %}
     {% if role != 'viewer' and not following %}<a href="{{ url_for('greetings_page') }}" class="{{ 'on' if nav == 'greetings_page' }}">{{ icon('wave', 'i') }}Greetings</a>{% endif %}
     {% if role != 'viewer' and not office %}<a href="{{ url_for('live_page') }}" class="{{ 'on' if nav == 'live_page' }}">{{ icon('live', 'i') }}Camera</a>{% endif %}
     {% if role != 'viewer' %}<a href="{{ url_for('status_page') }}" class="{{ 'on' if nav == 'status_page' }}">{{ icon('activity', 'i') }}Status</a>{% endif %}
@@ -40,6 +40,7 @@
     {% endif %}
     {% if role == 'viewer' %}<span class="badge info" title="This login can look but not change anything">{{ icon('eye') }}Read-only</span>{% endif %}
     <button class="icon-link" id="theme-toggle" type="button" aria-label="Switch light/dark theme" title="Light / dark"><span class="only-light">{{ icon('moon') }}</span><span class="only-dark">{{ icon('sun') }}</span></button>
+    {% if role == 'viewer' %}<a href="{{ url_for('account_page') }}" class="icon-link {{ 'on' if nav == 'account_page' }}" title="Your account" aria-label="Your account">{{ icon('settings') }}</a>{% endif %}
     {% if role != 'viewer' and not following %}<a href="{{ url_for('settings_page') }}" class="icon-link {{ 'on' if nav in ('settings_page', 'setup_page') }}"
        title="Settings{% if setup_open %} ({{ setup_open }} setup step{{ 's' if setup_open > 1 }} left){% endif %}" aria-label="Settings">
       {{ icon('settings') }}
@@ -75,6 +76,7 @@
   <nav class="seg icons">
     <a href="{{ url_for('report') }}" class="{{ 'on' if nav == 'report' }}" title="Late &amp; absence">{{ icon('report') }}<span class="lbl">Late &amp; absence</span></a>
     <a href="{{ url_for('accuracy') }}" class="{{ 'on' if nav == 'accuracy' }}" title="Accuracy">{{ icon('accuracy') }}<span class="lbl">Accuracy</span></a>
+    <a href="{{ url_for('groups_page') }}" class="{{ 'on' if nav == 'groups_page' }}" title="Groups at the door">{{ icon('employees') }}<span class="lbl">Groups</span></a>
     <a href="{{ url_for('audit') }}" class="{{ 'on' if nav == 'audit' }}" title="Change log">{{ icon('log') }}<span class="lbl">Change log</span></a>
   </nav>
   {% endif %}

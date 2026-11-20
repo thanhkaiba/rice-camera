@@ -20,6 +20,7 @@ from . import (
     first_setup,
     late_message_status,
     leave_status,
+    role,
     pending_reminder_status,
 )
 
@@ -91,6 +92,8 @@ def register(app: Flask, core: "App") -> None:
                 "arrival": bool(a and x.status == "ok" and a.first_seen == x.ts and a.source == x.source),
                 "source": SOURCES.get(x.source, x.source), "score": round(x.score * 100) if x.score else None,
                 "image": url_for("media", path=x.image) if x.image else None})
+        if role(cfg) == "viewer":  # the read-only login gets the day's list only: no camera pictures, no sources
+            sightings = {}
         return render_template("index.html", rep=rep, employees=store.employees(), sightings=sightings,
                                request_groups=request_groups, request_memberships=request_memberships,
                                late=lambda a: minutes_late(a, rep.window), today=today,

@@ -238,6 +238,17 @@ def register(app, core) -> None:
         core.store.log(core.service.now(), person.email, "Google login", "")
         return redirect(pending["next"])
 
+    @app.get("/account")
+    def account_page():
+        """Who is signed in, and the way out: all the read-only login has instead of Settings."""
+        from flask import render_template
+
+        from . import role
+
+        who = identity()
+        person = core.store.employee(who.get("employee_id", "")) if who and who.get("kind") == "google" else None
+        return render_template("account.html", who=who, person=person, account_role=role(core.cfg))
+
     @app.post("/logout")
     def logout():
         check_csrf()

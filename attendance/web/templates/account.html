@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% set title = 'Your account' %}
+{% block body %}
+<div class="page-head"><div><h1>Your account</h1></div></div>
+<div class="panel" style="max-width:520px">
+  <div class="kv">
+    {% if person %}<div><span class="hint">Name</span><strong>{{ person.name }}</strong></div>{% endif %}
+    <div><span class="hint">Signed in as</span><strong>{{ who.user if who else 'the read-only login' }}</strong></div>
+    <div><span class="hint">Sign-in</span><span>{{ 'Google' if who and who.kind == 'google' else 'Password' }}</span></div>
+    <div><span class="hint">Access</span><span>{% if account_role == 'viewer' %}Read-only: the Today page{% else %}Admin{% endif %}</span></div>
+  </div>
+  {% if who %}
+  <form method="post" action="{{ url_for('logout') }}" style="margin-top:16px">{% include "_csrf.html" %}<button>{{ icon('close') }}Sign out</button></form>
+  {% else %}
+  <p class="hint" style="margin-top:14px">This browser signed in with the password prompt: close the browser to sign out.</p>
+  {% endif %}
+</div>
+{% endblock %}

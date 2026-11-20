@@ -173,6 +173,14 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
             store.add_embedding(str(event["model"]), employee, _vector(event["vector"]), str(event["source"]), ts, image,
                                 event.get("quality_ok"), event.get("quality"))
             core.library.reload()
+        elif event["kind"] == "crowd":  # a group at the door, counted on the Mac
+            people, faces, named = (int(event[k]) for k in ("people", "faces", "named"))
+            if not (0 <= named <= people <= 200 and 0 <= faces <= 200):
+                raise ValueError("bad group")
+            store.add_crowd({"id": str(event["id"])[:32], "day": ts.date().isoformat(), "start": ts.isoformat(),
+                             "end": _when(event["until"]).isoformat(), "people": people, "faces": faces, "named": named,
+                             "names": [str(n)[:64] for n in (event.get("names") or [])[:200]],
+                             "bodies": bool(event.get("bodies")), "image": image})
         elif event["kind"] == "alert":
             service.alert(str(event["text"])[:1000])
         elif event["kind"] == "greeted":  # what the door said: kept for the Today page

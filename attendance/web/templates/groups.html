@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% set title = 'Groups' %}
+{% macro pct(n, total) %}{% if total %}{{ '%.0f'|format(100 * n / total) }}%{% else %}–{% endif %}{% endmacro %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>Groups at the door</h1>
+    <p class="subtitle">Every time three or more people are in the picture at once, the office computer counts how many of them it named and keeps one picture of the moment. With <em>Whole people</em> tracking a person whose face was never found counts as missed; with <em>Faces only</em> such a person is not counted at all. Someone walking away from the camera counts as not named, so read the rate on the morning's arrivals.</p>
+  </div>
+</div>
+
+{% if not days %}
+<div class="panel"><p class="hint" style="margin:0">No group has been counted yet (the office computer counts them from version 1.1.91 on).</p></div>
+{% else %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Day</th><th>Groups</th><th>People in them</th><th>Faces found</th><th>Named</th><th>Named, of people</th><th>Counted as</th></tr></thead>
+    <tbody>
+    {% for d in days %}
+      <tr class="{{ 'on' if d.day == day.isoformat() }}">
+        <td><a href="{{ url_for('groups_page', day=d.day) }}">{{ d.day }}{{ ' · today' if d.day == today.isoformat() }}</a></td>
+        <td>{{ d.groups }}</td><td>{{ d.people }}</td><td>{{ d.faces }} <span class="hint">{{ pct(d.faces, d.people) }}</span></td>
+        <td>{{ d.named }}</td><td><strong>{{ pct(d.named, d.people) }}</strong></td>
+        <td class="hint">{{ 'bodies' if d.bodies else 'faces (some groups)' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 style="margin:22px 0 10px; font-size:1.1em">{{ day.strftime('%d %b %Y') }} · {{ groups|length }} group{{ '' if groups|length == 1 else 's' }}</h2>
+{% if not groups %}<div class="panel"><p class="hint" style="margin:0">No group on this day.</p></div>{% endif %}
+<div class="crowd-grid">
+  {% for g in groups %}
+  <figure class="crowd-card">
+    {% if g.image %}<a href="{{ url_for('media', path=g.image) }}" target="_blank" rel="noopener"><img src="{{ url_for('media', path=g.image) }}" alt="The group at {{ g.start.strftime('%H:%M:%S') }}" loading="lazy"></a>{% endif %}
+    <figcaption>
+      <div><strong>{{ g.start.strftime('%H:%M:%S') }}</strong> · {{ g.people }} {{ 'people' if g.bodies else 'faces' }} · {{ g.faces }} faces found ·
+        <span class="badge {{ 'ok' if g.named >= g.people else 'bad' if g.named * 2 < g.people else 'late' }}">{{ g.named }} named · {{ pct(g.named, g.people) }}</span></div>
+      <div class="hint">{{ g.who|join(', ') if g.who else 'nobody named' }}</div>
+    </figcaption>
+  </figure>
+  {% endfor %}
+</div>
+<p class="hint" style="margin-top:14px">In the pictures: a green box is a face named in that frame, an orange one a face not named, a red one a person whose face was not found, a light blue one a person with a face.</p>
+{% endif %}
+{% endblock %}

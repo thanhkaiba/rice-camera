@@ -136,7 +136,6 @@ def test_google_viewer_is_enforced_on_direct_urls(portal, monkeypatch):
     assert client.get("/", headers={"Accept": "application/json"}).status_code == 401
     assert google_login(client, monkeypatch).status_code == 302
     assert client.get("/").status_code == 200
-    assert client.get("/report").status_code == 200
     assert client.get("/settings").status_code == 403
     assert client.get("/employees/B").status_code == 403
     assert client.post("/employees/B", data={"portal_role": "admin"}).status_code == 403
@@ -698,3 +697,30 @@ def test_a_server_without_the_google_library_refuses_the_token_with_a_clear_mess
         with pytest.raises(auth.GoogleLoginError, match="not installed") as caught:
             auth.verify("client-id", "some-token")
     assert caught.value.status == 503
+
+
+def test_viewer_sees_only_today_without_pictures_or_sources(portal, monkeypatch):
+    """The read-only login: the Today page and its own account page; no other page, no camera picture, and not
+    how an arrival was recorded (camera, review or by hand)."""
+    client, core_app = portal
+    store, service = core_app.store, core_app.service
+    now = service.now()
+    store.record_checkin(now.date(), "A", now, "camera", 0.61, "crops/2026-10-14/090000_000000_A_x.jpg")
+    assert google_login(client, monkeypatch).status_code == 302
+    page = client.get("/").get_data(as_text=True)
+    assert "Read-only" in page and ">Source<" not in page and 'class="src"' not in page
+    assert "/media/" not in page and 'class="avatar empty"' in page  # everyone has the plain initial
+    assert "const SIGHTINGS = {}" in page
+    for link in ("/report", "/unknowns", "/employees", "/greetings", "/status", "/settings", "/live"):
+        assert f'href="{link}"' not in page, link
+    assert 'href="/account"' in page
+    for path in ("/report", "/accuracy", "/groups", "/audit", "/unknowns", "/greetings", "/status", "/employees",
+                 "/media/crops/2026-10-14/090000_000000_A_x.jpg", "/evidence/2026-10-14/A"):
+        assert client.get(path).status_code in (403, 404), path
+    account = client.get("/account")
+    text = account.get_data(as_text=True)
+    assert account.status_code == 200 and "bob@example.com" in text and "Read-only: the Today page" in text and "Sign out" in text
+    with client.session_transaction() as session:
+        token = session["csrf_token"]
+    assert client.post("/logout", data={"csrf_token": token}).status_code == 302
+    assert client.get("/").status_code == 302  # signed out

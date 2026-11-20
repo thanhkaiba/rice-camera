@@ -196,11 +196,13 @@ the same way or make the same joke as any of them.
 EMOTIONS = """- The voice is a lively actor (Eleven v3) that can also make sounds. Put tags in square brackets, \
 choosing only from: {tags}. A tag is never read aloud: a sound tag ([gasps], [laughs], [chuckles], [giggles], \
 [sighs happily], [clears throat], [applause]) makes that sound right there; a delivery tag ([excited], [cheerfully], \
-[surprised], [mischievously], [whispers]) colours the words after it, until the next tag. Use them like a stand-up \
+[happily], [playfully], [surprised], [mischievously]) colours the words after it, until the next tag. Use them like a stand-up \
 comedian: a gasp of mock shock before the surprise, a laugh, giggle or chuckle right after the punchline, a happy \
-sigh for relief, clearing the throat before a mock announcement and applause after a grand one, a whisper only for a \
-playful secret that makes sense. One to three tags in a greeting (a short one: one or none), not every greeting \
-laughs, and a different mix from person to person. Write for the ear too: open with a Vietnamese interjection where \
+sigh for relief, clearing the throat before a mock announcement and applause after a grand one. EVERY greeting opens with a tag, so no sentence is read in a flat voice: a bright \
+delivery tag ([cheerfully], [excited], [happily], [playfully]) or a sound of surprise or joy; most greetings also \
+have a laugh, giggle or chuckle. Two or three tags in a greeting (a very short one: one or two), and a different mix \
+from person to person. The voice should sound like someone grinning: glad to see each person, never formal, flat, \
+solemn or like an announcement. Write for the ear too: open with a Vietnamese interjection where \
 it is natural (Ủa, Ơ, Ơ kìa, Ồ, Trời ơi, Ui giời ơi, Ê), use "..." for a comic pause before the punchline, put at \
 most one WORD in capitals for emphasis, and end on a bright, rising note, usually with "!". Never a sad, tired, \
 bored, angry or sarcastic delivery, also for late arrivals. Example of the form only: \
@@ -579,16 +581,25 @@ def office_feedback(store, day: dt.date) -> dict:
     return {k: v for k, v in (("liked", liked), ("disliked", disliked), ("so_so", remarks)) if v}
 
 
+def voiced_level(audio, floor: float = 0.01) -> float:
+    """How loud `audio` is where someone speaks (RMS of the samples above `floor`); 0.0 for silence."""
+    import numpy as np
+
+    voiced = audio[np.abs(audio) > floor]
+    return float(np.sqrt(np.mean(voiced ** 2))) if voiced.size else 0.0
+
+
 def _smoothed(audio, rate: int, floor: float = 0.01, level: float = 0.09, fade_s: float = 0.012):
-    """A piece of a joined greeting: near-silence cut at both ends, brought to one loudness (RMS of the voiced
-    part) and faded in and out over a few milliseconds, so no join clicks or jumps."""
+    """A piece of a joined greeting: near-silence cut at both ends, brought to the loudness `level` (RMS of the
+    voiced part; never so far that its peaks would be cut off) and faded in and out over a few milliseconds, so
+    no join clicks or jumps."""
     import numpy as np
 
     loud = np.flatnonzero(np.abs(audio) > floor)
     if loud.size:
         audio = audio[max(0, loud[0] - int(rate * 0.01)): loud[-1] + int(rate * 0.02)]
-        voiced = audio[np.abs(audio) > floor]
-        audio = audio * (level / max(float(np.sqrt(np.mean(voiced ** 2))), 1e-4))
+        gain = level / max(voiced_level(audio, floor), 1e-4)
+        audio = audio * min(gain, 0.98 / max(float(np.abs(audio).max()), 1e-4))
     audio = np.clip(audio, -0.98, 0.98).astype(np.float32)
     n = min(int(rate * fade_s), len(audio) // 2)
     if n:
@@ -609,6 +620,20 @@ def acted(text: str, tags: list[str]) -> str:
     """`text` with only the emotion tags in `tags` left in it."""
     kept = TAG.sub(lambda m: m.group(0) if m.group(1).strip().lower() in tags else " ", text)
     return " ".join(kept.split()) if "[" in text else text
+
+
+BRIGHT = ("cheerfully", "excited", "happily", "playfully")  # delivery tags a flat sentence may be opened with
+
+
+def brightened(text: str, tags: list[str]) -> str:
+    """`text` opening with a cheerful delivery tag when it opens with no tag at all: Eleven v3 reads an
+    untagged sentence in an even, rather serious voice. The tag is picked by the sentence, so the same sentence
+    is always said the same way (and its audio file found again); nothing is added when `tags` has none of them."""
+    mine = [tag for tag in BRIGHT if tag in tags]
+    if not mine or not text.strip() or text.lstrip().startswith("["):
+        return text
+    pick = int(hashlib.sha1(untagged(text).encode()).hexdigest(), 16) % len(mine)
+    return f"[{mine[pick]}] {text.lstrip()}"
 
 
 class CloudSpeechError(RuntimeError):
@@ -666,6 +691,31 @@ def play_audio(audio, rate: int) -> None:
     except Exception:
         log.warning("The sound devices could not be read again; using the ones known at the start")
     sd.play(audio, rate, blocking=True)
+
+
+AWAKE_RATE = 24000
+AWAKE_KEY = "speaker_awake_at"  # when the speaker last got the hum, ISO: read again when the app starts
+AWAKE_S, AWAKE_FIRST_S = 3.0, 6.0  # the hum that keeps the speaker awake; the first of the day, which wakes it
+AWAKE_FIRST_GAIN = 3.0
+AWAKE_SILENT_HZ = 20  # the later signals of the day: too low to be heard
+
+
+def awake_signal(level: int, first: bool = False):
+    """The signal for a speaker that sleeps without one, `level` percent of full scale (never above half scale).
+    The first of the day is a soft low hum that can be heard (55 and 110 Hz, longer and louder): it wakes the
+    speaker. The later ones are a 20 Hz tone, below what a small speaker can play and what people hear: the
+    speaker's input still sees a signal, the office hears nothing. Both are faded in and out, so nothing clicks."""
+    import numpy as np
+
+    seconds = AWAKE_FIRST_S if first else AWAKE_S
+    peak = min(level / 100 * AWAKE_FIRST_GAIN, 0.5)  # the silent tone as strong as the wake-up: nobody hears it
+    t = np.arange(int(AWAKE_RATE * seconds)) / AWAKE_RATE
+    audio = (np.sin(2 * np.pi * 55 * t) + 0.6 * np.sin(2 * np.pi * 110 * t)) if first else np.sin(2 * np.pi * AWAKE_SILENT_HZ * t)
+    audio *= peak / float(np.abs(audio).max())
+    fade = int(AWAKE_RATE * (0.4 if first else 0.8))
+    audio[:fade] *= np.linspace(0, 1, fade)
+    audio[-fade:] *= np.linspace(1, 0, fade)
+    return audio.astype("float32")
 
 
 def louder(audio, gain: float):
@@ -735,6 +785,15 @@ class Greeter:
         self.on_greeted = lambda ids, ts, text, kind: None  # told what was said to whom: sent on to the server
         self._local: tuple | None = None
         self._last_said = -UNKNOWN_GAP_S  # time.monotonic() of the last greeting of any kind
+        # When the speaker last got a signal (a greeting or the hum). Kept in the store too, so the app starting
+        # again during the day does not wake the speaker a second time with the long, louder hum.
+        self._sound_at: dt.datetime | None = None
+        try:
+            kept = self.store.get(AWAKE_KEY)
+            self._sound_at = dt.datetime.fromisoformat(kept) if kept else None
+        except (TypeError, ValueError):
+            pass
+        self.awake_error: str | None = None
         self._taken: list[str] = []  # today's sentences of the others, while more are being written
         self._want_together = False
         self._carry_lock = threading.Lock()
@@ -862,7 +921,7 @@ class Greeter:
     def with_emotions(self, text: str, language: str) -> str:
         """`text` as the voice of `language` takes it: with the emotion tags it can act, or without any."""
         tags = self.emotion_tags(language)
-        return acted(text, tags) if tags else untagged(text)
+        return brightened(acted(text, tags), tags) if tags else untagged(text)
 
     def _search_trends(self, day: dt.date) -> list[str]:
         """What Claude finds on the web about what is in fashion to say in Vietnam now: "phrase — what it means"."""
@@ -1373,6 +1432,7 @@ class Greeter:
                 else:
                     audio, rate = self._audio(text, voice, self.now().date())
                 play_audio(louder(audio, self.settings.loudness), rate)
+                self._sound_at = self.now()  # the speaker has just had a signal
             else:
                 text = " ".join(text.replace(PART, " ").split())
                 subprocess.run(["say", "-v", voice, "-r", str(self.settings.rate), text],
@@ -1395,7 +1455,7 @@ class Greeter:
         import numpy as np
 
         *names, line = self.parts(said)
-        pieces, rate = [], None
+        read, rate = [], None
         for n, part in enumerate(names + [line]):
             audio, r = self._audio(part, voice, day, keep=n < len(names))
             audio = np.asarray(audio, dtype=np.float32)
@@ -1405,7 +1465,13 @@ class Greeter:
                 rate = r
             elif r != rate:  # one piece read by ZeroTTS instead of ElevenLabs: brought to the same rate
                 audio = np.interp(np.arange(0, len(audio), r / rate), np.arange(len(audio)), audio).astype(np.float32)
-            pieces.append(_smoothed(audio, rate))
+            read.append(audio)
+        # As loud as the line was made: that is how loud a greeting for one person is. (A fixed, low level made
+        # a group's greeting some 10 dB quieter than one person's from the same voice.)
+        level = voiced_level(read[-1]) or 0.09
+        pieces = []
+        for n, audio in enumerate(read):
+            pieces.append(_smoothed(audio, rate, level=level))
             if n < len(names):
                 pieces.append(np.zeros(int(rate * (NAME_GAP_S if n < len(names) - 1 else LINE_GAP_S)), dtype=np.float32))
         return np.concatenate(pieces), rate
@@ -1891,7 +1957,55 @@ class Greeter:
                 self._sleep(RETRY_S)
             self._sleep(0.2 if made else RENDER_IDLE_S)
 
+    def awake_due(self, now: dt.datetime) -> str | None:
+        """"first" or "again" when the hum that keeps the speaker awake is due now, else None: on work days from
+        Settings → "from" until the door stops greeting, when the speaker had no signal for "every" minutes."""
+        from .config import parse_clock
+
+        s = self.settings
+        if not (s.enabled and s.speaker_awake) or not self.rules(now.date()).get("workday", True):
+            return None
+        _, _, end = self.cfg.schedule.clocks()
+        if s.until_people:  # some people are greeted after the camera hours
+            end = max(end, parse_clock(s.until))
+        if not parse_clock(s.speaker_awake_from) <= now.time() < end:
+            return None
+        if self._sound_at is None or self._sound_at.date() != now.date():
+            return "first"
+        return "again" if now - self._sound_at >= dt.timedelta(minutes=s.speaker_awake_every) else None
+
+    def keep_awake(self, play=None) -> bool:
+        """Plays the hum when it is due and nobody waits to be greeted. True if it was played."""
+        now = self.now()
+        due = self.awake_due(now)
+        if not due or not self._queue.empty():
+            return False
+        with self._speech_lock:
+            try:
+                (play or play_audio)(awake_signal(self.settings.speaker_awake_level, first=due == "first"), AWAKE_RATE)
+                self.awake_error = None
+            except Exception as exc:
+                self.awake_error = f"{now:%H:%M} could not play the hum: {type(exc).__name__}: {str(exc)[:200]}"
+                log.warning("Speaker: %s", self.awake_error)
+            self._sound_at = self.now()  # after a failure too: tried again in "every" minutes, not at once
+            try:
+                self.store.put(AWAKE_KEY, self._sound_at.isoformat())
+            except Exception:
+                log.exception("Could not remember when the speaker was woken")
+        if due == "first":
+            log.info("Speaker: woken for the day (hum at level %d)", self.settings.speaker_awake_level)
+        return True
+
+    def _awake_loop(self) -> None:
+        while True:
+            try:
+                self.keep_awake()
+            except Exception:
+                log.exception("Keeping the speaker awake failed")
+            time.sleep(15)
+
     def start(self) -> None:
+        threading.Thread(target=self._awake_loop, name="speaker-awake", daemon=True).start()
         threading.Thread(target=self._speak_loop, name="greeting-speak", daemon=True).start()
         threading.Thread(target=self._write_loop, name="greeting-write", daemon=True).start()
         threading.Thread(target=self._render_loop, name="greeting-render", daemon=True).start()

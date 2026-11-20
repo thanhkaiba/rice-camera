@@ -354,6 +354,9 @@ class _CameraSlot:
         self.index, self.url = index, url
         self.camera = None  # vision.camera.Camera once opened
         self.processor = FrameProcessor(app, use_area=index == 0)
+        from .crowd import CrowdLog
+
+        self.crowd = CrowdLog(app.cfg, app.store, app.data_dir, send=app.edge.crowd if app.edge.enabled else None)
         self.face_regions: list = []  # where faces were in the last analysed frame
         self.health = FrameHealth()
         self.last_processed = self.last_chosen = self.last_recorded = self.last_drawn = 0.0
@@ -420,6 +423,7 @@ def run(cfg: Config) -> None:
     last_ping = last_tick = 0.0
     placement_saved = time.time()
     fps_since = time.time()
+    speed_since, speed_seen = time.time(), []  # for the log: the frame rate over five minutes
     was_in_window = was_greeting = False
 
     def handle(decisions: list[Decision], slot: _CameraSlot, greet_only: bool = False) -> None:
@@ -486,6 +490,11 @@ def run(cfg: Config) -> None:
                 app.enrolment.observe([(f, c) for f, c, _ in matched], frame)
             elif collecting:
                 app.collector.observe(matched, frame, ts)
+            if not enrolling:
+                try:
+                    slot.crowd.observe(ts, raw, matched, people, decisions)
+                except Exception:
+                    log.exception("The group at the door could not be counted")
             handle(decisions, slot, greet_only=greeting and not in_window)
             if in_window and not enrolling:
                 app.placement.add_frame(ts.date(), [f for f, _, _ in matched], cfg.recognition,
@@ -580,6 +589,16 @@ def run(cfg: Config) -> None:
             shown = slots[live.viewed] if live.viewed < len(slots) else slots[0] if slots else None
             live.fps = shown.fps if shown else 0.0
             live.source_fps = shown.source_fps if shown else 0.0
+            if shown and shown.fps > 0:
+                speed_seen.append((shown.fps, shown.source_fps))
+            if time.time() - speed_since >= 300:
+                if speed_seen:  # how fast frames are analysed: the number to watch when a heavier model is tried
+                    log.info("Speed: %.1f frames/s analysed of %.1f from the camera (%s tracking, faces at %d px, %s)",
+                             sum(f for f, _ in speed_seen) / len(speed_seen),
+                             sum(c for _, c in speed_seen) / len(speed_seen), cfg.tracking.mode,
+                             cfg.recognition.det_size, Path(cfg.tracking.person_model).stem
+                             if cfg.tracking.mode == "person" else "no person model")
+                speed_since, speed_seen = time.time(), []
         if slots:
             live.cameras = [slot.summary(len(slots)) for slot in slots]
         else:

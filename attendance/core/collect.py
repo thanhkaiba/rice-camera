@@ -130,6 +130,8 @@ class Collector:
                 employee = self._wanted(face, candidates)
                 if employee is None or employee not in self._active:
                     continue
+                if employee in {v for v in c.skip_people.split(",") if v}:
+                    continue  # switched off for them in Settings: no new reference photos
                 key = ("person", pid) if pid is not None else ("employee", employee)
                 before = self._seen.get(key)
                 same = before is not None and before[0] == employee
