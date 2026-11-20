@@ -910,7 +910,7 @@
   // Only the settings of the voices chosen for Vietnamese and English are shown; the others stay in the form.
   const engineVi = document.getElementById('engine-vi'), engineEn = document.getElementById('engine-en');
   function showEngines() {
-    document.querySelectorAll('.engine-box').forEach(box => {
+    document.querySelectorAll('.engine-box[data-engine]').forEach(box => {  // a box of no voice (Speaker watch) stays
       box.hidden = ![engineVi.value, engineEn.value].includes(box.dataset.engine);
     });
     document.getElementById('cloud-account-field').hidden = engineVi.value !== 'elevenlabs';

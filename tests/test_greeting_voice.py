@@ -719,3 +719,12 @@ def test_settings_name_the_voices_in_use(core):
     app, _, _ = core
     page = create_app(app).test_client().get("/settings").get_data(as_text=True)
     assert "Now: <strong>Tram · southern woman" in page and "Now: <strong>Jess · Australian woman" in page
+
+
+def test_the_speaker_test_is_not_hidden_with_the_voices_not_chosen(core):
+    from attendance.web import create_app
+    app, _, _ = core
+    page = create_app(app).test_client().get("/settings").get_data(as_text=True)
+    box = page.split('id="speaker-watch"')[0].rsplit("<div", 1)[1]
+    assert "data-engine" not in box and "Test the speaker" in page
+    assert "querySelectorAll('.engine-box[data-engine]')" in page  # only voice boxes are shown and hidden by engine
