@@ -365,7 +365,7 @@ class GreetingConfig:
     # reads. Each has its own voice ID (a voice belongs to an account); empty: the voice ID of the first.
     elevenlabs_key: str = field(default="", repr=False)
     elevenlabs_voice: str = "6Xq32rHt6oAu98TBDKfr"  # the voice ID from the ElevenLabs voice library (Tram)
-    elevenlabs_voice_en: str = "IKne3meq5aSn9XLyUdCD"  # the voice for people greeted in English (Charlie, Australian); empty: the same voice
+    elevenlabs_voice_en: str = "ys3XeJJA4ArWMhRpcX1D"  # the voice for people greeted in English (Jess, Australian woman); empty: the same voice
     elevenlabs_key2: str = field(default="", repr=False)
     elevenlabs_voice2: str = ""
     elevenlabs_key3: str = field(default="", repr=False)

@@ -296,13 +296,13 @@
           <datalist id="elevenlabs-voices">
             {% for id, label in cloud_voices %}<option value="{{ id }}">{{ label }}</option>{% endfor %}
           </datalist>
-          <span class="hint">Click the box for suggestions, or paste an ID: voice’s menu (⋯) → Copy voice ID. Library voices need a paid ElevenLabs plan.</span>{{ src('greeting.elevenlabs_voice') }}</label>
+          <span class="hint">{% for id, label in cloud_voices if id == s.greeting.elevenlabs_voice %}Now: <strong>{{ label }}</strong>. {% endfor %}Click the box for suggestions, or paste an ID: voice’s menu (⋯) → Copy voice ID. Library voices need a paid ElevenLabs plan.</span>{{ src('greeting.elevenlabs_voice') }}</label>
         <label class="field">English voice ID
           <input name="greeting.elevenlabs_voice_en" value="{{ s.greeting.elevenlabs_voice_en }}" list="elevenlabs-voices-en" autocomplete="off">
           <datalist id="elevenlabs-voices-en">
             {% for id, label in cloud_voices_en %}<option value="{{ id }}">{{ label }}</option>{% endfor %}
           </datalist>
-          <span class="hint">For people greeted in English, when English is read by ElevenLabs. Empty: the same voice as Vietnamese.</span>{{ src('greeting.elevenlabs_voice_en') }}</label>
+          <span class="hint">{% for id, label in cloud_voices_en if id == s.greeting.elevenlabs_voice_en %}Now: <strong>{{ label }}</strong>. {% endfor %}For people greeted in English, when English is read by ElevenLabs. Empty: the same voice as Vietnamese.</span>{{ src('greeting.elevenlabs_voice_en') }}</label>
       </div>
       <div class="form-row">
         <label class="field">Model

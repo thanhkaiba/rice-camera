@@ -100,6 +100,7 @@ class App:
         self.machine.speak_failed = lambda: self.greeter.speak_failed
         self.edge.on_speaker = self.speaker_test
         self.edge.render_text = self.greeter.render_text
+        self.edge.upcoming = self.greeter.upcoming
         from .remote_voice_creation import run_on_camera
 
         self.edge.on_create_voice = lambda payload: run_on_camera(self, payload)

@@ -73,7 +73,8 @@ CLOUD_VOICES = [("6Xq32rHt6oAu98TBDKfr", "Tram · southern woman, bright and fri
                 ("w2KTJ6MO4SIK6nWK4YH8", "Đuc Huy · southern man, young, warm and expressive"),
                 ("M0rVwr32hdQ5UXpkI3ni", "Hao · southern man, youthful and warm"),
                 ("UsgbMVmY3U59ijwK5mdh", "Trieu Duong · southern man, soft and calm")]
-CLOUD_VOICES_EN = [("kPzsL2i3teMYv0FxEYQ6", "Brittney · American woman, fun and vibrant"),
+CLOUD_VOICES_EN = [("ys3XeJJA4ArWMhRpcX1D", "Jess · Australian woman, relaxed and conversational"),
+                   ("kPzsL2i3teMYv0FxEYQ6", "Brittney · American woman, fun and vibrant"),
                    ("tnSpp4vdxKPjI9w0GnoV", "Hope · American woman, upbeat and clear"),
                    ("uYXf8XasLslADfZ2MB4u", "Hope · American woman, bubbly, chuckles"),
                    ("cgSgspJ2msm6clMCkdW9", "Jessica · American woman, playful and bright · works on the Free plan"),
@@ -773,6 +774,17 @@ class Greeter:
     def lines(self, day: dt.date) -> dict:
         saved = json.loads(self.store.get(LINES_KEY) or "{}")
         return saved.get("people", {}) if saved.get("day") == day.isoformat() else {}
+
+    def upcoming(self, day: dt.date) -> dict:
+        """Today's written sentences as people read them (no emotion tags), for the server's Greetings page:
+        what the door is going to say to whom, and the lines kept for a group."""
+        people = {pid: {"on_time": [untagged(t) for t in entry.get("on_time") or []],
+                        "late": [untagged(t) for t in entry.get("late") or []],
+                        "timed": entry.get("timed", True) is not False, "note": entry.get("note", "")}
+                  for pid, entry in self.lines(day).items()}
+        together = [{"language": line.get("language", "vi"), "text": untagged(line.get("text", ""))}
+                    for line in self.together_lines(day)]
+        return {"day": day.isoformat(), "people": people, "together": together}
 
     def waits_for_approval(self, person, ts: dt.datetime) -> bool:
         """Was: arriving inside the interval of a coming-late request not approved yet, they heard that the

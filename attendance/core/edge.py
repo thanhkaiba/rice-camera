@@ -41,6 +41,7 @@ JOBS_KEY = "edge_jobs_unsent"
 FOLLOW_S = 30.0
 FETCH_EMBEDDINGS = 200
 JOBS_REMEMBERED = 50
+UPCOMING_KEY = "edge_upcoming_sent"  # digest of the day's written greetings the server last took
 
 
 def _vector(vector) -> str | None:
@@ -65,6 +66,7 @@ class EdgeClient:
         self.on_speaker = None  # plays a test sound and tells what it played on
         self.render_text = None
         self.on_create_voice = None
+        self.upcoming = None  # day -> the day's written greetings, shown on the server's Greetings page
         self._preview_results = {}
         self._creation_jobs = {}
 
@@ -185,6 +187,26 @@ class EdgeClient:
         sent["days"] = {d: h for d, h in sent["days"].items() if d >= since}
         sent.update(people=people, gallery=gallery, camera=address, after=new[-1]["id"] if new else sent.get("after", 0))
         self.store.put(STATE_KEY, json.dumps(sent))
+
+    def send_upcoming(self) -> None:
+        """The day's written greetings reach the server's Greetings page, each time they change."""
+        if self.upcoming is None:
+            return
+        try:
+            body = json.dumps(self.upcoming(self._today()), ensure_ascii=False, sort_keys=True).encode()
+        except Exception:  # a fault here must not hold up the camera's events
+            log.exception("Could not read today's greetings for the server")
+            return
+        digest = hashlib.md5(body).hexdigest()
+        if digest == self.store.get(UPCOMING_KEY):
+            return
+        status, _ = self._send("POST", "/api/edge/greetings/upcoming", body, "application/json")
+        if status in PERMANENT:  # an older server has no page for them: tried again next time, quietly
+            log.debug("The server did not take today's greetings (HTTP %s)", status)
+            return
+        if status != 200:
+            raise ConnectionError(f"upcoming greetings answered HTTP {status}")
+        self.store.put(UPCOMING_KEY, digest)
 
     def heartbeat(self) -> None:
         body = json.dumps({**self.status(), "backlog": self.store.edge_backlog()}).encode()
@@ -348,6 +370,7 @@ class EdgeClient:
                 sent = self.deliver_batch()
                 if not sent and time.monotonic() - last_state >= (FOLLOW_S if self.following else STATE_S):
                     (self.follow if self.following else self.sync_state)()
+                    self.send_upcoming()
                     last_state = time.monotonic()
                 backoff = IDLE_S
                 self._sleep(0 if sent else IDLE_S)

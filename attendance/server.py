@@ -132,6 +132,7 @@ def build(home: Path, admin_password: str, token_sha256: str, *, admin_user: str
                                            application.extensions["voice_preview_lock"])
     _camera_is_at_the_office(application, office_url)
     core.photos_read_elsewhere = True
+    core.camera_elsewhere = lambda: camera_status(core)  # the Status page shows the Mac's camera, not this server's
     application.jinja_env.globals["shadow_site"] = shadow
     PUBLIC.update(edge_api.ENDPOINTS)
     edge_api.register(application, core, token_sha256, shadow=shadow)

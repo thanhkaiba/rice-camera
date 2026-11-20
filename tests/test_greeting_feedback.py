@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import re
 
 import pytest
@@ -79,3 +80,38 @@ def test_the_brief_for_claude_carries_the_feedback(core):
     assert "bá khí" in system and "one person in eight" in system
     g.set_rules({"day": day.isoformat(), "workday": True, "people": {}})
     assert "rated greetings" not in g.prompt([app.store.employee(a)], day)[0]
+
+
+def test_today_the_page_shows_what_the_door_is_still_going_to_say(core):
+    from attendance.core.greeting import LINES_KEY, Greeter
+    from attendance.web import create_app, edge_api
+    app, clock, _ = core
+    a, b, _ = people(app)
+    day = clock().date()
+    app.store.put(LINES_KEY, json.dumps({"day": day.isoformat(), "people": {
+        a: {"on_time": ["[cheerfully] Anh An tới sớm ghê!"], "late": ["Anh An vô thôi!"], "timed": True, "note": ""},
+        b: {"on_time": ["Chị Bình chào buổi sáng!"], "late": ["Chị Bình tới rồi!"], "timed": False, "note": ""}}}))
+    written = Greeter(app.cfg, app.store, clock, lambda d: clock()).upcoming(day)
+    assert written["people"][a]["on_time"] == ["Anh An tới sớm ghê!"] and written["people"][b]["timed"] is False
+    app.store.put(edge_api.UPCOMING_KEY, json.dumps({**written, "at": clock().isoformat()}))
+    said(app, clock, a, "Anh An tới sớm ghê!", day=day)
+    client = create_app(app).test_client()
+    coming = client.get("/greetings").get_data(as_text=True).split("Still to come today")[1].split("</details>")[0]
+    assert "1 person not greeted yet" in coming and "any time:</span> “Chị Bình tới rồi!”" in coming
+    assert "Anh An" not in coming  # greeted already: in the list below, to be marked
+    yesterday = (day - dt.timedelta(days=1)).isoformat()
+    assert "Still to come today" not in client.get(f"/greetings?day={yesterday}").get_data(as_text=True)
+
+
+def test_the_page_opens_on_today_once_the_sentences_are_written_even_before_anyone_is_greeted(core):
+    from attendance.web import create_app, edge_api
+    app, clock, _ = core
+    a, _, _ = people(app)
+    day = clock().date()
+    said(app, clock, a, "Hôm qua nè", day=day - dt.timedelta(days=1))
+    client = create_app(app).test_client()
+    assert "Still to come today" not in client.get("/greetings").get_data(as_text=True)  # nothing written: yesterday
+    app.store.put(edge_api.UPCOMING_KEY, json.dumps({"day": day.isoformat(), "at": clock().isoformat(), "together": [],
+                                                     "people": {a: {"on_time": ["Anh An sớm ghê!"], "late": [], "timed": True, "note": ""}}}))
+    page = client.get("/greetings").get_data(as_text=True)
+    assert "Still to come today" in page and "Anh An sớm ghê!" in page

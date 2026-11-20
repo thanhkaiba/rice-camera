@@ -136,13 +136,19 @@ def status(app: "App") -> dict:
 
     cfg, live = app.cfg, app.live
     backup = app.backup.status()
+    camera = {"state": live.camera_state, "ok": live.camera_state == "ok", "problem": live.problem,
+              "fps": round(live.fps, 1), "target_fps": cfg.camera.process_fps,
+              "source_fps": round(getattr(live, "source_fps", 0.0), 1), "decode_threads": cfg.camera.decode_threads,
+              "in_window": app.service.in_window(app.service.now()), "configured": bool(cfg.camera.urls()),
+              "cameras": list(live.cameras), "detail": camera_detail(cfg, live)}
+    remote = getattr(app, "camera_elsewhere", None)
+    if remote is not None:  # on the server: the camera runs on the office Mac, as its last heartbeat says
+        ok, state = remote()
+        camera.update(ok=ok, state=state, problem="" if ok else state, cameras=[],
+                      detail="as the office Mac reported " + ("just now" if ok else "it"))
     return {
         "version": __version__, "packaged": getattr(sys, "frozen", False),
-        "camera": {"state": live.camera_state, "ok": live.camera_state == "ok", "problem": live.problem,
-                   "fps": round(live.fps, 1), "target_fps": cfg.camera.process_fps,
-                   "source_fps": round(getattr(live, "source_fps", 0.0), 1), "decode_threads": cfg.camera.decode_threads,
-                   "in_window": app.service.in_window(app.service.now()), "configured": bool(cfg.camera.urls()),
-                   "cameras": list(live.cameras), "detail": camera_detail(cfg, live)},
+        "camera": camera,
         "uptime": camera_uptime(app),
         "usage": process_usage(),
         "backup": {"folder": cfg.backup.folder, "at": backup.get("at"), "ok": backup.get("ok"),

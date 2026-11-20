@@ -712,3 +712,10 @@ def test_the_door_can_play_louder_without_clipping(speech):
     app.cfg.greeting.loudness = 5
     with pytest.raises(ValueError, match="loudness"):
         app.cfg.validate()
+
+
+def test_settings_name_the_voices_in_use(core):
+    from attendance.web import create_app
+    app, _, _ = core
+    page = create_app(app).test_client().get("/settings").get_data(as_text=True)
+    assert "Now: <strong>Tram · southern woman" in page and "Now: <strong>Jess · Australian woman" in page

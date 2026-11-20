@@ -19,6 +19,31 @@
   <span class="hint" id="greet-counts">{{ rows|length }} said · <span data-count="good">{{ counts.good }}</span> good · <span data-count="ok">{{ counts.ok }}</span> so-so · <span data-count="bad">{{ counts.bad }}</span> not good</span>
 </div>
 
+{% if coming is not none %}
+<details class="panel group" open style="margin-bottom:18px">
+  <summary><span>Still to come today</span><span class="sum">{{ coming.rows|length }} {{ 'person' if coming.rows|length == 1 else 'people' }} not greeted yet{% if coming.at %} · sent {{ coming.at.strftime('%H:%M') }}{% endif %}</span></summary>
+  <div>
+    <p class="hint" style="margin:0 0 4px">The sentences written this morning for whoever the door has not greeted yet: one of them is said when they arrive, on time or late. Once said, a sentence moves to the list below to be marked.</p>
+    {% if coming.rows %}
+    <div class="greet-list" style="padding:0">
+      {% for r in coming.rows %}
+      <div class="greet-row">
+        <div class="greet-said">
+          <div style="font-weight:500">{{ r.name }}{% if r.note %} <span class="hint">· {{ r.note }}</span>{% endif %}</div>
+          {% for kind, text in r.lines %}<div class="greet-text"><span class="hint">{{ kind }}:</span> “{{ text }}”</div>{% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<p class="hint" style="margin:0">Everyone has been greeted.</p>{% endif %}
+    {% if coming.together %}
+    <p style="margin:12px 0 4px; font-weight:500">For a group arriving together</p>
+    <ul style="margin:0; padding-left:18px">{% for line in coming.together %}<li>“{{ line.text }}”{% if line.language == 'en' %} <span class="hint">· English</span>{% endif %}</li>{% endfor %}</ul>
+    {% endif %}
+  </div>
+</details>
+{% endif %}
+
 {% if not rows %}
 <div class="panel"><p class="hint" style="margin:0">Nothing was said at the door on {{ day.strftime('%d %b %Y') }}.</p></div>
 {% else %}

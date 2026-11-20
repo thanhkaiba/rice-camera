@@ -27,7 +27,7 @@ from ..core import fines, settings
 log = logging.getLogger(__name__)
 
 ENDPOINTS = {"edge_events", "edge_photo", "edge_heartbeat", "edge_state", "edge_sync", "edge_sync_embeddings",
-             "edge_file", "edge_job_result", "edge_preview_upload", "healthz"}
+             "edge_file", "edge_job_result", "edge_preview_upload", "edge_upcoming", "healthz"}
 UPLOAD_PATH = re.compile(r"uploads/[0-9a-f]{32}")
 MAX_JOB_EMBEDDINGS = 500
 # What the Mac needs to run the camera. The detection area is drawn on the Mac and stays there.
@@ -35,6 +35,8 @@ MAC_SECTIONS = ("schedule", "camera", "tracking", "recognition", "collect", "gre
 SHADOW_DIFF_KEY = "shadow_diff"
 MAX_DIFF_LISTED = 50
 HEARTBEAT_KEY = "edge_heartbeat"
+UPCOMING_KEY = "greeting_upcoming"  # {"day", "at", "people": {id: {on_time, late, timed, note}}, "together": [...]}
+MAX_UPCOMING_PEOPLE = 2000
 MAX_EVENTS = 200
 PHOTO_PATH = re.compile(r"crops/\d{4}-\d{2}-\d{2}/[A-Za-z0-9_\-]+\.jpg|faces/[0-9a-f]{32}/\d{14}_[0-9a-f]{6}\.jpg")
 
@@ -101,6 +103,26 @@ def _speaker_status(value) -> dict | None:
 def heartbeat(store) -> dict | None:
     raw = store.get(HEARTBEAT_KEY)
     return json.loads(raw) if raw else None
+
+
+def upcoming(store, day: dt.date) -> dict | None:
+    """What the Mac has written for the door to say on `day`, as it last sent it; None for another day."""
+    saved = json.loads(store.get(UPCOMING_KEY) or "{}")
+    return saved if saved.get("day") == day.isoformat() else None
+
+
+def _upcoming(sent) -> dict:
+    """The Mac's written greetings, checked and cut to size."""
+    if not isinstance(sent, dict) or not isinstance(sent.get("people"), dict) or len(sent["people"]) > MAX_UPCOMING_PEOPLE:
+        raise ValueError("expected the day's greetings")
+    day = dt.date.fromisoformat(str(sent.get("day")))
+    lines = lambda value: [str(t)[:500] for t in value[:5]] if isinstance(value, list) else []
+    people = {str(pid)[:64]: {"on_time": lines(entry.get("on_time")), "late": lines(entry.get("late")),
+                              "timed": entry.get("timed") is not False, "note": str(entry.get("note") or "")[:120]}
+              for pid, entry in sent["people"].items() if isinstance(entry, dict)}
+    together = [{"language": "en" if line.get("language") == "en" else "vi", "text": str(line.get("text", ""))[:500]}
+                for line in (sent.get("together") or [])[:30] if isinstance(line, dict) and line.get("text")]
+    return {"day": day.isoformat(), "people": people, "together": together}
 
 
 def _instants(times) -> set[float]:
@@ -220,6 +242,16 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
                                              "speaker": _speaker_status(beat.get("speaker")),
                                              "person_model": (bool(beat["person_model"]) if "person_model" in beat else None)}))
         return jsonify(ok=True, mode="shadow" if shadow else "live")
+
+    @app.post("/api/edge/greetings/upcoming")
+    @from_the_mac
+    def edge_upcoming():
+        try:
+            kept = _upcoming(request.get_json(silent=True))
+        except (TypeError, ValueError) as exc:
+            abort(400, str(exc))
+        store.put(UPCOMING_KEY, json.dumps({**kept, "at": service.now().isoformat()}, ensure_ascii=False))
+        return jsonify(ok=True)
 
     def mac_config() -> dict:
         current = settings.current(core.cfg)

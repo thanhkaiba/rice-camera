@@ -137,6 +137,17 @@ def test_heartbeat_tells_the_server_how_the_camera_is(site):
     assert not ok and "10 min" in why
 
 
+def test_the_status_page_on_the_server_shows_the_macs_camera(site):
+    from attendance.core import health
+    _, core, c = site
+    c.post("/api/edge/heartbeat", json={"camera_ok": True, "camera_state": "ok", "backlog": 0}, headers=AUTH)
+    camera = health.status(core)["camera"]
+    assert camera["ok"] and camera["state"] == "ok" and "office Mac" in camera["detail"]
+    c.post("/api/edge/heartbeat", json={"camera_ok": False, "camera_state": "reconnecting", "backlog": 0}, headers=AUTH)
+    camera = health.status(core)["camera"]
+    assert not camera["ok"] and camera["state"] == "reconnecting"
+
+
 def client_for(tmp_path, site, *, fail=None):
     _, _, c = site
     store = Store(tmp_path / "mac" / "attendance.db")
@@ -631,3 +642,27 @@ def test_evidence_label_is_written_without_accents():
     finally:
         cv2.putText = real
     assert seen["text"] == "Ho Thi Hang Do  match 0.54"
+
+
+def test_the_days_written_greetings_reach_the_server_once_each_time_they_change(site, tmp_path):
+    from attendance.web import edge_api
+    core, mac, edge = mirror_to(site, tmp_path)
+    calls, send = [], edge._send
+    edge._send = lambda *a: calls.append(a[1]) or send(*a)
+    written = {"day": DAY.isoformat(), "together": [{"language": "vi", "text": "Cả nhà tới rồi!"}],
+               "people": {"A": {"on_time": ["Chào Alice!"], "late": ["Alice tới rồi!"], "timed": True, "note": ""}}}
+    edge.upcoming = lambda day: written
+    edge.send_upcoming()
+    edge.send_upcoming()  # nothing changed: nothing sent
+    assert calls == ["/api/edge/greetings/upcoming"]
+    kept = edge_api.upcoming(core.store, DAY)
+    assert kept["people"]["A"]["late"] == ["Alice tới rồi!"] and kept["together"][0]["text"] == "Cả nhà tới rồi!" and kept["at"]
+    written["people"]["A"]["on_time"] = ["Chào chị Alice!"]
+    edge.send_upcoming()
+    assert len(calls) == 2 and edge_api.upcoming(core.store, DAY)["people"]["A"]["on_time"] == ["Chào chị Alice!"]
+    assert edge_api.upcoming(core.store, DAY + dt.timedelta(days=1)) is None
+    edge.upcoming = lambda day: 1 / 0  # a fault reading them on the Mac is logged, not raised into the link
+    edge.send_upcoming()
+    client = site[2]
+    assert client.post("/api/edge/greetings/upcoming", json={"day": "x", "people": {}}, headers=AUTH).status_code == 400
+    assert client.post("/api/edge/greetings/upcoming", json=written).status_code == 401
