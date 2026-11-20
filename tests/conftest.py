@@ -89,3 +89,11 @@ def core(tmp_path):
 def env(core):
     app, clock, sent = core
     return app.service, app.store, clock, sent
+
+
+@pytest.fixture(autouse=True)
+def _greetings_not_played_on_this_computer(monkeypatch):
+    """Tests never play through afplay (it would be heard in the office): they see sounddevice, which they replace."""
+    from attendance.core import greeting
+
+    monkeypatch.setattr(greeting, "AFPLAY", "")

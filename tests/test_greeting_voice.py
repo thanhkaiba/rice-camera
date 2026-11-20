@@ -728,3 +728,23 @@ def test_the_speaker_test_is_not_hidden_with_the_voices_not_chosen(core):
     box = page.split('id="speaker-watch"')[0].rsplit("<div", 1)[1]
     assert "data-engine" not in box and "Test the speaker" in page
     assert "querySelectorAll('.engine-box[data-engine]')" in page  # only voice boxes are shown and hidden by engine
+
+
+def test_on_macos_a_greeting_is_played_by_afplay_in_a_process_of_its_own(monkeypatch, tmp_path):
+    import numpy as np
+    import soundfile as sf
+    from attendance.core import greeting
+
+    played = []
+
+    def run(args, **kwargs):
+        audio, rate = sf.read(args[1], dtype="float32")
+        played.append((args[0], len(audio), rate, kwargs["timeout"]))
+
+    monkeypatch.setattr(greeting, "AFPLAY", __file__)  # a file that exists
+    monkeypatch.setattr(greeting.sys, "platform", "darwin")
+    monkeypatch.setattr(greeting.subprocess, "run", run)
+    monkeypatch.setattr(greeting.tempfile, "tempdir", str(tmp_path))
+    greeting.play_audio(np.zeros(24000, dtype="float32"), 24000)
+    assert played == [(__file__, 24000, 24000, 1 + greeting.SAY_TIMEOUT_S)]
+    assert not list(tmp_path.iterdir())  # the file is gone once heard

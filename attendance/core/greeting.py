@@ -14,11 +14,14 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import os
 import queue
 import random
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -41,6 +44,9 @@ RULES_KEY = "greeting_rules"
 MAX_WAITING = 8  # arrivals waiting to be greeted; more are dropped (a crowd at the door)
 STALE_S = 25.0  # a greeting not started this long after the arrival is dropped: the person has walked on
 SAY_TIMEOUT_S = 20.0
+# Plays a greeting in a process of its own. Played from this process (sounddevice, fed by Python), the sound was
+# starved now and then while the camera's frames were being worked on, and the speaker crackled. Empty: sounddevice.
+AFPLAY = "/usr/bin/afplay"
 GROUP = 15  # people per request to Claude, so one answer stays short
 RETRY_S = 600.0
 WRITE_EVERY_S = 60.0
@@ -633,6 +639,33 @@ def elevenlabs_speech(text: str, key: str, voice: str, model: str, how: dict | N
                                quota="quota" in status or exc.code in (401, 403), answered=True) from None
     except Exception as exc:  # no network, timeout
         raise CloudSpeechError(f"{type(exc).__name__}: {str(exc)[:200]}") from None
+
+
+def play_audio(audio, rate: int) -> None:
+    """Plays `audio` (mono float samples) on the computer's output and returns when it has been heard: through
+    afplay on macOS (see AFPLAY), which takes the output in use now, else through sounddevice."""
+    if AFPLAY and sys.platform == "darwin" and os.path.exists(AFPLAY):
+        import soundfile as sf
+
+        handle, path = tempfile.mkstemp(prefix="greeting-", suffix=".wav")
+        os.close(handle)
+        try:
+            sf.write(path, audio, rate, format="WAV", subtype="PCM_16")
+            subprocess.run([AFPLAY, path], timeout=len(audio) / rate + SAY_TIMEOUT_S, check=True, capture_output=True)
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        return
+    import sounddevice as sd
+
+    try:  # the sound system is asked again: a speaker plugged in since the start is used, not the old one
+        sd._terminate()
+        sd._initialize()
+    except Exception:
+        log.warning("The sound devices could not be read again; using the ones known at the start")
+    sd.play(audio, rate, blocking=True)
 
 
 def louder(audio, gain: float):
@@ -1335,18 +1368,11 @@ class Greeter:
                 engine = "ZeroTTS model or" if self.uses_zerotts(language) else "the"
                 raise RuntimeError(f"{engine} voice {voice} is not on this computer")
             if self.uses_zerotts(language):
-                import sounddevice as sd
-
                 if PART in text:
                     audio, rate = self._joined(text, voice, self.now().date())
                 else:
                     audio, rate = self._audio(text, voice, self.now().date())
-                try:  # the sound system is asked again: a speaker plugged in since the start is used, not the old one
-                    sd._terminate()
-                    sd._initialize()
-                except Exception:
-                    log.warning("The sound devices could not be read again; using the ones known at the start")
-                sd.play(louder(audio, self.settings.loudness), rate, blocking=True)
+                play_audio(louder(audio, self.settings.loudness), rate)
             else:
                 text = " ".join(text.replace(PART, " ").split())
                 subprocess.run(["say", "-v", voice, "-r", str(self.settings.rate), text],
