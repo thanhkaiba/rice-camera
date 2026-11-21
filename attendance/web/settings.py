@@ -458,6 +458,8 @@ def register(app: Flask, core: "App") -> None:
                 elif key == "fine_notice.approvers":
                     if "fine_notice.approvers_shown" in form:  # no box ticked = nobody approves
                         changes.setdefault(section, {})[name] = ",".join(form.getlist(key))
+                elif key == "schedule.maintenance":
+                    pass  # only its own button (set_maintenance) switches it
                 elif name == "work_days":
                     changes.setdefault(section, {})[name] = [int(d) for d in form.getlist(key)]
                 elif isinstance(value, bool):
@@ -477,6 +479,26 @@ def register(app: Flask, core: "App") -> None:
         store.log(service.now(), current_user(cfg), "change settings",
                   ", ".join(f"{s}.{n}" if s else n for s, f in changes.items() for n in f))
         return done("Settings saved and applied.", "settings_page")
+
+    @app.post("/maintenance")
+    def set_maintenance():
+        """Maintenance mode on or off. On: the office computer stops reading the camera within a minute, nobody
+        is recognised or greeted, and today is not counted when it is inside the camera hours."""
+        on = request.form.get("on") == "1"
+        if core.edge.following:
+            return failed("Maintenance mode is switched on the portal, which is in charge of this computer.", "settings_page")
+        if on == cfg.schedule.maintenance:
+            return done(f"Maintenance mode is already {'on' if on else 'off'}.", "settings_page")
+        try:
+            settings.save(cfg, store, {"schedule": {"maintenance": on}})
+        except ValueError as exc:
+            return failed(f"Not changed: {exc}", "settings_page")
+        now = service.now()
+        if on:
+            service.note_maintenance(now)
+        store.log(now, current_user(cfg), "maintenance mode", "on" if on else "off")
+        return done("Maintenance mode is on: the camera stops within a minute and nothing is reported." if on else
+                    "Maintenance mode is off: the camera works again as usual.", "settings_page")
 
     @app.post("/settings/reset")
     def reset_setting():

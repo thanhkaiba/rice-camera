@@ -396,7 +396,8 @@ def register(app: Flask, core: "App") -> None:
                 groups.setdefault(r.employee_id, []).append((r, check))
         people = []
         for emp, items in groups.items():
-            items.sort(key=lambda rc: rc[1].margin if rc[1].margin is not None else -9.0)
+            # photos that pull in other people's faces first, then the weakest matches
+            items.sort(key=lambda rc: (-rc[1].pulled_wrong, rc[1].margin if rc[1].margin is not None else -9.0))
             people.append({"id": emp, "name": names.get(emp, emp), "items": items, "total": total.get(emp, 0),
                            "left": total.get(emp, 0) - len(items)})
         people.sort(key=lambda p: (-len(p["items"]), p["name"].lower()))

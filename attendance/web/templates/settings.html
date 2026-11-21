@@ -64,6 +64,15 @@
     </div>
     {{ src('schedule.work_days') }}
     <p class="hint" style="margin:14px 0 0">Holidays and leave come from the HR system. Arrivals before the camera starts count only if the person passes again.</p>
+    <div class="panel maint-panel" id="maintenance" style="margin-top:18px">
+      <p style="margin:0 0 4px; font-weight:500">Maintenance mode{% if s.schedule.maintenance %} <span class="badge warn">on</span>{% endif %}</p>
+      <p class="hint" style="margin:0 0 10px">For work on the camera or the office computer. While it is on, the camera stream is not read, nobody is
+        recognised or greeted, and no greeting is written. A work day it is on during the camera hours is not counted: no on-time, late,
+        not-seen, fine or summary message for it. Every page, Settings too, stays open.</p>
+      {% if following %}<span class="hint">Switched on the portal.</span>
+      {% elif s.schedule.maintenance %}<button type="submit" form="maint-switch" name="on" value="0" class="primary">Turn off maintenance mode</button>
+      {% else %}<button type="submit" form="maint-switch" name="on" value="1">{{ icon('alert') }}Turn on maintenance mode</button>{% endif %}
+    </div>
   </section>
 
   <section class="tab groups" id="notify">
@@ -233,6 +242,7 @@
       {{ check('greeting', 'enabled', 'Greet people at the door', 'Off: silent') }}
       {{ check('greeting', 'unknown', 'Say hello to faces the camera cannot name', '“Xin chào!” without a name, at most once every 2 minutes') }}
       {{ check('greeting', 'birthdays', 'Wish a happy birthday', 'On their birthday (People page, or from Base Account) the greeting is a birthday wish, also when they come late; only when they come in that day; a Saturday birthday is wished on the Friday before, a Sunday one on Monday; once per birthday') }}
+      {{ check('greeting', 'days_off', 'Write greetings on days off too', 'Off: Claude writes the sentences and ElevenLabs reads them ahead only on work days, so weekends and holidays cost nothing; someone who comes in then hears a plain hello') }}
       {{ check('greeting', 'tease', 'Joke about how people have arrived lately', 'Someone often late who comes early, or on time many days in a row. Only that label goes to Claude with the name, never a time. A late arrival is never teased about the habit.') }}
     </div>
     <details class="panel" style="margin-top:14px" {{ 'open' if s.greeting.until_people }}>
@@ -559,6 +569,7 @@
       {{ field('collect', 'fps', 'Frames / second', 'Lighter than camera hours', type='number', step='0.5') }}
       {{ field('collect', 'review_per_day', 'Unrecognised faces to Review a day', 'Clear faces nobody matches · no arrival is recorded · 0 = none', type='number', step='1') }}
     </div>
+    <div class="stack" style="margin-top:14px">{{ check('collect', 'angles', 'Send turned faces of people the camera has just named to Review', 'In the camera hours, with Whole people tracking: one face per side and person a day, with the name suggested. Confirm it on the Review page and that angle becomes a reference photo; nothing is learned without that.') }}</div>
     <details class="panel" style="margin-top:14px" {{ 'open' if s.collect.skip_people }}>
       <summary><span>People no photos are collected for</span><span class="sum">{{ (s.collect.skip_people.split(',')|length ~ ' people') if s.collect.skip_people else 'nobody' }}</span></summary>
       <p class="hint">Tick someone who always wears a mask or is otherwise covered: photos like that make other people's hidden or turned faces look like them. They are still recognised from the photos they have; nothing new is added for them by itself.</p>
@@ -858,6 +869,7 @@
     <button class="primary btn-lg">{{ icon('check') }}Save</button>
   </div>
 </form>
+<form method="post" action="{{ url_for('set_maintenance') }}" id="maint-switch" hidden{% if not s.schedule.maintenance %} data-confirm="Turn on maintenance mode? The camera stops within a minute and today is not counted if it is inside the camera hours."{% endif %}>{% include "_csrf.html" %}</form>
 <form method="post" action="{{ url_for('save_google_login') }}" id="google-login-config" hidden>{% include "_csrf.html" %}</form>
 <form method="post" action="{{ url_for('api_key_create') }}" id="api-key-new" hidden>{% include "_csrf.html" %}</form>
 {% for k in api_keys() %}<form method="post" action="{{ url_for('api_key_revoke', key_id=k.id) }}" id="api-revoke-{{ k.id }}" data-confirm="Revoke the key for {{ k.name }}? That system stops getting data at once." hidden>{% include "_csrf.html" %}</form>{% endfor %}

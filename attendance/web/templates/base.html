@@ -81,8 +81,50 @@
   </nav>
   {% endif %}
   {% if shadow_site and nav != 'personal_page' %}<div class="alert info"><span class="ico">{{ icon('eye') }}</span><span>This site only mirrors attendance from the office computer for now. {% if role == 'admin' %}Portal access can be managed here; make other changes at {{ office.url }}, from the office network.{% else %}Attendance changes are made on the office computer.{% endif %}</span></div>{% endif %}
+  {% if maintenance %}
+  <div class="alert warn maint-bar" role="status"><span class="ico">{{ icon('alert') }}</span>
+    <span><strong>Maintenance mode is on.</strong> The camera is off: nobody is recognised or greeted, and today is not reported.</span>
+    {% if role != 'viewer' %}<span class="maint-actions">
+      <button type="button" class="btn-sm ghost" data-maint-open>Details</button>
+      {% if not following %}<button class="btn-sm" form="maint-off">Turn off</button>{% endif %}
+    </span>{% endif %}
+  </div>
+  {% endif %}
   {% block body %}{% endblock %}
 </main>
+{% if maintenance and role != 'viewer' %}
+<form method="post" action="{{ url_for('set_maintenance') }}" id="maint-off" hidden>{% include "_csrf.html" %}<input type="hidden" name="on" value="0"><input type="hidden" name="back" value="{{ request.path }}"></form>
+<dialog class="maint-dialog" id="maint-dialog" aria-labelledby="maint-title">
+  <div class="dialog-body maint-body">
+    <div class="logo-tile lg">{{ logo('loop') }}</div>
+    <h2 id="maint-title">Maintenance mode</h2>
+    <p>The office camera is switched off for maintenance.</p>
+    <ul class="maint-list">
+      <li>The camera stream is not read and nobody is recognised or greeted.</li>
+      <li>No on-time, late, not-seen or fine messages are sent; a work day it was on in the camera hours is not counted.</li>
+      <li>Settings and every other page can still be opened.</li>
+    </ul>
+    <div class="maint-buttons">
+      {% if following %}<span class="hint">Switched off on the portal.</span>
+      {% else %}<button class="primary" form="maint-off">Turn off maintenance mode</button>{% endif %}
+      <button type="button" data-close>Close</button>
+    </div>
+  </div>
+</dialog>
+<script>
+  // Maintenance mode: shown once per browser tab; Details brings it back.
+  (() => {
+    const d = document.getElementById('maint-dialog');
+    const open = () => { if (!d.open) d.showModal(); };
+    let seen = false;
+    try { seen = sessionStorage.getItem('maint-seen') === '1'; sessionStorage.setItem('maint-seen', '1'); } catch (e) {}
+    if (!seen) open();
+    document.querySelectorAll('[data-maint-open]').forEach(b => b.addEventListener('click', open));
+  })();
+</script>
+{% elif not maintenance %}
+<script>try { sessionStorage.removeItem('maint-seen'); } catch (e) {}</script>
+{% endif %}
 <script>
   // Setup warnings: hidden for a day once closed in this browser.
   document.querySelectorAll('.setup-warning').forEach(el => {

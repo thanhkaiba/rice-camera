@@ -40,6 +40,9 @@ CAMERA_ALERT_AFTER = dt.timedelta(minutes=2)  # a camera down this long during t
 CAMERA_ALERT_KEY = "camera_alert"  # set while a "camera not working" alert is out, so it is sent once
 ALIVE_SAVE_EVERY = dt.timedelta(seconds=10)
 FLUSH_EVERY = dt.timedelta(seconds=30)
+MAINTENANCE_KEY = "maintenance_days"  # JSON list of ISO days maintenance mode touched inside the camera hours
+MAINTENANCE_LABEL = "Maintenance mode"
+MAINTENANCE_KEPT = 400  # days remembered
 MIN_REFERENCES = 3  # reference photos the midnight housekeeping always leaves someone, however poor
 # On Review, a suggestion at or above this was the person the admin then confirmed for 65 of 68 photos
 # (November 2026); such cards may be confirmed together, each as its own suggestion, after a look.
@@ -175,6 +178,7 @@ class AttendanceService:
         self._unknown_rows: dict[int, int] = {}  # face track -> its Review row, for a track that continues it
         self._camera_seen_day: dt.date | None = None
         self._bad_since: dt.datetime | None = None  # when the camera stopped working, in this run
+        self._maintenance_days: tuple[str, frozenset] = ("", frozenset())  # (stored text, days)
 
     @property
     def model_id(self) -> str:
@@ -189,8 +193,8 @@ class AttendanceService:
         start, late, end = self.cfg.schedule.clocks()
         return Window(*(dt.datetime.combine(day, t, tzinfo=self.tz) for t in (start, late, end)))
 
-    def day_info(self, day: dt.date) -> tuple[bool, str]:
-        """(is a work day, note) taking the holiday calendar into account."""
+    def scheduled_day(self, day: dt.date) -> tuple[bool, str]:
+        """(is a work day, note) by the work days and the holiday calendar, maintenance mode left out."""
         override = self.store.calendar_day(day)
         if override:
             kind, note = override
@@ -198,12 +202,51 @@ class AttendanceService:
             return kind == "workday", f"{label}: {note}" if note else label
         return day.weekday() in self.cfg.schedule.work_days, ""
 
+    def day_info(self, day: dt.date) -> tuple[bool, str]:
+        """(is a work day, note) taking the holiday calendar into account. A work day that maintenance mode
+        touched inside the camera hours is not one: nobody is late or missing on it."""
+        workday, note = self.scheduled_day(day)
+        if workday and day.isoformat() in self.maintenance_days():
+            return False, MAINTENANCE_LABEL
+        return workday, note
+
     def is_workday(self, day: dt.date) -> bool:
         return self.day_info(day)[0]
 
     def in_window(self, now: dt.datetime) -> bool:
+        """The camera hours of a work day. A maintenance day counts: once maintenance mode is off again the camera
+        goes back to work, though the day is not reported."""
         w = self.window(now.date())
-        return w.start <= now < w.end and self.is_workday(now.date())
+        return w.start <= now < w.end and self.scheduled_day(now.date())[0]
+
+    @property
+    def maintenance(self) -> bool:
+        return bool(self.cfg.schedule.maintenance)
+
+    def maintenance_days(self) -> frozenset:
+        raw = self.store.get(MAINTENANCE_KEY) or "[]"
+        if self._maintenance_days[0] != raw:
+            try:
+                days = frozenset(str(d) for d in json.loads(raw))
+            except (TypeError, ValueError):
+                days = frozenset()
+            self._maintenance_days = (raw, days)
+        return self._maintenance_days[1]
+
+    def note_maintenance(self, now: dt.datetime | None = None) -> bool:
+        """While maintenance mode is on inside the camera hours of a work day, that day is remembered as not
+        counted. True when the day was added now."""
+        now = now or self.now()
+        day = now.date()
+        if not self.maintenance or day.isoformat() in self.maintenance_days():
+            return False
+        w = self.window(day)
+        if not (w.start <= now < w.end and self.scheduled_day(day)[0]):
+            return False
+        days = sorted(self.maintenance_days() | {day.isoformat()})[-MAINTENANCE_KEPT:]
+        self.store.put(MAINTENANCE_KEY, json.dumps(days))
+        log.info("Maintenance mode in the camera hours: %s is not counted", day.isoformat())
+        return True
 
     def _greeted_late(self) -> frozenset:
         """Who is still greeted after the camera hours (Settings → Greeting)."""
@@ -1095,6 +1138,10 @@ class AttendanceService:
         camera is not ok, for the alert."""
         now = self.now()
         day = now.date()
+        try:
+            self.note_maintenance(now)
+        except Exception:
+            log.exception("Could not remember the maintenance day")
         if getattr(self.edge, "following", False):  # the server sends the messages; only old photos are this computer's job
             if self.store.get("cleanup_day") != day.isoformat():
                 self.cleanup(day)

@@ -15,6 +15,9 @@ import datetime as dt
 import logging
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
 from typing import TYPE_CHECKING
 
 from ..vision.tracker import vote_for
@@ -83,7 +86,9 @@ class CrowdLog:
         if count >= GROUP_MIN:
             g["last"] = ts
             if (count, len(faces)) > (g["people"], g["faces"]) or g["frame"] is None:
-                g["frame"] = (frame.copy(), list(people), list(faces), named_faces, ts)
+                # The boxes as they are now: the trackers go on moving their people after this frame.
+                seen = [SimpleNamespace(id=p.id, box=np.array(p.box, dtype=np.float32)) for p in people]
+                g["frame"] = (frame.copy(), seen, list(faces), named_faces, ts)
             g["people"], g["faces"] = max(g["people"], count), max(g["faces"], len(faces))
         if (ts - g["last"]).total_seconds() < END_GAP_S and (ts - g["start"]).total_seconds() < MAX_S:
             return None

@@ -73,3 +73,17 @@ def test_groups_page_and_the_event_from_the_mac(core):
     page = client.get("/groups?day=2026-11-20").get_data(as_text=True)
     assert "Groups at the door" in page and "3 people" in page and "1 named" in page and "33%" in page
     assert client.get("/groups?day=2020-01-01").status_code == 200
+
+
+def test_the_picture_keeps_the_boxes_of_its_own_frame(core, monkeypatch):
+    """The people's boxes are copied when the picture is taken: the tracker moves them on afterwards."""
+    from attendance.core import crowd as module
+    app, crowd, _ = log(core)
+    drawn = []
+    monkeypatch.setattr(module, "picture", lambda frame, people, faces, named, label: drawn.append([p.box.copy() for p in people]) or b"\xff\xd8")
+    people = [body(1, 100), body(2, 400), body(3, 700)]
+    crowd.observe(T0, FRAME, [], people)
+    for p in people:
+        p.box += 500  # they walk on
+    crowd.observe(T0 + dt.timedelta(seconds=4), FRAME, [], [])
+    assert [float(b[0]) for b in drawn[0]] == [100.0, 400.0, 700.0]

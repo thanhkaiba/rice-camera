@@ -79,6 +79,9 @@ class App:
         self.enrolment = DoorEnrolment(self.library, self.store, cfg.recognition, name_of=self.service.chat_name)
         self.collector = Collector(cfg, self.library, self.store, self.service,
                                    report=lambda *face: report_collected(self, *face))
+        from .angles import AngleLearner
+
+        self.angles = AngleLearner(cfg, self.store, report=lambda *face: report_collected(self, *face))
         self.placement = Placement(self.store)
         self.service.placement = self.placement
         self.machine = MachineWatch(cfg, self.store, self.service.alert, self.service.now)
@@ -495,6 +498,11 @@ def run(cfg: Config) -> None:
                     slot.crowd.observe(ts, raw, matched, people, decisions)
                 except Exception:
                     log.exception("The group at the door could not be counted")
+            if in_window and not enrolling:
+                try:
+                    app.angles.observe(slot.processor.face_tracker._tracks, matched, frame, ts)
+                except Exception:
+                    log.exception("A turned face could not be sent to Review")
             handle(decisions, slot, greet_only=greeting and not in_window)
             if in_window and not enrolling:
                 app.placement.add_frame(ts.date(), [f for f, _, _ in matched], cfg.recognition,
@@ -526,14 +534,16 @@ def run(cfg: Config) -> None:
     log.info("Running; processing window %s-%s", cfg.schedule.window_start, cfg.schedule.window_end)
     while True:
         now = service.now()
-        in_window = service.in_window(now) and not app.maintenance
+        # A seed import, or maintenance mode from the portal: the camera stream is not read at all.
+        paused = app.maintenance or ("maintenance mode" if cfg.schedule.maintenance else None)
+        in_window = service.in_window(now) and not paused
         if was_in_window and not in_window:
             for slot in slots:
                 handle(slot.processor.flush(), slot)
             app.placement.save()  # before the summary, which reads it
         was_in_window = in_window
         camera_ok = True
-        greeting = not in_window and not app.maintenance and service.greets_after(now)
+        greeting = not in_window and not paused and service.greets_after(now)
         if was_greeting and not greeting:
             for slot in slots:
                 slot.processor.flush()  # tracks of the greeting-only time are dropped, not recorded
@@ -545,7 +555,7 @@ def run(cfg: Config) -> None:
         watching = in_window or greeting or live.previewing or enrolling
         fps = cfg.camera.process_fps if watching else min(cfg.camera.process_fps, cfg.collect.fps)
         urls = cfg.camera.urls()
-        if (watching or collecting) and recognizer is not None and urls and not app.maintenance:
+        if (watching or collecting) and recognizer is not None and urls and not paused:
             if [slot.url for slot in slots] != urls:  # cameras added, removed or changed in Settings
                 for slot in slots:
                     handle(slot.processor.flush(), slot)
@@ -572,11 +582,11 @@ def run(cfg: Config) -> None:
                 if slot.camera is not None:
                     slot.camera.stop()
             slots = []
-            live.camera_state = (f"paused ({app.maintenance})" if app.maintenance
+            live.camera_state = (f"paused ({paused})" if paused
                                  else "off (outside the camera hours)" if urls
                                  else "off (no camera address in Settings)")
             if in_window or (app.maintenance and service.in_window(now)):
-                camera_ok = False  # should be working but cannot: count it as an outage
+                camera_ok = False  # should be working but cannot: count it as an outage (maintenance mode is not one)
             live.faces, live.people = [], 0
             time.sleep(0.5)
 

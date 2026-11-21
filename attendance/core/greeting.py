@@ -848,6 +848,16 @@ class Greeter:
     def note(self, person, day: dt.date) -> str:
         return self.rules(day).get("notes", {}).get(person.id, "")
 
+    def prepares(self, day: dt.date) -> bool:
+        """Whether the day's sentences are written by Claude and read ahead into audio: on work days only
+        (Settings → Greeting → "days off too" adds the others), never in maintenance mode."""
+        if self.cfg.schedule.maintenance:
+            return False
+        if self.settings.days_off:
+            return True
+        rules = self.rules(day)  # the server's word when it is in charge: holidays and maintenance days are in it
+        return bool(rules["workday"]) if "workday" in rules else day.weekday() in self.cfg.schedule.work_days
+
     def is_late(self, person, ts: dt.datetime) -> bool:
         if person.not_counted:
             return False
@@ -1039,6 +1049,8 @@ class Greeter:
         if not dt.datetime.combine(day, start, now.tzinfo) - EARLY <= now < dt.datetime.combine(day, end, now.tzinfo):
             return False
         if self._failed_at and time.monotonic() - self._failed_at < RETRY_S:
+            return False
+        if not self.prepares(day):
             return False
         self.carry_over(day)
         have = self.lines(day)
@@ -1681,6 +1693,8 @@ class Greeter:
         day = now.date()
         if not dt.datetime.combine(day, start, now.tzinfo) - EARLY <= now < dt.datetime.combine(day, end, now.tzinfo):
             return False
+        if not self.prepares(day):
+            return False
         self.carry_over(day)  # the sentences nobody heard keep their audio
         root = self.cfg.path(self.cfg.data_dir) / AUDIO_DIR
         if root.is_dir():
@@ -1964,6 +1978,8 @@ class Greeter:
 
         s = self.settings
         if not (s.enabled and s.speaker_awake) or not self.rules(now.date()).get("workday", True):
+            return None
+        if self.cfg.schedule.maintenance:
             return None
         _, _, end = self.cfg.schedule.clocks()
         if s.until_people:  # some people are greeted after the camera hours

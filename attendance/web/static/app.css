@@ -649,3 +649,14 @@ button.listen { margin-left: 6px; white-space: nowrap; color: var(--muted); } bu
 .crowd-card { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .crowd-card img { display: block; width: 100%; height: auto; }
 .crowd-card figcaption { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+
+/* maintenance mode ----------------------------------------------------------------- */
+.maint-bar { align-items: center; flex-wrap: wrap; }
+.maint-bar > span:nth-child(2) { flex: 1 1 260px; }
+.maint-actions { display: flex; gap: 6px; margin-left: auto; }
+.maint-dialog { width: min(440px, calc(100vw - 24px)); }
+.maint-body { text-align: center; justify-items: center; gap: 12px; padding: 28px 24px 24px; }
+.maint-body h2 { margin: 0; font-size: 1.3em; }
+.maint-body p { margin: 0; color: var(--text-2); }
+.maint-list { margin: 0; padding: 0 0 0 18px; text-align: left; color: var(--text-2); display: grid; gap: 4px; }
+.maint-buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }

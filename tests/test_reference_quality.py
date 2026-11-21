@@ -275,3 +275,44 @@ def test_photos_changed_during_evaluation_do_not_publish_a_mixed_report(library,
     with pytest.raises(ValueError, match='changed'):
         library.reevaluate_quality()
     assert library.saved_quality()['stale']
+
+
+def named(lib, employee, vector):
+    """A camera face that an admin named on the Review page."""
+    v = np.array(vector, dtype=np.float32)
+    uid = lib.store.add_unknown(at(9, 0).date(), at(9, 0), None, lib.model_id, v / np.linalg.norm(v), None, None)
+    lib.store._exec("UPDATE unknowns SET status = 'assigned', employee_id = ? WHERE id = ?", (employee, uid))
+
+
+def test_a_photo_that_pulls_in_other_peoples_faces_is_flagged(library):
+    """A covered or turned reference: clean among the person's own photos, yet the closest photo for faces that
+    people named as someone else."""
+    good = add(library, "A", [1, 0, 0, 0])
+    add(library, "A", [0.9, 0.44, 0, 0])
+    hub = add(library, "A", [0.8, 0.3, 0.52, 0])  # consistent with A's photos: the usual check finds nothing
+    add(library, "B", [0, 0, 0.6, 0.8])
+    add(library, "B", [0, 0, 0.5, 0.87])
+    add(library, "C", [0, 0.05, 0.2, 0.98])
+    for _ in range(3):
+        named(library, "B", [0.5, 0.2, 0.84, 0.1])  # B's hidden faces look most like A's covered photo
+    named(library, "A", [0.6, 0.5, 0.55, 0.25])  # a different picture of A that the covered photo is closest to
+    named(library, "A", [0.95, -0.2, 0.1, 0.1])  # ... and one that A's plain photo is closest to
+    checks = library.recognition_quality()
+    assert (checks[hub].pulled_wrong, checks[hub].pulled_right) == (3, 1)
+    assert checks[hub].status == "review" and "Pulls in other people" in checks[hub].reason
+    assert checks[good].status == "useful" and checks[good].pulled_wrong == 0 and checks[good].pulled_right == 1
+
+
+def test_few_wrong_pulls_or_more_right_ones_do_not_flag(library):
+    hub = add(library, "A", [1, 0, 0])
+    add(library, "A", [0.9, 0.44, 0])
+    add(library, "B", [0, 0, 1])
+    add(library, "B", [0, 0.2, 0.98])
+    for _ in range(2):
+        named(library, "B", [0.9, 0.1, 0.42])  # only two: below the bar
+    assert library.recognition_quality()[hub].status == "useful"
+    named(library, "B", [0.9, 0.1, 0.42])
+    for _ in range(4):
+        named(library, "A", [0.95, -0.2, 0.2])  # the photo is right more often than wrong: kept
+    check = library.recognition_quality()[hub]
+    assert (check.pulled_wrong, check.pulled_right) == (3, 4) and check.status == "useful"

@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 MIN_FACE_PX = 40
 MIN_DET_SCORE = 0.5
 NEAR_DUPLICATE = 0.97  # a learned face this similar to a kept one is not stored again
+PULL_MIN = 3  # a photo that is the closest for this many faces of other people (and more than of its own) is flagged
 GOOD_PHOTOS = 5  # sharp, frontal reference photos a person needs; fewer is flagged on the People page
 BLURRED = "The face is blurred or turned away; a sharper, frontal photo works better."
 
@@ -57,6 +58,8 @@ class ReferenceCheck:
     other_id: str | None
     other: float | None
     duplicate_of: int | None
+    pulled_wrong: int = 0  # camera faces named as someone else for which this photo was the closest of all
+    pulled_right: int = 0  # ... and faces of this person
 
     @property
     def margin(self) -> float | None:
@@ -347,7 +350,39 @@ class FaceLibrary:
             else:
                 status, reason = "useful", "Matches this person's other photos with enough separation."
             out[ref.id] = ReferenceCheck(status, reason, own, other_id, other, duplicate)
+        for ref_id, (wrong, right) in self.pulled_in(refs, vectors, set(active)).items():
+            check = out.get(ref_id)
+            if check is None:
+                continue
+            check.pulled_wrong, check.pulled_right = wrong, right
+            if wrong >= PULL_MIN and wrong > right:
+                check.status = "review"
+                check.reason = (f"Pulls in other people's faces: the closest photo for {wrong} camera faces that were "
+                                f"named as someone else ({right} of this person). Often a covered or turned face; "
+                                "deleting it stops those mix-ups.")
         return out
+
+    def pulled_in(self, refs, vectors: dict, active: set) -> dict[int, tuple[int, int]]:
+        """reference id -> (wrong, right): for how many camera faces that a person named (Review, confirmed
+        arrivals) this photo was the closest of all photos at the acceptance score, split by whether the face
+        was named as someone else or as this photo's person. The very same picture kept as a reference is
+        left out. A photo with many wrong ones makes other people look like its person."""
+        named = [(e, normalize(v)) for e, v in self.store.named_faces(self.model_id) if e in active]
+        refs = [r for r in refs if r.employee_id in active]
+        if not named or not refs:
+            return {}
+        gallery = np.stack([vectors[r.id] for r in refs])
+        owners = np.array([r.employee_id for r in refs])
+        counts: dict[int, list[int]] = {}
+        for start in range(0, len(named), 2000):
+            part = named[start:start + 2000]
+            scores = np.stack([v for _, v in part]) @ gallery.T
+            scores[scores >= NEAR_DUPLICATE] = -1.0
+            best = scores.argmax(axis=1)
+            for (employee, _), b, s in zip(part, best, scores.max(axis=1)):
+                if s >= self.cfg.recognition.accept_score:
+                    counts.setdefault(refs[b].id, [0, 0])[int(owners[b] == employee)] += 1
+        return {ref_id: (wrong, right) for ref_id, (wrong, right) in counts.items()}
 
     def look_alikes_of(self, employee_id: str) -> list[tuple[str, float]]:
         """(other employee, score) whose reference photos match this person's at the acceptance threshold."""

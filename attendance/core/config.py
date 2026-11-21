@@ -44,6 +44,10 @@ class ScheduleConfig:
     late_after: str = "10:00"  # this whole minute is on time; late starts at 10:01
     window_end: str = "11:00"  # camera stops processing, daily summary is sent
     work_days: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])  # Monday = 0
+    # Maintenance mode, switched on and off by the button on the portal (never by the Settings form): the
+    # camera stream is not read, nobody is recognised or greeted, and a work day it touches inside the camera
+    # hours is not counted (no late, not seen, fine or summary message for it).
+    maintenance: bool = False
 
     def clocks(self) -> tuple[dt.time, dt.time, dt.time]:
         return parse_clock(self.window_start), parse_clock(self.late_after), parse_clock(self.window_end)
@@ -333,6 +337,9 @@ class CollectConfig:
     # Employee ids (comma separated) nothing is collected for: someone who always wears a mask, whose masked
     # photos make other people's hidden or turned faces look like them.
     skip_people: str = ""
+    # In the camera hours, with whole people followed: a turned face of someone the camera has just named goes
+    # to Review with their name suggested (one per side and person a day); confirmed, it teaches that angle.
+    angles: bool = True
 
 
 @dataclass
@@ -401,6 +408,9 @@ class GreetingConfig:
     speaker_awake_from: str = "07:30"
     speaker_awake_every: int = 120
     speaker_awake_level: int = 6
+    # Write and voice the day's sentences on days off too (weekends, holidays). Off: only on work days, so a
+    # day nobody is expected costs no Claude or ElevenLabs credits; anyone who comes hears a plain hello.
+    days_off: bool = False
     style: str = ""  # extra wishes for the sentences, e.g. "mention the weather" (any language)
     # The office, for the morning weather: coordinates as Google Maps gives them ("21.0285, 105.8542", or the
     # address of a place there: kept as "lat,lon"), or a place name ("Hà Nội"); empty: no weather.

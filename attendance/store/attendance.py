@@ -278,6 +278,15 @@ class AttendanceStoreMixin:
                              (now.isoformat(), user, "reopen seed", f"sample {unknown_id}; no attendance or learning"))
         return True
 
+    def named_faces(self, model: str) -> list[tuple[str, np.ndarray]]:
+        """(employee, face vector) of every camera face a person has put a name to: unknown faces named on
+        the Review page and arrivals confirmed there. The evidence for what a reference photo pulls in."""
+        rows = self._all("SELECT employee_id, vector FROM unknowns WHERE status = 'assigned' AND employee_id IS NOT NULL "
+                         "AND vector IS NOT NULL AND model = ? "
+                         "UNION ALL SELECT employee_id, vector FROM sightings WHERE source = 'admin' AND status = 'ok' "
+                         "AND vector IS NOT NULL AND model = ?", (model, model))
+        return [(r["employee_id"], _vec(r["vector"])) for r in rows]
+
     def unknowns(self, day: dt.date | None = None, status: str | None = "pending",
                  *, source: str | None = None) -> list[Unknown]:
         sql, params = "SELECT * FROM unknowns WHERE 1 = 1", []

@@ -33,6 +33,7 @@ from typing import Callable
 
 import numpy as np
 
+from ..vision.recognizer import looks_covered
 from ..vision.tracker import clear_match, vote_for
 
 log = logging.getLogger(__name__)
@@ -132,6 +133,8 @@ class Collector:
                     continue
                 if employee in {v for v in c.skip_people.split(",") if v}:
                     continue  # switched off for them in Settings: no new reference photos
+                if looks_covered(frame, face.landmarks):
+                    continue  # a mask or a hand over the face: such a photo pulls in other people's faces
                 key = ("person", pid) if pid is not None else ("employee", employee)
                 before = self._seen.get(key)
                 same = before is not None and before[0] == employee

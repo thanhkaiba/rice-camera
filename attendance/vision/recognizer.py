@@ -98,6 +98,26 @@ def align(frame: np.ndarray, landmarks: np.ndarray) -> np.ndarray:
     return cv2.warpAffine(frame, matrix, (112, 112), borderValue=0)
 
 
+COVERED_GAP = 35.0  # colour difference (CIELAB) between the skin under the eyes and the mouth area
+
+
+def looks_covered(frame: np.ndarray, landmarks: np.ndarray | None) -> bool:
+    """Whether the lower half of a face seems hidden (a mask, a hand, a scarf): the mouth and chin have another
+    colour than the skin under the eyes. Tried on this office's photos, it caught 25 of 29 masked faces and 3
+    of 52 clear ones, so it is only for deciding what NOT to keep as a reference photo by itself: a covered
+    reference makes other people's hidden or turned faces look like that person."""
+    if landmarks is None:
+        return False
+    try:
+        face = align(frame, landmarks)
+    except (ValueError, cv2.error):
+        return False
+    lab = cv2.cvtColor(face, cv2.COLOR_BGR2LAB).astype(np.float32)
+    under_eyes = np.concatenate([lab[52:62, 20:40].reshape(-1, 3), lab[52:62, 72:92].reshape(-1, 3)])
+    mouth = lab[78:104, 36:76].reshape(-1, 3)
+    return float(np.linalg.norm(np.median(under_eyes, axis=0) - np.median(mouth, axis=0))) >= COVERED_GAP
+
+
 def crop_face(frame: np.ndarray, bbox, margin: float = 0.4) -> np.ndarray:
     x1, y1, x2, y2 = bbox
     mw, mh = (x2 - x1) * margin, (y2 - y1) * margin
