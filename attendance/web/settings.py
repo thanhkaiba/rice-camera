@@ -399,7 +399,8 @@ def register(app: Flask, core: "App") -> None:
             def play():
                 from ..core import speaker
 
-                result = speaker.test(cfg.greeting.speaker, cfg.greeting.speaker_min_volume)
+                result = speaker.test(cfg.greeting.speaker, cfg.greeting.speaker_min_volume,
+                                      listener=service.greeter.listener)
                 store.log(service.now(), who, "test speaker",
                           ("ok: " if result.get("ok") else "problem: ") + str(result.get("message", ""))[:400])
 

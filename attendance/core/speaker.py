@@ -60,11 +60,21 @@ def read() -> dict | None:
     return {"device": device, "devices": devices, "volume": volume, "muted": muted, "at": time.time()}
 
 
-def problems(state: dict, want: str, min_volume: int, failed: str | None = None) -> dict[str, str]:
+def problems(state: dict, want: str, min_volume: int, failed: str | None = None,
+             heard: dict | None = None) -> dict[str, str]:
     """Problem id -> chat text. `want` is the device the greetings should play on ("" = any),
     `min_volume` the lowest volume that is fine (0 = not checked), `failed` the last greeting that
-    could not be played."""
+    could not be played, `heard` the microphone check (listen.Listener.status) when it is on."""
+    from .listen import MIC_DENIED, SILENT_ALERT
+
     found = {}
+    if heard:
+        if heard.get("allowed") is False:
+            found["speaker_mic"] = MIC_DENIED
+        elif (heard.get("silent_in_a_row") or 0) >= SILENT_ALERT:
+            found["speaker_silent"] = (f"🔇 *The door speaker seems silent*: the office computer's microphone did not hear "
+                                       f"the last {heard['silent_in_a_row']} greetings. Check the speaker's power, its "
+                                       "plug and its own volume knob.")
     device = state.get("device")
     if want and device and device.casefold() != want.casefold():
         gone = want.casefold() not in {d.casefold() for d in state.get("devices", [])}
@@ -84,7 +94,9 @@ def problems(state: dict, want: str, min_volume: int, failed: str | None = None)
 RECOVERED = {"speaker_device": "✅ The door greetings play on the right speaker again.",
              "speaker_muted": "✅ The attendance computer is no longer muted.",
              "speaker_volume": "✅ The attendance computer's volume is high enough again.",
-             "speaker_play": "✅ The door greetings are playing again."}
+             "speaker_play": "✅ The door greetings are playing again.",
+             "speaker_silent": "✅ The office computer's microphone hears the door speaker again.",
+             "speaker_mic": "✅ The office computer may use its microphone again."}
 
 
 def describe(state: dict | None) -> str:
@@ -94,18 +106,36 @@ def describe(state: dict | None) -> str:
     return f"{state.get('device') or 'unknown output'} · {volume} · {'MUTED' if state.get('muted') else 'not muted'}"
 
 
-def test(want: str = "", min_volume: int = 0, play=None) -> dict:
-    """Plays a short sound on the computer's output and tells what it played on. A person has to hear
-    it: the computer cannot tell whether a speaker on the headphone socket made a sound."""
+def test(want: str = "", min_volume: int = 0, play=None, listener=None) -> dict:
+    """Plays a short sound on the computer's output and tells what it played on. With `listener`
+    (listen.Listener) the computer's microphone listens too and tells whether the speaker made the sound;
+    without, a person has to hear it."""
     state = read()
     if sys.platform != "darwin":
         return {"ok": False, "message": "the speaker test works on macOS only"}
+    heard = None
     try:
-        (play or (lambda: subprocess.run(["afplay", TEST_SOUND], timeout=15, check=True, capture_output=True)))()
+        if listener is not None:
+            from .greeting import play_audio
+            from .listen import chime
+
+            audio, rate = chime()
+            heard = listener.play_and_check(play or play_audio, audio, rate, "test", wait_s=30.0)
+        else:
+            (play or (lambda: subprocess.run(["afplay", TEST_SOUND], timeout=15, check=True, capture_output=True)))()
     except Exception as exc:
         return {"ok": False, "message": f"could not play the test sound: {type(exc).__name__}: {exc}"[:300] + f" · {describe(state)}"}
     found = problems(state, want, min_volume) if state else {}
     message = f"played a test sound on {describe(state)}"
+    if heard is not None:
+        message += " · " + str(heard.get("message") or "")
+        if heard.get("heard") is True:
+            message += ": the speaker works"
+        elif heard.get("heard") is False:
+            message += ": the speaker is switched off, asleep, unplugged or turned down by its own knob"
     if found:
-        return {"ok": False, "message": message + " · " + " ".join(re.sub(r"[*🔇🔉]", "", t).strip() for t in found.values())}
+        return {"ok": False, "message": message + " · " + " ".join(re.sub(r"[*🔇🔉]", "", t).strip() for t in found.values()),
+                "heard": (heard or {}).get("heard")}
+    if heard is not None:
+        return {"ok": heard.get("heard") is not False, "message": message, "heard": heard.get("heard")}
     return {"ok": True, "message": message + " · if nobody heard it, check the speaker's power and its own volume"}

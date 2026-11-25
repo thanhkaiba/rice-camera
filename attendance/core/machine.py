@@ -225,10 +225,11 @@ class MachineWatch:
     def __init__(self, cfg: "Config", store: "Store", alert: Callable[[str], None], now: Callable,
                  read: Callable[[], Power | None] = read_power, found: Callable[[], dict] = addresses,
                  read_speaker: Callable[[], dict | None] = speaker_state.read,
-                 speak_failed: Callable[[], str | None] = lambda: None):
+                 speak_failed: Callable[[], str | None] = lambda: None,
+                 heard: Callable[[], dict | None] = lambda: None):
         self.cfg, self.store, self.alert, self.now = cfg, store, alert, now
         self.read, self.found = read, found
-        self.read_speaker, self.speak_failed = read_speaker, speak_failed
+        self.read_speaker, self.speak_failed, self.heard = read_speaker, speak_failed, heard
         self.power: Power | None = None
         self.speaker: dict | None = None  # the last speaker reading
         self._speaker_read = 0.0
@@ -317,7 +318,8 @@ class MachineWatch:
             self.speaker = self.read_speaker()
         if self.speaker is None:
             return {}
-        return speaker_state.problems(self.speaker, g.speaker, g.speaker_min_volume, self.speak_failed())
+        return speaker_state.problems(self.speaker, g.speaker, g.speaker_min_volume, self.speak_failed(),
+                                      self.heard() if getattr(g, "speaker_listen", False) else None)
 
     def status(self) -> dict | None:
         """For the Status page: the last power reading, or None where there is none."""

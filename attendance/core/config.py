@@ -413,6 +413,10 @@ class GreetingConfig:
     birthdays: bool = True  # someone whose birthday it is hears a birthday wish instead of the usual greeting
     speaker: str = ""
     speaker_min_volume: int = 30
+    # Listen with the office computer's own microphone while a greeting plays (macOS, see listen.py): a speaker
+    # that is switched off, asleep or turned down by its knob is told to the system space after three greetings
+    # the microphone did not hear. The speaker test always listens.
+    speaker_listen: bool = False
     # A mains speaker that goes to sleep without a signal swallows a greeting, or its first words. On work
     # days at speaker_awake_from a soft low hum of a few seconds wakes it (it can be heard); day and night, every
     # day, whenever the speaker had no sound for speaker_awake_every minutes, a 20 Hz tone nobody hears is played

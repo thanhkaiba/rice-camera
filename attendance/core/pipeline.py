@@ -107,6 +107,7 @@ class App:
         self.edge.on_arrived = self.service.set_arrived
         self.edge.on_say = self.greeter.say_test
         self.machine.speak_failed = lambda: self.greeter.speak_failed
+        self.machine.heard = self.greeter.listener.status
         self.edge.on_speaker = self.speaker_test
         self.edge.render_text = self.greeter.render_text
         self.edge.upcoming = self.greeter.upcoming
@@ -144,7 +145,8 @@ class App:
         """Asked from the Settings page: a short sound on the office speaker, and what it played on."""
         from . import speaker
 
-        result = speaker.test(self.cfg.greeting.speaker, self.cfg.greeting.speaker_min_volume)
+        result = speaker.test(self.cfg.greeting.speaker, self.cfg.greeting.speaker_min_volume,
+                              listener=self.greeter.listener)
         log.log(logging.INFO if result["ok"] else logging.WARNING, "Speaker test: %s", result["message"])
         return result
 
@@ -157,7 +159,9 @@ class App:
             greeting["daily_voice"] = {"name": self.greeter.zerotts_voice("auto"),
                                        "at": self.service.now().isoformat()}
         return {"camera_ok": self.live.camera_state == "ok", "camera_state": self.live.camera_state, "version": __version__,
-                "greeting": greeting, "speaker": self.machine.speaker,
+                "greeting": greeting,
+                "speaker": ({**self.machine.speaker, "heard": self.greeter.listener.status()}
+                            if self.machine.speaker is not None else None),
                 "person_model": self.cfg.path(self.cfg.tracking.person_model).exists()}
 
     def recognizer(self):

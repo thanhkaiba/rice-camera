@@ -30,6 +30,7 @@ import urllib.request
 from ..store import Employee
 from ..store.schema import HONORIFICS
 from . import fines
+from .listen import Listener
 from .voice_models import ensure as ensure_voice_models
 from .voice import voice_names
 
@@ -817,6 +818,7 @@ class Greeter:
         CALL_NAMES_FROM[0] = lambda: getattr(cfg.greeting, "call_names", "")
         self._speak = speak or self._say
         self.speak_failed: str | None = None  # the last greeting that could not be played; None once one plays
+        self.listener = Listener(cfg.base_dir)  # the office computer's microphone, hearing the speaker (listen.py)
         self._write = write or self._ask_claude
         self._sleep = sleep
         self._queue: queue.Queue = queue.Queue(maxsize=MAX_WAITING)
@@ -1554,7 +1556,11 @@ class Greeter:
                     audio, rate = self._joined(text, voice, self.now().date())
                 else:
                     audio, rate = self._audio(text, voice, self.now().date())
-                play_audio(louder(audio, self.settings.loudness), rate)
+                audio = louder(audio, self.settings.loudness)
+                if self.settings.speaker_listen and self.listener.may_listen():
+                    self.listener.play_and_check(play_audio, audio, rate, "greeting", background=True)
+                else:
+                    play_audio(audio, rate)
                 self._sound_at = self.now()  # the speaker has just had a signal
             else:
                 text = " ".join(text.replace(PART, " ").split())
@@ -2182,6 +2188,8 @@ class Greeter:
             time.sleep(15)
 
     def start(self) -> None:
+        if self.settings.speaker_listen:
+            self.listener.build_soon()
         threading.Thread(target=self._awake_loop, name="speaker-awake", daemon=True).start()
         threading.Thread(target=self._speak_loop, name="greeting-speak", daemon=True).start()
         threading.Thread(target=self._write_loop, name="greeting-write", daemon=True).start()

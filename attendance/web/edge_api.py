@@ -95,9 +95,18 @@ def _speaker_status(value) -> dict | None:
         return None
     names = [str(n)[:80] for n in value.get("devices", [])[:20]] if isinstance(value.get("devices"), list) else []
     volume = value.get("volume")
+    heard = value.get("heard") if isinstance(value.get("heard"), dict) else None
+    if heard is not None:
+        at, corr = heard.get("at"), heard.get("corr")
+        heard = {"allowed": heard.get("allowed") if isinstance(heard.get("allowed"), bool) else None,
+                 "heard": heard.get("heard") if isinstance(heard.get("heard"), bool) else None,
+                 "at": float(at) if isinstance(at, (int, float)) else None,
+                 "corr": float(corr) if isinstance(corr, (int, float)) else None,
+                 "at_text": str(heard.get("at_text") or "")[:8],
+                 "kind": str(heard.get("kind") or "")[:20], "message": str(heard.get("message") or "")[:200]}
     return {"device": str(value.get("device") or "")[:80], "devices": names,
             "volume": int(volume) if isinstance(volume, (int, float)) and 0 <= volume <= 100 else None,
-            "muted": bool(value.get("muted"))}
+            "muted": bool(value.get("muted")), "heard": heard}
 
 
 def heartbeat(store) -> dict | None:

@@ -15,7 +15,8 @@ a = Analysis(
     binaries=collect_dynamic_libs("onnxruntime"),
     datas=[(str(root / "attendance" / "web" / "templates"), "attendance/web/templates"),
            (str(root / "attendance" / "web" / "static"), "attendance/web/static"),
-           (str(root / "config.example.yaml"), ".")]
+           (str(root / "config.example.yaml"), "."),
+           (str(root / "attendance" / "core" / "mic_helper.swift"), "attendance/core")]
           + collect_data_files("certifi")
           + collect_data_files("zerotts")
           + (collect_data_files("tzdata") if sys.platform == "win32" else []),  # elsewhere the system's time zones
