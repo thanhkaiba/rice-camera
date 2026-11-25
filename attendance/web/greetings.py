@@ -31,7 +31,10 @@ def register(app: Flask, core: "App") -> None:
         day = _date(request.args.get("day"), latest)
         said, feedback = store.greetings(day), store.greeting_feedback(day)
         people = {p.id: p for p in store.all_employees()}
+        from ..core.greeting import untagged
         rows = [{"id": emp, "name": people[emp].name if emp in people else emp,
+                 "plain_text": untagged(g["text"]),
+                 "boss": emp in people and (people[emp].not_counted or people[emp].honorific in {"sep", "shark"}),
                  "time": dt.datetime.fromisoformat(g["said_at"]), "text": g["text"], "kind": KINDS.get(g["kind"], g["kind"]),
                  "rating": (feedback.get(emp) or {}).get("rating", ""), "comment": (feedback.get(emp) or {}).get("comment", "")}
                 for emp, g in said.items()]
@@ -62,6 +65,8 @@ def register(app: Flask, core: "App") -> None:
                      if entry.get("timed", True) else
                      [("any time", t) for t in entry.get("on_time", []) + entry.get("late", [])])
             lines += [("busy door", t) for t in entry.get("short", [])]
+            if entry.get("on_time") and entry.get("on_time") == entry.get("late"):
+                lines = [("any arrival", t) for t in entry["on_time"]] + [("busy door", t) for t in entry.get("short", [])]
             rows.append({"name": person.name, "note": entry.get("note", ""), "lines": lines})
         rows.sort(key=lambda r: r["name"].lower())
         at = sent.get("at")

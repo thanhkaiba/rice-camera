@@ -494,9 +494,9 @@ def test_habits_come_from_the_last_work_days_and_only_the_label_reaches_claude(c
     people = [app.store.employee(i) for i in "ABC"]
     system, user, ids = g.prompt(people, DAY)
     listed = {e["name"]: e for e in json.loads(user.split("People:\n")[1])}
-    assert listed["Alice"]["habit"] == "on time 6 work days in a row" and listed["Bob"]["habit"] == "often late lately"
+    assert all("habit" not in person for person in listed.values())  # greetings no longer discuss punctuality
     assert "habit" not in listed["Carol"] and "10:20" not in user and "08:40" not in user
-    assert '"habit"' in system and "never mentions the habit" in system
+    assert "never mentions the habit" in system
     # Switched off in Settings: nothing about anyone's attendance is worked out or sent.
     app.cfg.greeting.tease = False
     app.service._greeting_habits = None
@@ -505,10 +505,10 @@ def test_habits_come_from_the_last_work_days_and_only_the_label_reaches_claude(c
     assert "habit" not in g.prompt(people, DAY)[1]
 
 
-def test_one_sentence_of_each_kind_is_asked_for(core):
+def test_one_sentence_for_any_arrival_is_asked_for(core):
     app, clock, g, _, _ = make(core)
     system, _, _ = g.prompt([app.store.employee("A")], DAY)
-    assert greeting.VARIANTS == 1 and "\"on_time\": 1 for arriving" in system
+    assert '"greeting": one main sentence' in system and "Do not write separate early/late variants" in system
 
 
 def test_a_coming_late_request_still_waiting_moves_the_late_time_for_the_door_only(core):
@@ -541,7 +541,7 @@ def test_someone_whose_request_waits_for_approval_hears_their_usual_greeting(cor
     assert g.sentence(bob, at(9, 50)) == plain("Bob", "", False)
     assert not g.waits_for_approval(bob, at(10, 20)) and not g.is_late(bob, at(10, 20))
     text = g.sentence(bob, at(10, 20))
-    assert text == plain("Bob", "", False) and "chờ" not in text and "duyệt" not in text
+    assert text == g.short_line(bob, DAY) and "chờ" not in text and "duyệt" not in text
     assert g.is_late(bob, at(10, 31)) and g.sentence(bob, at(10, 31)) == plain("Bob", "", True)  # after the interval: late
     # Arriving with others, they share the group's sentence like anyone else.
     plan = g._plan([(bob, at(10, 20), 0.0), (app.store.employee("A"), at(10, 20), 0.0), (app.store.employee("C"), at(10, 20), 0.0)])

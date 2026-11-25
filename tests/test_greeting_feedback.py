@@ -82,6 +82,20 @@ def test_the_brief_for_claude_carries_the_feedback(core):
     assert "rated greetings" not in g.prompt([app.store.employee(a)], day)[0]
 
 
+def test_review_has_filters_plain_words_and_boss_context(core):
+    from attendance.web import create_app
+    app, clock, _ = core
+    a, _, _ = people(app)
+    app.store.set_greetings({a: {"honorific": "sep"}})
+    said(app, clock, a, "[cheerfully] Hello An!")
+    page = create_app(app).test_client().get(f"/greetings?day={DAY}").get_data(as_text=True)
+    assert 'id="review-filter"' in page and 'id="review-search"' in page
+    assert 'data-person-kind="boss"' in page
+    assert '<div class="greet-text">“Hello An!”</div>' in page
+    assert 'Voice direction' in page and 'More respectful' in page
+    assert 'Save review' in page
+
+
 def test_today_the_page_shows_what_the_door_is_still_going_to_say(core):
     from attendance.core.greeting import LINES_KEY, Greeter
     from attendance.web import create_app, edge_api

@@ -642,6 +642,15 @@ button.listen { margin-left: 6px; white-space: nowrap; color: var(--muted); } bu
 .greet-rate .seg button.on.bad { color: var(--bad-text); background: var(--bad-bg); }
 .greet-comment { width: 100%; }
 .greet-state { min-height: 1.2em; }
+.greet-row[hidden] { display: none; }
+.review-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 14px; }
+.review-tools label { display: flex; flex-direction: column; gap: 6px; flex: 1 1 170px; }
+.review-tools input, .review-tools select { width: 100%; }
+.review-reasons { display: flex; flex-wrap: wrap; gap: 5px; }
+.review-reasons button { font-size: .8em; padding: 4px 8px; }
+.greet-original { margin-top: 6px; font-size: .85em; }
+.greet-original summary { cursor: pointer; }
+.greet-save { align-self: flex-start; }
 @media (max-width: 640px) { .greet-rate { flex-basis: 100%; } }
 
 /* Groups page: one picture per group at the door */

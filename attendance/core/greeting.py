@@ -140,8 +140,9 @@ SYSTEM = """You write the spoken greetings of the camera at the front door of an
 A speaker reads each one aloud with a text-to-speech voice the moment the camera recognises someone walking in.
 
 The camera sounds like a warm, observant female colleague who is happy to see someone arrive. Speak to that \
-person, not to an audience. Everyday conversation comes first; wit is a small bonus, never a performance. Most \
-greetings are an easy hello with one friendly thought; a few have a light, immediately understandable joke. \
+person, not to an audience. Everyday conversation comes first, with a witty, cheerful personality. For colleagues, \
+aim for a small smile: a fresh playful observation or light joke that is understood immediately. Mix these with \
+warm simple hellos so the humour stays spontaneous; never force a punchline or turn the greeting into a performance. \
 Do not default to an MC, a news presenter, exaggerated flattery or pretending to inspect attendance. A short, \
 sincere hello is better than a clever line nobody would actually say. No stock phrases or long wishes.
 
@@ -156,14 +157,14 @@ Never ask a question that needs an answer: the speaker cannot hold a conversatio
 - Silently read each draft aloud once. If it needs explaining, sounds scripted or takes effort to understand, \
 rewrite it more simply. Check the name, address, arrival context and recent greetings before returning the JSON.
 
-For every person in the list write three greetings, in the person's "language" ("vi" Vietnamese, "en" English):
+For every person write one main greeting and a brief busy-door hello, in their "language" ("vi" Vietnamese, "en" English):
 - "short": a fixed short hello, one to two seconds spoken (two to five words), the same for any arrival time: it is \
 used when many people come in one after another ("A, anh Terry!" · "Chào chị Trang ạ!" · "Hi, Chris!").
-- "on_time": {n} for arriving early or on time, three to five seconds spoken (about eight to sixteen words). It must \
-fit both an early and an on-time arrival.
-- "late": {n} for arriving after the start of the working day, three to five seconds spoken.
-For a person with "not_timed": true (the bosses), "on_time" and "late" are two different greetings, picked at random \
-on any day: neither may depend on the time they arrive.
+- "greeting": one main sentence, three to five seconds spoken (about eight to sixteen words), suitable for ANY \
+arrival time. Never mention being early, on time, late, a clock, punctuality, an attendance streak or permission \
+to arrive late. Do not infer the arrival time from recent greetings. Humour comes from a friendly welcome, not \
+attendance. Do not write separate early/late variants.
+For a person with "not_timed": true (the bosses), follow the courteous boss rules below.
 
 Logic first. Every greeting must make sense said to someone who is walking through the office door right now:
 - Never assume what anyone will do today or did before: no work, tasks, schedule, meeting, mood, sleep, dream, \
@@ -178,13 +179,12 @@ given and only when the link is natural and fun: never squeeze the weather or an
 Never state weather, dates or occasions that are not given.
 
 How to greet:
-- On time: a cheerful, playful compliment or a burst of good energy; it need not mention being on time. Avoid the \
-worn motifs (ten points, model employee, so diligent).
-- Late: a light, witty tease at most, never blame, judgement or shame; never guess why they are late, never say how \
-late, never "again" or "as usual". Do not overuse pretending not to see them, covering for them, keeping it secret or \
-deleting the attendance record. Not every late greeting needs to tease about being late.
-- Bosses ("not_timed": true): polite, with the right address; playful flattery, a mock report, a light tease or \
-real delight are fine, never over the top; nothing about arriving early, late, on time or the clock.
+- Colleagues: cheerful, witty and lightly playful, never blame, judgement or shame. Avoid worn motifs (ten points, \
+model employee, so diligent), covering for people, keeping arrivals secret or deleting an attendance record.
+- Bosses ("not_timed": true, or addressed as sếp or shark): courteous, warm and respectful, with the correct \
+address and natural politeness such as ạ in Vietnamese. Prefer a sincere welcome over a joke. No teasing, mock \
+reports, exaggerated flattery, jokes about authority or money, or asking them to rate the greeting. Nothing about \
+arriving early, late, on time or the clock. This takes priority over humour, trends, habits and style preferences.
 - Never at anyone else's expense: praising one person never implies others are late or lazy.
 - Kind at heart: tease the situation, never a person's looks, body, age, clothes, gender, family, health or ability, \
 and nothing that would sting if their manager stood next to them.
@@ -207,18 +207,15 @@ translated-sounding phrases; no English words except the name.
 - Only words a voice can read: no emoji, symbols or abbreviations. Write numbers as words.
 
 Data about a person:
-- "habit", when given, is how they arrived lately. "often late lately": their "on_time" greeting may be delighted \
-mock surprise at seeing them this early; their "late" greeting never mentions the habit. "on time N work days in a \
-row": their "on_time" greeting may cheer the streak; their "late" one is gentle mock surprise that the streak takes a \
-break, never a reproach. Never say how many times anyone was late.
-- "today" that says it is (or was, or is tomorrow) their birthday: "on_time" and "late" are both a happy birthday \
+- The greeting never mentions the habit of arrival, even if older feedback does.
+- "today" that says it is (or was, or is tomorrow) their birthday: "greeting" is a happy birthday \
 wish by name, never about the time or their age (yesterday: a cheerful belated wish; tomorrow: a wish a day early); \
 their "short" stays an ordinary short hello. Never guess or mention how old they are.
-- Another "today" (back after leave, their first day at the company): "on_time" and "late" are about it, warmly, \
-before their "habit". Never say or guess why someone was away.
+- Another "today" (back after leave, their first day at the company): "greeting" is about it, warmly. Never say or \
+guess why someone was away.
 - "about", when given, is what colleagues know and like about them: good material, used kindly, nothing private.
 - "dated": true when a greeting of this person uses something true only today (the weekday, the weather, an occasion, \
-their "today" or "habit"), false when both would still fit on another day: those are kept for later.
+their "today"), false when the greeting would still fit on another day: those are kept for later.
 - "say_as": how a Vietnamese text-to-speech voice must be given the person's "name" to pronounce it right. The voice \
 reads every word as Vietnamese, so a foreign name comes out wrong: respell it as Vietnamese syllables with tone marks, \
 separated by spaces, that sound like the name said by a Vietnamese colleague (Brian: "Bờ rai ần", Tony: "Tô ni", \
@@ -298,9 +295,8 @@ SCHEMA = {
     "properties": {"people": {"type": "array", "items": {
         "type": "object",
         "properties": {"id": {"type": "string"}, "say_as": {"type": "string"}, "short": {"type": "string"},
-                       "on_time": {"type": "array", "items": {"type": "string"}},
-                       "late": {"type": "array", "items": {"type": "string"}}, "dated": {"type": "boolean"}},
-        "required": ["id", "say_as", "short", "on_time", "late", "dated"], "additionalProperties": False}}},
+                       "greeting": {"type": "string"}, "dated": {"type": "boolean"}},
+        "required": ["id", "say_as", "short", "greeting", "dated"], "additionalProperties": False}}},
     "required": ["people"], "additionalProperties": False,
 }
 WEEKDAYS_VI = ["thứ Hai", "thứ Ba", "thứ Tư", "thứ Năm", "thứ Sáu", "thứ Bảy", "Chủ nhật"]
@@ -1012,6 +1008,13 @@ class Greeter:
         """Their greeting: the short hello when the door is busy (and they have one), else the one for the time."""
         if self.waits_for_approval(person, ts):
             return waiting_sentence(person, ts.date())
+        # A shifted deadline means excused, not early: old cached on-time praise is misleading.
+        # Reuse the short greeting without generating a third variant or exposing leave details.
+        rules = self.rules(ts.date())
+        shifted = person.id in rules.get("people", {})
+        if (shifted and ts >= self.late_from(ts.date()) and not self.is_late(person, ts)
+                and not self._entry(person, ts.date()).get("universal")):
+            return self.short_line(person, ts.date()) or plain(called(person), person.honorific, False, person.greet_language)
         if short:
             line = self.short_line(person, ts.date())
             if line:
@@ -1354,11 +1357,8 @@ class Greeter:
             note = self.note(p, day)
             if note:
                 entry["today"] = note
-            habit = self.rules(day).get("habits", {}).get(p.id)
             if p.not_counted:  # never late: their greetings are not about the time
                 entry["not_timed"] = True
-            elif habit:
-                entry["habit"] = habit
             recent = self.heard(p.id, day)
             if recent:
                 entry["recent"] = recent
@@ -1380,7 +1380,7 @@ class Greeter:
             style = (EMOTIONS.format(tags=" ".join(f"[{t}]" for t in tags)) + ("\n" + style if style else ""))
         user = self.day_context(day) + "\n\nPeople:\n" + json.dumps(listed, ensure_ascii=False)
         if self._taken:  # what the other colleagues get today: no idea is used twice
-            user += "\n\nalready_written_today:\n" + json.dumps(self._taken[-80:], ensure_ascii=False)
+            user += "\n\nalready_written_today:\n" + json.dumps(list(dict.fromkeys(self._taken))[-80:], ensure_ascii=False)
         system = SYSTEM.format(n=VARIANTS, style=style)
         if self._want_together:
             system += TOGETHER_RULES.format(vi=6, en=3)
@@ -1479,8 +1479,10 @@ class Greeter:
             self._note_together(day, answer["together"])
         for entry in answer["people"]:
             if entry["id"] in ids:
-                clean = {k: [t.strip() for t in entry[k] if t.strip()][:VARIANTS] for k in ("on_time", "late")}
-                if clean["on_time"] and clean["late"]:
+                main = " ".join(str(entry.get("greeting") or "").split())
+                if main:
+                    # Both legacy slots point to the same sentence/audio; keep edge and cache compatibility.
+                    clean = {"on_time": [main], "late": [main], "universal": True}
                     short = " ".join(str(entry.get("short") or "").split())[:80]
                     clean["short"] = [short] if short else []
                     clean["say_as"] = " ".join(str(entry.get("say_as") or "").split())[:60]
@@ -1804,7 +1806,7 @@ class Greeter:
             voice, line = self.voice_for("vi"), self.mask_line()
             if not self.audio_path(line, voice, day).is_file():
                 wanted.append((line, voice))
-        return wanted
+        return list(dict.fromkeys(wanted))  # universal greetings share one audio across both legacy slots
 
     def _wanted_group_audio(self, people: list, day: dt.date) -> list[tuple]:
         wanted = []

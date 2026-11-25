@@ -4,7 +4,7 @@
 <div class="page-head">
   <div>
     <h1>Greetings</h1>
-    <p class="subtitle">What the door said. Mark each sentence and add a remark if you like: Claude reads the marks of the last weeks when it writes the next morning's sentences, writes more like the good ones and, now and then, gives a good one to someone else.</p>
+    <p class="subtitle">Review what the door actually said. Aim for witty, cheerful greetings for colleagues and courteous welcomes for bosses. Saved ratings and specific remarks guide future greetings; existing sentences and audio stay unchanged.</p>
   </div>
 </div>
 
@@ -20,7 +20,7 @@
 </div>
 
 {% if coming is not none %}
-<details class="panel group" open style="margin-bottom:18px">
+<details class="panel group" style="margin-bottom:18px">
   <summary><span>Still to come today</span><span class="sum">{{ coming.rows|length }} {{ 'person' if coming.rows|length == 1 else 'people' }} not greeted yet{% if coming.at %} · sent {{ coming.at.strftime('%H:%M') }}{% endif %}</span></summary>
   <div>
     <p class="hint" style="margin:0 0 4px">The sentences written this morning for whoever the door has not greeted yet: one of them is said when they arrive, on time or late. Once said, a sentence moves to the list below to be marked.</p>
@@ -47,18 +47,31 @@
 {% if not rows %}
 <div class="panel"><p class="hint" style="margin:0">Nothing was said at the door on {{ day.strftime('%d %b %Y') }}.</p></div>
 {% else %}
+<div class="panel review-tools">
+  <label>Find a greeting <input id="review-search" type="search" placeholder="Name or spoken words"></label>
+  <label>Rating <select id="review-filter"><option value="all">All greetings</option><option value="unreviewed">Not reviewed</option><option value="bad">Needs improvement</option><option value="good">Good</option><option value="ok">So-so</option></select></label>
+  <label>People <select id="review-people"><option value="all">Everyone</option><option value="boss">Bosses / exempt</option><option value="colleague">Colleagues</option></select></label>
+  <span id="review-progress" class="hint" role="status"></span>
+</div>
+<p id="review-empty" class="hint" hidden>No greetings match these filters.</p>
 <div class="panel greet-list">
   {% for r in rows %}
-  <div class="greet-row" data-employee="{{ r.id }}" data-rating="{{ r.rating }}">
+  <div class="greet-row" data-employee="{{ r.id }}" data-rating="{{ r.rating }}" data-person-kind="{{ 'boss' if r.boss else 'colleague' }}">
     <div class="greet-said">
-      <div class="greet-text">“{{ r.text }}”</div>
+      <div class="greet-text">“{{ r.plain_text }}”</div>
       <div class="hint">{{ r.time.strftime('%H:%M') }} · {{ r.name }} · {{ r.kind }}</div>
+      {% if r.boss %}<span class="hint">Courteous welcome · boss / exempt</span>{% endif %}
+      {% if r.plain_text != r.text %}<details class="greet-original"><summary>Voice direction</summary><span class="hint">{{ r.text }}</span></details>{% endif %}
     </div>
     <div class="greet-rate">
       <div class="seg" role="group" aria-label="Rating">
         {% for key, label in ratings.items() %}<button type="button" data-rate="{{ key }}" class="{{ 'on ' ~ key if r.rating == key }}" aria-pressed="{{ 'true' if r.rating == key else 'false' }}">{{ label }}</button>{% endfor %}
       </div>
       <input type="text" class="greet-comment" maxlength="300" placeholder="Remark for Claude (optional)" value="{{ r.comment }}" aria-label="Remark for {{ r.name }}'s greeting">
+      <div class="review-reasons" role="group" aria-label="Quick feedback for {{ r.name }}">
+        {% for reason in ('Naturally funny', 'Too bland', 'Forced joke', 'Too long', 'Repetitive', 'More respectful', 'Voice overacted') %}<button type="button" data-reason="{{ reason }}">{{ reason }}</button>{% endfor %}
+      </div>
+      <button type="button" class="greet-save" disabled>Save review</button>
       <span class="hint greet-state" aria-live="polite"></span>
     </div>
   </div>
@@ -69,7 +82,7 @@
 <details class="panel group" style="margin-top:18px">
   <summary><span>What Claude is shown tomorrow</span><span class="sum">{{ (learned.liked or [])|length }} good · {{ (learned.disliked or [])|length }} not good · {{ (learned.so_so or [])|length }} remarks</span></summary>
   <div>
-    <p class="hint" style="margin:0 0 8px">The newest marks of the last 45 days, each sentence once, at most 20 of each kind. Names are part of the sentences.</p>
+    <p class="hint" style="margin:0 0 8px">The newest marks of the last 45 days, each sentence once, at most 20 of each kind. Refresh this page after saving to see updated feedback here. Good examples guide the style, rather than being copied with another name.</p>
     {% for key, label in (('liked', 'Good'), ('disliked', 'Not good'), ('so_so', 'So-so, with a remark')) %}{% if learned.get(key) %}
     <p style="margin:10px 0 4px; font-weight:500">{{ label }}</p>
     <ul style="margin:0; padding-left:18px">{% for e in learned[key] %}<li>“{{ e.text }}”{% if e.remark %} <span class="hint">— {{ e.remark }}</span>{% endif %}</li>{% endfor %}</ul>
@@ -82,38 +95,96 @@
 (() => {
   const token = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
   const day = {{ day.isoformat()|tojson }};
+  const rows = [...document.querySelectorAll('.greet-row[data-employee]')];
+  const search = document.querySelector('#review-search');
+  const filter = document.querySelector('#review-filter');
+  const people = document.querySelector('#review-people');
+  const normalize = text => text.toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+  const refresh = () => {
+    if (!search) return;
+    let visible = 0;
+    rows.forEach(row => {
+      const rating = row.dataset.rating;
+      const matches = normalize(row.querySelector('.greet-said').textContent).includes(normalize(search.value.trim())) &&
+        (filter.value === 'all' || (filter.value === 'unreviewed' ? !rating : rating === filter.value)) &&
+        (people.value === 'all' || people.value === row.dataset.personKind);
+      row.hidden = !matches;
+      if (matches) visible++;
+    });
+    document.querySelector('#review-empty').hidden = visible !== 0;
+    document.querySelector('#review-progress').textContent = `${visible} shown · ${rows.filter(r => !r.dataset.rating).length} not reviewed`;
+  };
+  [search, filter, people].filter(Boolean).forEach(el => el.addEventListener('input', refresh));
+  const paint = row => row.querySelectorAll('[data-rate]').forEach(b => {
+    const on = b.dataset.rate === row.draftRating;
+    b.className = on ? 'on ' + row.draftRating : '';
+    b.setAttribute('aria-pressed', String(on));
+  });
+  const dirty = row => {
+    row.dataset.dirty = 'true';
+    row.querySelector('.greet-save').disabled = false;
+    row.querySelector('.greet-state').textContent = 'Not saved yet';
+    paint(row);
+  };
   const recount = () => ['good', 'ok', 'bad'].forEach(key => {
     const el = document.querySelector('[data-count="' + key + '"]');
     if (el) el.textContent = document.querySelectorAll('.greet-row[data-rating="' + key + '"]').length;
   });
   const save = async row => {
+    if (row.saving) return;
+    row.saving = true;
     const state = row.querySelector('.greet-state');
     const data = new URLSearchParams({ csrf_token: token, day, employee_id: row.dataset.employee,
-                                       rating: row.dataset.rating || '', comment: row.querySelector('.greet-comment').value });
+                                       rating: row.draftRating, comment: row.querySelector('.greet-comment').value });
+    row.querySelectorAll('button, input').forEach(el => el.disabled = true);
     state.textContent = 'Saving…';
     try {
       const answer = await fetch({{ url_for('rate_greeting')|tojson }}, { method: 'POST', body: data, headers: { 'X-CSRF-Token': token } });
       const result = await answer.json();
-      if (!result.ok) throw new Error(result.message || 'not saved');
+      if (!answer.ok || !result.ok) throw new Error(result.message || 'not saved');
       row.dataset.rating = result.rating;
-      row.querySelectorAll('[data-rate]').forEach(b => {
-        const on = b.dataset.rate === result.rating;
-        b.className = on ? 'on ' + result.rating : '';
-        b.setAttribute('aria-pressed', on ? 'true' : 'false');
-      });
+      row.draftRating = result.rating;
+      row.querySelector('.greet-comment').value = result.comment;
+      row.dataset.dirty = 'false';
+      paint(row);
       state.textContent = 'Saved';
       recount();
+      refresh();
     } catch (error) {
       state.textContent = 'Not saved: ' + error.message;
+    } finally {
+      row.saving = false;
+      row.querySelectorAll('button, input').forEach(el => el.disabled = false);
+      row.querySelector('.greet-save').disabled = row.dataset.dirty !== 'true';
     }
   };
-  document.querySelectorAll('.greet-row').forEach(row => {
+  rows.forEach(row => {
+    row.draftRating = row.dataset.rating;
     row.querySelectorAll('[data-rate]').forEach(button => button.addEventListener('click', () => {
-      row.dataset.rating = row.dataset.rating === button.dataset.rate ? '' : button.dataset.rate;  // a second click takes it back
-      save(row);
+      row.draftRating = row.draftRating === button.dataset.rate ? '' : button.dataset.rate;
+      dirty(row);
     }));
-    row.querySelector('.greet-comment').addEventListener('change', () => save(row));
+    const comment = row.querySelector('.greet-comment');
+    comment.addEventListener('input', () => dirty(row));
+    row.querySelectorAll('[data-reason]').forEach(button => button.addEventListener('click', () => {
+      const reason = button.dataset.reason;
+      const next = [comment.value.trim(), reason].filter(Boolean).join('; ');
+      if (next.length > comment.maxLength) {
+        row.querySelector('.greet-state').textContent = 'Remark is full; shorten it before adding a reason.';
+        return;
+      }
+      comment.value = next;
+      dirty(row);
+    }));
+    row.querySelector('.greet-save').addEventListener('click', () => save(row));
   });
+  window.addEventListener('beforeunload', event => {
+    if (rows.some(row => row.dataset.dirty === 'true')) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
+  refresh();
 })();
 </script>
 {% endblock %}
