@@ -77,7 +77,7 @@ def test_the_brief_for_claude_carries_the_feedback(core):
     g.set_rules({"day": day.isoformat(), "workday": True, "people": {},
                  "feedback": {"liked": [{"text": "Anh An bước vào bá khí ghê!"}]}})
     system, _, _ = g.prompt([app.store.employee(a)], day)
-    assert "bá khí" in system and "one person in eight" in system
+    assert "bá khí" in system and "Do not recycle a liked sentence" in system
     g.set_rules({"day": day.isoformat(), "workday": True, "people": {}})
     assert "rated greetings" not in g.prompt([app.store.employee(a)], day)[0]
 
