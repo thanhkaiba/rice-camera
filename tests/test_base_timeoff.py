@@ -512,3 +512,34 @@ def test_a_pending_request_counts_as_approved_when_the_setting_says_so(core, mon
     assert 'B' not in greeting.rules_for(app.service, DAY).get('pending', {})  # the door does not say "waiting"
     page = create_app(app).test_client().get('/settings').get_data(as_text=True)
     assert 'name="leave_api.pending_counts"' in page
+
+
+def test_base_is_asked_hourly_outside_working_hours(core):
+    """The greetings are read ahead at 06:30: who works from home must be known by then, so Base is asked at night too."""
+    from attendance.integrations import leave_api
+
+    app, clock, _ = core
+    app.cfg.base_api_key = 'secret'
+
+    def synced(when, ok=True):
+        app.store.put(leave_api.STATUS_KEY, json.dumps({'at': when.isoformat(), 'ok': ok}))
+
+    clock.t = at(5, 30)
+    assert app.leave_sync.due()  # never asked yet
+    synced(at(5, 30))
+    clock.t = at(6, 29)
+    assert not app.leave_sync.due()
+    clock.t = at(6, 30)
+    assert app.leave_sync.due()
+    synced(at(6, 30), ok=False)
+    clock.t = at(6, 39)
+    assert not app.leave_sync.due()
+    clock.t = at(6, 40)
+    assert app.leave_sync.due()  # a failure is tried again sooner
+    synced(at(18, 5))
+    clock.t = at(19, 4)
+    assert not app.leave_sync.due()
+    clock.t = at(19, 5)
+    assert app.leave_sync.due()
+    clock.t = at(6, 0, day=dt.date(2026, 10, 17))  # a Saturday: nothing to read ahead
+    assert not app.leave_sync.due()

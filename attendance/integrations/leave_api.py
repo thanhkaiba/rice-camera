@@ -41,7 +41,11 @@ BEFORE_DEADLINE = dt.timedelta(minutes=5)  # refresh once more just before the l
 ARRIVING_EVERY = dt.timedelta(minutes=5)
 ARRIVING_FOR = dt.timedelta(minutes=90)
 STALE_AFTER = dt.timedelta(hours=24)
-BASE_AUTO_HOURS = (dt.time(9), dt.time(18))  # local time; Base is not polled automatically outside it
+BASE_AUTO_HOURS = (dt.time(9), dt.time(18))  # local time; Base is asked every refresh_minutes inside it
+# Outside those hours (nights, early mornings) Base is still asked once an hour on work days: the door reads the
+# day's greetings ahead around 06:30 and must know by then who works from home or is on leave (no audio for them).
+OFF_HOURS_EVERY = dt.timedelta(hours=1)
+OFF_HOURS_RETRY = dt.timedelta(minutes=10)
 
 
 def _get_json(url: str, token: str) -> object:
@@ -110,7 +114,11 @@ class LeaveSync:
             if now.astimezone(base_timeoff.VN).weekday() >= 5:
                 return False
             if not BASE_AUTO_HOURS[0] <= now.time() < BASE_AUTO_HOURS[1]:
-                return False
+                status = read_status(self.store)
+                if not status.get("at"):
+                    return True
+                last = dt.datetime.fromisoformat(status["at"])
+                return now - last >= (OFF_HOURS_EVERY if status.get("ok") else OFF_HOURS_RETRY)
         status = read_status(self.store)
         if not status.get("at"):
             return True
@@ -207,8 +215,8 @@ def base_ready(cfg: Config, store: Store, now: dt.datetime, day: dt.date | None 
     if not cfg.base_api_key:
         return True
     day = day or now.astimezone(base_timeoff.VN).date()
-    # Base is only polled between BASE_AUTO_HOURS: before the first sync of today nothing is due yet,
-    # and after the last one the data is not "stale" just because it is not refreshed any more.
+    # Outside BASE_AUTO_HOURS Base is asked only hourly: before 09:00 today's data may not be in yet,
+    # and after 18:00 the data is not "stale" just because it is refreshed less often.
     if now.time() < BASE_AUTO_HOURS[0] and day == now.date():
         return all_tracked_have_username(store)
     status = read_status(store)
