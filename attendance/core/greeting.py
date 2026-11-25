@@ -49,6 +49,22 @@ def fixed_short(said: str) -> bool:
     return any(p.match(said.strip()) for p in FIXED_SHORT)
 
 
+# Someone who comes in late hears their name ("Anh Terry!"), then one of these, picked anew each day: the office's
+# fine for coming late, the amount as Settings → Greeting → late fine says it ("hai mươi nghìn"; empty: off, they hear
+# the greeting written for them). The name is read once and kept (names), so are these lines: no credits per arrival.
+LATE_FINE_VI = [
+    "[playfully] Hôm nay góp quỹ {amount} nha!",
+    "Hơi muộn chút rồi, nhớ nộp {amount} vô quỹ nha.",
+    "[playfully] Quỹ văn phòng vừa có thêm {amount} rồi đó!",
+    "Muộn một chút thôi mà, {amount} là xong nha.",
+    "Chào buổi sáng! Nhớ ghé thủ quỹ gửi {amount} nha.",
+    "[cheerfully] Tới rồi là vui rồi, góp quỹ {amount} là vui hơn nữa!",
+    "Quỹ liên hoan cảm ơn {amount} của mình trước nha!",
+    "Sáng nay chậm một xíu, quỹ văn phòng nhận thêm {amount} nha.",
+    "Không sao đâu, góp quỹ {amount} là hòa cả làng nha!",
+    "[cheerfully] Một ngày mới bắt đầu bằng {amount} cho quỹ chung nha!",
+]
+
 SHORT_KEY = "greeting_short"  # person id -> {"text", "language", "honorific", "called"}: their short hello, kept
 HEARD_KEY = "greeting_heard"  # person id -> [[day, sentence], ...]: what they heard lately, so Claude does not repeat it
 HEARD_DAYS = 7
@@ -1015,6 +1031,26 @@ class Greeter:
                             "called": called(person)}
         self.store.put(SHORT_KEY, json.dumps(saved, ensure_ascii=False))
 
+    def fine_lines(self) -> list[str]:
+        """The late-fine lines with the amount in them; empty when Settings has no amount."""
+        amount = " ".join(str(getattr(self.settings, "late_fine", "") or "").split())
+        return [line.format(amount=amount) for line in LATE_FINE_VI] if amount else []
+
+    def fine_line(self, person, day: dt.date) -> str:
+        """The late-fine line someone hears after their name today; empty for a boss, an English speaker or when
+        it is off."""
+        lines = self.fine_lines()
+        if not lines or person.not_counted or person.greet_language != "vi":
+            return ""
+        return lines[int(hashlib.sha1(f"{person.id}{day.isoformat()}".encode()).hexdigest(), 16) % len(lines)]
+
+    def _kept_line(self, said: str) -> bool:
+        """A line said the same way every day: its audio is kept with the names and read once."""
+        if fixed_short(said):
+            return True
+        plain_said = untagged(said)
+        return any(untagged(line) == plain_said for line in self.fine_lines())
+
     def short_line(self, person, day: dt.date) -> str:
         """The short hello for a busy door. Vietnamese: one of SHORT_VI, picked once per person (the same every day).
         English: today's from Claude, else the one kept for them; empty when there is none."""
@@ -1047,6 +1083,9 @@ class Greeter:
             if line:
                 return line
         late = self.is_late(person, ts)
+        fine = self.fine_line(person, ts.date()) if late else ""
+        if fine:  # their name, then the office's fine: both read ahead once and kept
+            return f"{self.name_called(person)} {PART} {fine}"
         entry = self._entry(person, ts.date())
         written = entry.get("late" if late else "on_time") or []
         if person.not_counted and entry.get("timed") is False:  # never timed: both kinds are for any arrival
@@ -1656,7 +1695,7 @@ class Greeter:
         else:
             made = f"{voice}\n{said}" if how == (1.0, 0.8) else f"{voice}\n{said}\n{how[0]}\n{how[1]}"  # changed: made again
         key = hashlib.sha1(made.encode()).hexdigest()[:24]
-        keep = keep or fixed_short(said)  # the same every day: read once
+        keep = keep or self._kept_line(said)  # the same every day: read once
         return self.cfg.path(self.cfg.data_dir) / AUDIO_DIR / (NAMES_DIR if keep else day.isoformat()) / f"{key}.wav"
 
     def audio_ready(self, text: str, people: list, language: str, day: dt.date) -> bool:
@@ -1817,6 +1856,8 @@ class Greeter:
                   and self.uses_zerotts(p.greet_language)]
         for kind in ("on_time", "late"):
             for person in people:
+                if kind == "late" and self.fine_line(person, day):
+                    continue  # late, they hear their name and a fine line instead (read below, once)
                 lines = self._entry(person, day).get(kind) or []
                 language = person.greet_language
                 if not lines or not self.voice_ready(language):
@@ -1831,6 +1872,12 @@ class Greeter:
                             and not self.audio_ready(line, [person], language, day)):
                         wanted.append((self.voiced(line, [person], language, day), self.voice_for(language)))
                 wanted += self._wanted_group_audio(people, day)
+                if self.lines(day) and any(self.fine_line(p, day) for p in people) and self.voice_ready("vi"):
+                    voice = self.voice_for("vi")
+                    for line in self.fine_lines():
+                        said = self.voiced(line, [], "vi", day)
+                        if not self.audio_path(said, voice, day).is_file():
+                            wanted.append((said, voice))
         if (getattr(self.settings, "mask_nudge", False) and self.lines(day) and self.uses_zerotts("vi")
                 and self.voice_ready("vi")):  # last: once the day's sentences are written
             voice, line = self.voice_for("vi"), self.mask_line()

@@ -434,6 +434,9 @@ class GreetingConfig:
     # How the door calls someone whose name or email has no accents: "who = name", one per line or comma separated;
     # who is their email, its first part or their full name ("tan.nguyen@offspringdigital.com = Tân").
     call_names: str = ""
+    # Someone who comes in late hears their name, then a light line about the office's fine with this amount as it
+    # is said ("hai mươi nghìn"); empty: no fine lines, they hear the greeting written for them. Bosses never.
+    late_fine: str = "hai mươi nghìn"
     style: str = ""  # extra wishes for the sentences, e.g. "mention the weather" (any language)
     # The office, for the morning weather: coordinates as Google Maps gives them ("21.0285, 105.8542", or the
     # address of a place there: kept as "lat,lon"), or a place name ("Hà Nội"); empty: no weather.

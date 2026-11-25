@@ -70,6 +70,7 @@ def core(tmp_path):
     seed.close()
     cfg = Config(employees_file="employees.csv", data_dir="data", base_dir=tmp_path)
     cfg.web.public_url = "http://pc:8000"
+    cfg.greeting.late_fine = ""  # the office's late fine lines are off unless a test turns them on (test_greeting_fine.py)
     cfg.google_chat.webhook_url = "https://chat.googleapis.com/v1/spaces/X/messages?key=k&token=t"
     # Off by default; on here so the tests of those messages keep running (test_chat_defaults.py has the defaults).
     cfg.google_chat.notify_late_arrivals = cfg.google_chat.late_time_list = cfg.google_chat.daily_summary = True
