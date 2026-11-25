@@ -487,7 +487,7 @@ def test_habits_come_from_the_last_work_days_and_only_the_label_reaches_claude(c
 def test_one_sentence_of_each_kind_is_asked_for(core):
     app, clock, g, _, _ = make(core)
     system, _, _ = g.prompt([app.store.employee("A")], DAY)
-    assert greeting.VARIANTS == 1 and "write 1 different greetings" in system
+    assert greeting.VARIANTS == 1 and "\"on_time\": 1 for arriving" in system
 
 
 def test_a_coming_late_request_still_waiting_moves_the_late_time_for_the_door_only(core):

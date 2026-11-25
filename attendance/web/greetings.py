@@ -61,6 +61,7 @@ def register(app: Flask, core: "App") -> None:
             lines = ([("on time", t) for t in entry.get("on_time", [])] + [("late", t) for t in entry.get("late", [])]
                      if entry.get("timed", True) else
                      [("any time", t) for t in entry.get("on_time", []) + entry.get("late", [])])
+            lines += [("busy door", t) for t in entry.get("short", [])]
             rows.append({"name": person.name, "note": entry.get("note", ""), "lines": lines})
         rows.sort(key=lambda r: r["name"].lower())
         at = sent.get("at")

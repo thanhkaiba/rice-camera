@@ -48,9 +48,19 @@ class ScheduleConfig:
     # camera stream is not read, nobody is recognised or greeted, and a work day it touches inside the camera
     # hours is not counted (no late, not seen, fine or summary message for it).
     maintenance: bool = False
+    maintenance_until: str = ""  # "YYYY-MM-DDTHH:MM" local time it ends by itself; empty: until switched off
 
     def clocks(self) -> tuple[dt.time, dt.time, dt.time]:
         return parse_clock(self.window_start), parse_clock(self.late_after), parse_clock(self.window_end)
+
+    def maintenance_end(self, tz) -> dt.datetime | None:
+        """When maintenance mode ends by itself, or None when it lasts until switched off."""
+        return dt.datetime.fromisoformat(self.maintenance_until).replace(tzinfo=tz) if self.maintenance_until else None
+
+    def in_maintenance(self, now: dt.datetime) -> bool:
+        """Maintenance mode is on and its end time, if it has one, is still to come."""
+        end = self.maintenance_end(now.tzinfo) if self.maintenance else None
+        return self.maintenance and (end is None or now < end)
 
 
 MAX_CAMERAS = 4
@@ -411,6 +421,9 @@ class GreetingConfig:
     # Write and voice the day's sentences on days off too (weekends, holidays). Off: only on work days, so a
     # day nobody is expected costs no Claude or ElevenLabs credits; anyone who comes hears a plain hello.
     days_off: bool = False
+    # A person who arrives this many seconds after the last greeting ended, or while someone else waits, hears their
+    # short hello: people coming in one after another are all greeted before they walk on. 0: only while someone waits.
+    busy_seconds: int = 8
     style: str = ""  # extra wishes for the sentences, e.g. "mention the weather" (any language)
     # The office, for the morning weather: coordinates as Google Maps gives them ("21.0285, 105.8542", or the
     # address of a place there: kept as "lat,lon"), or a place name ("Hà Nội"); empty: no weather.
@@ -483,6 +496,11 @@ class Config:
             t.strftime("%H:%M") for t in (start, late, end))
         if not start < late <= end:
             raise ValueError("schedule must satisfy window_start < late_after <= window_end")
+        until = str(self.schedule.maintenance_until or "").strip()
+        try:
+            self.schedule.maintenance_until = dt.datetime.fromisoformat(until).strftime("%Y-%m-%dT%H:%M") if until else ""
+        except ValueError:
+            raise ValueError("schedule.maintenance_until must be a date and time like 2026-11-21T17:00") from None
         if self.recognition.backend not in DEFAULT_MODELS:
             raise ValueError(f"recognition.backend must be one of {sorted(DEFAULT_MODELS)}")
         if any(d not in range(7) for d in self.schedule.work_days):
@@ -581,6 +599,9 @@ class Config:
         g.speaker_awake_every, g.speaker_awake_level = int(g.speaker_awake_every), int(g.speaker_awake_level)
         if not 1 <= g.speaker_awake_every <= 480:
             raise ValueError("greeting.speaker_awake_every must be between 1 and 480 minutes")
+        g.busy_seconds = int(g.busy_seconds)
+        if not 0 <= g.busy_seconds <= 60:
+            raise ValueError("greeting.busy_seconds must be between 0 and 60")
         if not 1 <= g.speaker_awake_level <= 50:
             raise ValueError("greeting.speaker_awake_level must be between 1 and 50")
         tags = list(dict.fromkeys(" ".join(t.strip(" []").lower().split()) for t in str(g.elevenlabs_tags).split(",")))

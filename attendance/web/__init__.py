@@ -247,7 +247,8 @@ def create_app(core: "App") -> "Flask":
                 "leave_label": lambda kind: LEAVE_KINDS.get(kind, kind), "WEEKDAYS": WEEKDAYS,
                 "employee_emails": store.employee_emails(), "config_warnings": health.config_warnings(cfg),
                 "role": "admin" if request.endpoint in PUBLIC else role(cfg), "following": core.edge.following,
-                "maintenance": cfg.schedule.maintenance,
+                "maintenance": cfg.schedule.in_maintenance(core.service.now()),
+                "maintenance_end": cfg.schedule.maintenance_end(cfg.tz) if cfg.schedule.maintenance else None,
                 "portal_identity": portal_auth.identity()}
 
     from . import attendance as attendance_routes

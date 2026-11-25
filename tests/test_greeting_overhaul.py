@@ -143,7 +143,7 @@ def test_claude_is_told_about_the_person_the_office_and_the_others_lines(core):
     g._want_together = True
     system, user, _ = g.prompt([app.store.employee("A")], DAY)
     assert "chạy bộ mỗi sáng" in user and "already_written_today" in user and "tên lửa riêng" in user
-    assert "Không có máy in" in system and '"together"' in system and "Never bring objects to life" in system
+    assert "Không có máy in" in system and '"together"' in system and "Never invent events" in system
 
 
 def test_fun_facts_are_saved_from_the_person_page(core):

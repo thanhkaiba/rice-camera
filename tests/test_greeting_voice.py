@@ -502,7 +502,7 @@ def test_claude_chooses_emotions_only_for_eleven_v3_and_nobody_else_sees_the_tag
     app.cfg.greeting.elevenlabs_tags = "surprised, laughs"
     assert g.emotion_tags("vi") == ["surprised", "laughs"] and g.emotion_tags("en") == []
     system = g.prompt([person], clock().date())[0]
-    assert "[surprised] [laughs]" in system and "choosing only from" in system
+    assert "[surprised] [laughs]" in system and "chosen only" in system
     line = "[surprised] Ủa, Alice! [shouting] [laughs] Sớm ghê."
     assert g.voiced(line, [person], "vi", clock().date()) == "[surprised] Ủa, Alice! [laughs] Sớm ghê."  # not allowed: dropped
     assert g.voiced(line, [person], "en", clock().date()) == "Ủa, Alice! Sớm ghê."  # English is read by macOS
@@ -598,7 +598,7 @@ def test_people_greeted_in_english_get_the_english_elevenlabs_voice(speech):
     g._say("Hello there", "en")
     assert asked[-1][2] == "VoiceId123"
     system = g.prompt([app.store.employee("A")], g.now().date())[0]
-    assert "stand-up comedian" in system and "[gasps]" in system and "[cheerfully]" in system and "[mischievously]" in system
+    assert "the listener laughs" in system and "[gasps]" in system and "[cheerfully]" in system
 
 
 def test_claude_looks_up_what_is_in_fashion_once_a_week_and_the_greetings_get_it(speech):

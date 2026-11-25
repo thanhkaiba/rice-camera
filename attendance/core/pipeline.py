@@ -535,7 +535,7 @@ def run(cfg: Config) -> None:
     while True:
         now = service.now()
         # A seed import, or maintenance mode from the portal: the camera stream is not read at all.
-        paused = app.maintenance or ("maintenance mode" if cfg.schedule.maintenance else None)
+        paused = app.maintenance or ("maintenance mode" if cfg.schedule.in_maintenance(now) else None)
         in_window = service.in_window(now) and not paused
         if was_in_window and not in_window:
             for slot in slots:

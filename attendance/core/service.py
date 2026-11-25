@@ -221,7 +221,20 @@ class AttendanceService:
 
     @property
     def maintenance(self) -> bool:
-        return bool(self.cfg.schedule.maintenance)
+        return self.cfg.schedule.in_maintenance(self.now())
+
+    def end_maintenance_if_due(self, now: dt.datetime) -> bool:
+        """Maintenance mode with an end time is switched off once that time has come. True if it was."""
+        s = self.cfg.schedule
+        end = s.maintenance_end(now.tzinfo) if s.maintenance else None
+        if end is None or now < end:
+            return False
+        from . import settings
+
+        settings.save(self.cfg, self.store, {"schedule": {"maintenance": False, "maintenance_until": ""}})
+        self.store.log(now, "system", "maintenance mode", f"off: its end time {end:%d/%m %H:%M} came")
+        log.info("Maintenance mode ended by itself at %s", f"{end:%Y-%m-%d %H:%M}")
+        return True
 
     def maintenance_days(self) -> frozenset:
         raw = self.store.get(MAINTENANCE_KEY) or "[]"
@@ -238,7 +251,7 @@ class AttendanceService:
         counted. True when the day was added now."""
         now = now or self.now()
         day = now.date()
-        if not self.maintenance or day.isoformat() in self.maintenance_days():
+        if not self.cfg.schedule.in_maintenance(now) or day.isoformat() in self.maintenance_days():
             return False
         w = self.window(day)
         if not (w.start <= now < w.end and self.scheduled_day(day)[0]):
@@ -1139,6 +1152,8 @@ class AttendanceService:
         now = self.now()
         day = now.date()
         try:
+            if not getattr(self.edge, "following", False):  # where the server is in charge, it switches it off
+                self.end_maintenance_if_due(now)
             self.note_maintenance(now)
         except Exception:
             log.exception("Could not remember the maintenance day")

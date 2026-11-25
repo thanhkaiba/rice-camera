@@ -458,7 +458,7 @@ def register(app: Flask, core: "App") -> None:
                 elif key == "fine_notice.approvers":
                     if "fine_notice.approvers_shown" in form:  # no box ticked = nobody approves
                         changes.setdefault(section, {})[name] = ",".join(form.getlist(key))
-                elif key == "schedule.maintenance":
+                elif key in ("schedule.maintenance", "schedule.maintenance_until"):
                     pass  # only its own button (set_maintenance) switches it
                 elif name == "work_days":
                     changes.setdefault(section, {})[name] = [int(d) for d in form.getlist(key)]
@@ -487,17 +487,27 @@ def register(app: Flask, core: "App") -> None:
         on = request.form.get("on") == "1"
         if core.edge.following:
             return failed("Maintenance mode is switched on the portal, which is in charge of this computer.", "settings_page")
-        if on == cfg.schedule.maintenance:
-            return done(f"Maintenance mode is already {'on' if on else 'off'}.", "settings_page")
+        now = service.now()
+        until = request.form.get("until", "").strip() if on else ""
+        if until:
+            try:
+                end = dt.datetime.fromisoformat(until).replace(tzinfo=cfg.tz)
+            except ValueError:
+                return failed("Not changed: the end time is not a date and time.", "settings_page")
+            if end <= now:
+                return failed("Not changed: the end time has already passed.", "settings_page")
+            until = f"{end:%Y-%m-%dT%H:%M}"
+        if not on and not cfg.schedule.maintenance:
+            return done("Maintenance mode is already off.", "settings_page")
         try:
-            settings.save(cfg, store, {"schedule": {"maintenance": on}})
+            settings.save(cfg, store, {"schedule": {"maintenance": on, "maintenance_until": until}})
         except ValueError as exc:
             return failed(f"Not changed: {exc}", "settings_page")
-        now = service.now()
         if on:
             service.note_maintenance(now)
-        store.log(now, current_user(cfg), "maintenance mode", "on" if on else "off")
-        return done("Maintenance mode is on: the camera stops within a minute and nothing is reported." if on else
+        ends = f" until {dt.datetime.fromisoformat(until):%d/%m %H:%M}" if until else ""
+        store.log(now, current_user(cfg), "maintenance mode", f"on{ends}" if on else "off")
+        return done(f"Maintenance mode is on{ends}: the camera stops within a minute and nothing is reported." if on else
                     "Maintenance mode is off: the camera works again as usual.", "settings_page")
 
     @app.post("/settings/reset")

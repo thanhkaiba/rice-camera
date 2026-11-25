@@ -118,6 +118,7 @@ def _upcoming(sent) -> dict:
     day = dt.date.fromisoformat(str(sent.get("day")))
     lines = lambda value: [str(t)[:500] for t in value[:5]] if isinstance(value, list) else []
     people = {str(pid)[:64]: {"on_time": lines(entry.get("on_time")), "late": lines(entry.get("late")),
+                              "short": lines(entry.get("short")),
                               "timed": entry.get("timed") is not False, "note": str(entry.get("note") or "")[:120]}
               for pid, entry in sent["people"].items() if isinstance(entry, dict)}
     together = [{"language": "en" if line.get("language") == "en" else "vi", "text": str(line.get("text", ""))[:500]}

@@ -77,3 +77,34 @@ def test_maintenance_mode_reaches_the_office_computer(core):
 
     app, _, _ = core
     assert "schedule" in MAC_SECTIONS and "maintenance" in settings.current(app.cfg)["schedule"]
+
+
+def test_maintenance_mode_with_an_end_time_turns_itself_off(core):
+    app, clock, _, _, _ = make(core)
+    clock.t = at(9, 0)
+    client = create_app(app).test_client()
+    client.post("/maintenance", data={"on": "1", "until": f"{DAY}T08:30"})  # already past: refused
+    assert not app.cfg.schedule.maintenance
+    client.post("/maintenance", data={"on": "1", "until": f"{DAY}T09:45"})
+    s = app.cfg.schedule
+    assert s.maintenance and s.maintenance_until == f"{DAY}T09:45" and s.in_maintenance(at(9, 44))
+    assert not s.in_maintenance(at(9, 45))
+    assert "until 09:45" in client.get("/settings").get_data(as_text=True)
+    clock.t = at(9, 30)
+    app.service.tick(True, "")
+    assert s.maintenance
+    clock.t = at(9, 45)
+    app.service.tick(True, "")
+    assert not s.maintenance and s.maintenance_until == ""
+    assert "maint-dialog" not in client.get("/").get_data(as_text=True)
+    assert app.service.day_info(DAY) == (False, "Maintenance mode")  # it was on in the camera hours
+
+
+def test_turning_it_off_by_hand_clears_the_end_time(core):
+    app, clock, _, _, _ = make(core)
+    clock.t = at(12, 0)  # after the camera hours: the day still counts
+    client = create_app(app).test_client()
+    client.post("/maintenance", data={"on": "1", "until": f"{DAY}T18:00"})
+    assert app.cfg.schedule.maintenance and app.service.is_workday(DAY)
+    client.post("/maintenance", data={"on": "0"})
+    assert not app.cfg.schedule.maintenance and app.cfg.schedule.maintenance_until == ""
