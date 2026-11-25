@@ -366,6 +366,9 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
         if payload.get("kind") == "create_voice":
             core.voice_creator.complete(payload, result)
             return jsonify(ok=True)
+        if payload.get("kind") == "moment":
+            store.put(f"moment:{payload.get('day')}:{payload.get('start')}", json.dumps({**result, "at": service.now().isoformat()}))
+            return jsonify(ok=True)
         if payload.get("kind") == "speaker":
             store.log(service.now(), "office computer", "test speaker",
                       ("ok: " if result.get("ok") else "problem: ") + str(result.get("message", ""))[:400])

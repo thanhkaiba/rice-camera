@@ -79,6 +79,9 @@ class App:
         self.enrolment = DoorEnrolment(self.library, self.store, cfg.recognition, name_of=self.service.chat_name)
         self.collector = Collector(cfg, self.library, self.store, self.service,
                                    report=lambda *face: report_collected(self, *face))
+        from .recorder import Recorder
+
+        self.recorder = Recorder(cfg, self.data_dir)
         from .angles import AngleLearner
 
         self.angles = AngleLearner(cfg, self.store, report=lambda *face: report_collected(self, *face))
@@ -95,6 +98,9 @@ class App:
         from .greeting import Greeter
 
         self.greeter = Greeter(cfg, self.store, self.service.now, lambda d: self.service.window(d).late_from)
+        from .masks import MaskWatch
+
+        self.masks = MaskWatch(cfg, self.greeter.mask_nudge)
         self.edge.on_rules = self.greeter.set_rules
         if self.edge.enabled:
             self.greeter.on_greeted = self.edge.greeted
@@ -443,6 +449,9 @@ def run(cfg: Config) -> None:
             tag = f" ({slot.label(len(slots))})" if several else ""
             if d.kind == "identified":
                 service.on_identified(d.employee_id, ts, d.score, image, d.embedding, digest)
+                if d.rule:  # named without the usual votes: kept apart in the log, to be checked
+                    log.info("Named %s by %s (%d frames, %d votes, best %.2f)%s", d.employee_id, d.rule, d.frames,
+                             d.votes, d.score or 0, f": {d.trace}" if d.trace else "")
                 live.last_identified = f"{app.service.chat_name(d.employee_id)} at {ts:%H:%M:%S}{tag}"
             else:
                 # Track ids are per camera: the service keys them by (camera, track).
@@ -503,11 +512,17 @@ def run(cfg: Config) -> None:
                     app.angles.observe(slot.processor.face_tracker._tracks, matched, frame, ts)
                 except Exception:
                     log.exception("A turned face could not be sent to Review")
+                try:
+                    app.masks.observe(slot.processor.face_tracker._tracks, matched, frame, ts)
+                except Exception:
+                    log.exception("Could not check for a face in a mask")
             handle(decisions, slot, greet_only=greeting and not in_window)
             if in_window and not enrolling:
                 app.placement.add_frame(ts.date(), [f for f, _, _ in matched], cfg.recognition,
                                         frame_time - slot.last_recorded)
                 slot.last_recorded = frame_time
+                if slot.index == 0:
+                    app.recorder.offer(raw, ts, frame_time)  # a picture a second, for the Moments page
         except Exception:
             # One bad frame must not stop the camera (a restart would lose every track).
             log.exception("Frame at %s from the %s could not be processed; skipping it", ts.strftime("%H:%M:%S"),

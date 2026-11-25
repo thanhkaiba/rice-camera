@@ -246,6 +246,7 @@
     <div class="stack">
       {{ check('greeting', 'enabled', 'Greet people at the door', 'Off: silent') }}
       {{ check('greeting', 'unknown', 'Say hello to faces the camera cannot name', '“Xin chào!” without a name, at most once every 2 minutes') }}
+      {{ check('greeting', 'mask_nudge', 'Ask someone in a mask to lower it', 'When a masked face at the door is not named after a second or two: once per person, during camera hours') }}
       {{ check('greeting', 'birthdays', 'Wish a happy birthday', 'On their birthday (People page, or from Base Account) the greeting is a birthday wish, also when they come late; only when they come in that day; a Saturday birthday is wished on the Friday before, a Sunday one on Monday; once per birthday') }}
       <label class="field">Call names
         <textarea name="greeting.call_names" rows="2" placeholder="tan.nguyen@offspringdigital.com = Tân">{{ s.greeting.call_names }}</textarea>
@@ -302,7 +303,7 @@
 
     <div class="engine-box" data-engine="elevenlabs" id="elevenlabs">
       <h4>ElevenLabs</h4>
-      <p class="hint" style="margin-top:0">Each sentence, with the names in it, is sent to elevenlabs.io and costs credits (about one per character with Eleven v3).
+      <p class="hint" style="margin-top:0">Each sentence, with the names in it, is sent to elevenlabs.io and costs credits (about one per character with Eleven v3 or v4).
         When it fails or the credits run out, ZeroTTS reads instead.
         {% if gs and gs.elevenlabs and (gs.elevenlabs.credits or gs.elevenlabs.error) %}<br>Used this month: <strong>{{ gs.elevenlabs.credits }}</strong> credits{% for n, used in (gs.elevenlabs.get('keys') or {})|dictsort %}{{ ' (' if loop.first else ', ' }}key {{ n }}: {{ used }}{{ ')' if loop.last }}{% endfor %}.
         {% if gs.elevenlabs.error %}<br><span class="badge bad">Problem</span> {{ gs.elevenlabs.error }}{% endif %}{% endif %}</p>
@@ -326,8 +327,8 @@
       <div class="form-row">
         <label class="field">Model
           <select name="greeting.elevenlabs_model">
-            {% for value, label in (('eleven_v3', 'Eleven v3 · most expressive'), ('eleven_flash_v2_5', 'Flash v2.5 · faster, half the credits'), ('eleven_turbo_v2_5', 'Turbo v2.5')) %}<option value="{{ value }}" {{ 'selected' if s.greeting.elevenlabs_model == value }}>{{ label }}</option>{% endfor %}
-            {% if s.greeting.elevenlabs_model not in ('eleven_v3', 'eleven_flash_v2_5', 'eleven_turbo_v2_5') %}<option value="{{ s.greeting.elevenlabs_model }}" selected>{{ s.greeting.elevenlabs_model }}</option>{% endif %}
+            {% for value, label in (('eleven_v4', 'Eleven v4 · most expressive, same credits as v3'), ('eleven_v3', 'Eleven v3'), ('eleven_flash_v2_5', 'Flash v2.5 · faster, half the credits'), ('eleven_turbo_v2_5', 'Turbo v2.5')) %}<option value="{{ value }}" {{ 'selected' if s.greeting.elevenlabs_model == value }}>{{ label }}</option>{% endfor %}
+            {% if s.greeting.elevenlabs_model not in ('eleven_v4', 'eleven_v3', 'eleven_flash_v2_5', 'eleven_turbo_v2_5') %}<option value="{{ s.greeting.elevenlabs_model }}" selected>{{ s.greeting.elevenlabs_model }}</option>{% endif %}
           </select>{{ src('greeting.elevenlabs_model') }}</label>
         <label class="field">Emotion
           <select name="greeting.elevenlabs_stability">
@@ -336,10 +337,10 @@
           </select>
           <span class="hint">More emotion also differs more each time.</span>{{ src('greeting.elevenlabs_stability') }}</label>
         {{ field('greeting', 'elevenlabs_speed', 'Speed', '1.0 = natural · 0.7–1.2', type='number', step='0.05') }}
-        {{ field('greeting', 'elevenlabs_prefix', 'Mood of every sentence', 'Eleven v3 only, e.g. [cheerfully] · for sentences without a tag of their own · empty: none') }}
+        {{ field('greeting', 'elevenlabs_prefix', 'Mood of every sentence', 'Eleven v3 and v4 only, e.g. [cheerfully] · for sentences without a tag of their own · empty: none') }}
       </div>
       <div class="stack" style="margin:10px 0">
-        {{ check('greeting', 'elevenlabs_emotions', 'Claude chooses the emotion of each part of a sentence', 'Eleven v3 only. Claude puts a tag before the words it fits, e.g. “[surprised] Ủa, anh Minh! [laughs] Hôm nay sớm ghê.” The tags are never shown or read aloud. Sentences already written today are written again.') }}
+        {{ check('greeting', 'elevenlabs_emotions', 'Claude chooses the emotion of each part of a sentence', 'Eleven v3 and v4 only. Claude puts a tag before the words it fits, e.g. “[surprised] Ủa, anh Minh! [laughs] Hôm nay sớm ghê.” The tags are never shown or read aloud. Sentences already written today are written again.') }}
       </div>
       {{ field('greeting', 'elevenlabs_tags', 'Emotions Claude may use', 'English words, comma separated, without brackets · e.g. excited, cheerfully, surprised, laughs, whispers, sighs · try one in “Listen” by typing [surprised] in the text', cls='grow') }}
       <details class="inline" {{ 'open' if s.greeting.elevenlabs_key2 or s.greeting.elevenlabs_key3 }}>
@@ -389,7 +390,7 @@
       </div>
       <div class="form-row">
         {{ time24('greeting', 'speaker_awake_from', 'Wake it at') }}
-        {{ field('greeting', 'speaker_awake_every', 'Silent signal every (min)', 'Shorter than the time after which the speaker sleeps · 1–480', type='number') }}
+        {{ field('greeting', 'speaker_awake_every', 'Silent signal every (min)', 'Day and night, every day · shorter than the time after which the speaker switches off · 1–480', type='number') }}
         {{ field('greeting', 'speaker_awake_level', 'Hum level (%)', '1–50 · the wake-up hum; the silent tone is three times as strong', type='number') }}
       </div>
       <div class="row between">
@@ -560,6 +561,7 @@
     </div>
     {% endif %}
     <div class="stack">{{ check('camera', 'enhance_low_light', 'Brighten dark frames') }}</div>
+    <div class="form-row">{{ field('camera', 'record_days', 'Keep a picture a second for (days)', 'In the camera hours, to play back a moment on Reports → Moments · 0 = nothing recorded · about 3 GB a day on the office computer', type='number') }}</div>
     {% endif %}
     </div></details>
     <details class="panel group" id="g-collect-reference-photos">

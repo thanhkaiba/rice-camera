@@ -1294,6 +1294,9 @@ class AttendanceService:
                 removed += 1
             for extra in (body_photo(image), scene_photo(image)):
                 (data_dir / extra).unlink(missing_ok=True)
+        from . import recorder
+
+        recorder.expire(data_dir, today, self.cfg.camera.record_days)  # the pictures a second, and those sent
         for image in self.store.expire_crowds(cutoff):  # the pictures of groups at the door
             if image.startswith("crops/") and (data_dir / image).exists():
                 (data_dir / image).unlink()

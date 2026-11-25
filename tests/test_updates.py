@@ -192,6 +192,7 @@ def test_versions_that_ignore_the_pin_are_not_offered(tmp_path, monkeypatch):
 
 def test_going_back_pins_the_earlier_version_and_skips_the_newer_one(tmp_path, monkeypatch):
     home, base, old, new = two_versions(tmp_path, monkeypatch)
+    monkeypatch.setattr(updater, "camera_hours", lambda cfg: True)  # going back is never held up
     assert [v for v, _ in updater.programs(home)] == ["2.0.0", "1.0.0", "0.5.0"]
     assert [v for v, _ in updater.rollback_targets(home)] == ["1.0.0", "0.5.0"]
     up = updater.Updater(home, write_config(home))
@@ -234,6 +235,11 @@ def test_going_back_to_the_installed_program_and_forward_again(tmp_path, monkeyp
 
     up = updater.Updater(home, write_config(home))
     (up.data / updater.ROLLBACK_FILE).write_text('{"version": ""}')
+    monkeypatch.setattr(updater, "camera_hours", lambda cfg: True)
+    up.requests()  # forward to the newest waits while people walk in
+    assert up.ready is None and (up.data / updater.ROLLBACK_FILE).exists()
+    assert "after camera hours" in updater.read_status(up.data)["state"]
+    monkeypatch.setattr(updater, "camera_hours", lambda cfg: False)
     up.requests()
     assert up.ready == new and updater.pinned(home) is None and not updater.read_status(up.data)["skip"]
 

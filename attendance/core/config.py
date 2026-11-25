@@ -81,6 +81,9 @@ class CameraConfig:
     # More cameras (a second door), one address per line. They share these settings, except the
     # detection area, which applies to the first camera only. Each camera costs as much CPU as the first.
     more: str = ""
+    # A picture a second of the first camera during the camera hours, kept this many days, to play back the
+    # moment someone arrived (recorder.py, the Moments page). 0 = nothing is recorded.
+    record_days: int = 3
 
     def urls(self) -> list[str]:
         """Every camera address: `url` first, then the lines of `more` (blank lines ignored)."""
@@ -411,9 +414,9 @@ class GreetingConfig:
     speaker: str = ""
     speaker_min_volume: int = 30
     # A mains speaker that goes to sleep without a signal swallows a greeting, or its first words. On work
-    # days at speaker_awake_from a soft low hum of a few seconds wakes it (it can be heard); from then until
-    # the door stops greeting, whenever the speaker had no sound for speaker_awake_every minutes, a 20 Hz tone
-    # nobody hears is played. speaker_awake_level: percent of full scale, 1-50, of the hum.
+    # days at speaker_awake_from a soft low hum of a few seconds wakes it (it can be heard); day and night, every
+    # day, whenever the speaker had no sound for speaker_awake_every minutes, a 20 Hz tone nobody hears is played
+    # (the office's speaker switches itself off for good after about 15 minutes without sound). speaker_awake_level: percent of full scale, 1-50, of the hum.
     speaker_awake: bool = False
     speaker_awake_from: str = "07:30"
     speaker_awake_every: int = 120
@@ -440,6 +443,10 @@ class GreetingConfig:
     # Facts about the office Claude keeps to, so it invents nothing ("no printer", "lunch together at 12"), any language.
     office: str = ""
     unknown: bool = True  # a short hello without a name for a face the camera cannot name (at most one every 2 minutes)
+    # Someone with a mask on standing at the door and not named yet is asked to lower it for a moment, once
+    # (core/masks.py): masked faces are rarely named, and with the mask down the camera knows them at once.
+    # Off unless switched on: cleaners and kitchen staff in masks walk past all day.
+    mask_nudge: bool = False
     # Jokes about how someone has arrived lately ("often late lately", "on time 6 work days in a row"): that label,
     # never a time, is sent to Claude with the name. Off: nothing about anyone's attendance leaves the office.
     tease: bool = True
@@ -527,6 +534,9 @@ class Config:
             raise ValueError("blurry_score must be between 0 and 100")
         if not 0 <= r.auto_delete_photos_below <= 100:
             raise ValueError("auto_delete_photos_below must be between 0 and 100")
+        self.camera.record_days = int(self.camera.record_days)
+        if not 0 <= self.camera.record_days <= 30:
+            raise ValueError("camera.record_days must be between 0 and 30")
         if not 0 < self.camera.process_fps <= 30:
             raise ValueError("process_fps must be between 0 and 30")
         if not 0 <= self.camera.decode_threads <= 32:

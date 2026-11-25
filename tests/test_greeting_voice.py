@@ -236,6 +236,7 @@ def test_zerotts_reads_the_days_sentences_ahead_and_the_door_plays_the_file(core
     written = lambda people, day: {p.id: {"say_as": "", "on_time": [f"Chào {p.name} một!", f"Chào {p.name} hai!"],
                                           "late": [f"{p.name} đến rồi!"]} for p in people}
     g = Greeter(cfg, app.store, clock, lambda d: app.service.window(d).late_from, write=written, sleep=lambda s: None)
+    cfg.greeting.mask_nudge = False  # its line is read ahead last (test_greeting.py has it)
     made = []
     g.voice_ready = lambda language="vi": True
     g._synthesize = lambda text, voice: (made.append((text, voice)) or np.full(480, 0.1, dtype=np.float32), 48000)

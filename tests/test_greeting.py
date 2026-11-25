@@ -409,6 +409,27 @@ def test_a_face_nobody_can_name_gets_a_hello_at_most_every_two_minutes(core, mon
     assert said[-1].startswith("Chào Alice") and len(said) == 2  # a named greeting wins over the hello
 
 
+def test_someone_in_a_mask_is_asked_to_lower_it_once_in_a_while(core, monkeypatch):
+    app, clock, g, said, _ = make(core)
+    clock.t = at(8, 55)
+    g.mask_nudge(at(8, 55))
+    assert not g.speak_next(timeout=0)  # off unless switched on in Settings
+    app.cfg.greeting.mask_nudge = True
+    g.mask_nudge(at(8, 55))
+    assert g.speak_next(timeout=0) and said[-1].endswith(greeting.MASK_VI)
+    g.mask_nudge(at(8, 55))
+    assert not g.speak_next(timeout=0) and len(said) == 1  # asked a moment ago
+    real = time.monotonic
+    monkeypatch.setattr(greeting.time, "monotonic", lambda: real() + greeting.MASK_GAP_S + 1)
+    g.arrived("A", at(8, 56))
+    g.mask_nudge(at(8, 56))
+    g.speak_next(timeout=0)
+    assert said[-1].startswith("Chào Alice")  # a greeting by name comes first
+    app.cfg.greeting.mask_nudge = False
+    g.mask_nudge(at(8, 57))
+    assert not g.speak_next(timeout=0)
+
+
 def test_no_hello_outside_camera_hours_or_when_switched_off(core):
     app, clock, g, said, _ = make(core)
     g.unknown(at(14, 0))
@@ -685,6 +706,7 @@ def test_the_speaker_is_kept_awake_between_greetings(core):
     clock.t = at(7, 45)
     assert g.awake_due(clock.t) is None and not g.keep_awake(play)  # switched off
     s.speaker_awake, s.speaker_awake_from, s.speaker_awake_every, s.speaker_awake_level = True, "07:30", 5, 6
+    g._sound_at = at(7, 28)
     clock.t = at(7, 29)
     assert not g.keep_awake(play)
     clock.t = at(7, 30)
@@ -701,13 +723,21 @@ def test_the_speaker_is_kept_awake_between_greetings(core):
     assert not g.keep_awake(play)
     assert g.speak_next(timeout=0)
     end = app.cfg.schedule.clocks()[2]
-    clock.t = at(end.hour, end.minute)  # the camera has stopped
-    assert g.awake_due(clock.t) is None
-    clock.t = at(end.hour - 1, 59)
+    clock.t = at(end.hour, end.minute)  # the camera has stopped: the silent tone goes on, day and night
     assert g.awake_due(clock.t) == "again"
+    g._sound_at = clock.t
+    clock.t = at(23, 0)
+    assert g.awake_due(clock.t) == "again"
+    g._sound_at = clock.t
+    clock.t = at(23, 4)
+    assert g.awake_due(clock.t) is None
     g.set_rules({"day": DAY.isoformat(), "workday": False, "people": {}})
+    clock.t = at(23, 6)
+    assert g.awake_due(clock.t) == "again"  # a day off too, but never the hum that can be heard
+    g.store.put(greeting.AWAKE_DAY_KEY, "")
+    g._sound_at = at(8, 29)
     clock.t = at(8, 30)
-    assert g.awake_due(clock.t) is None  # a day off
+    assert g.awake_due(clock.t) is None
 
     def broken(audio, rate):
         raise OSError("no output device")

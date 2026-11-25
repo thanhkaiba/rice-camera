@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% set title = 'Moments' %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>Moment at the door</h1>
+    <p class="subtitle">Play back the door around a time: the picture the office computer keeps every second of the camera hours (for {{ record_days }} day{{ '' if record_days == 1 else 's' }}{{ ', recording is off' if not record_days }}), and every scene the camera kept when it found a face or a group. For checking who was really there when someone arrived.</p>
+  </div>
+</div>
+
+<form method="get" class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:14px">
+  <label class="hint" for="m-day">Day</label><input id="m-day" type="date" name="day" value="{{ day.isoformat() }}">
+  <label class="hint" for="m-at">Time</label><input id="m-at" name="at" value="{{ at }}" pattern="\d{2}:\d{2}(:\d{2})?" placeholder="HH:MM:SS" style="width:7em">
+  <label class="hint" for="m-span">± seconds</label><input id="m-span" type="number" name="span" value="{{ half }}" min="5" max="90" style="width:5em">
+  <button>{{ icon('search') }}Show</button>
+</form>
+
+<section class="card">
+  <h2 class="row">{{ icon('camera') }}Every second · {{ start }}–{{ end }}</h2>
+  {% if frames %}
+  <div class="moment-player">
+    <img id="m-frame" src="{{ url_for('media', path=frames[0][1]) }}" alt="The door at {{ frames[0][0] }}">
+    <div class="row" style="gap:10px; margin-top:8px">
+      <button type="button" id="m-prev" class="btn-sm icon" aria-label="Previous second">{{ icon('chevron-left') }}</button>
+      <input type="range" id="m-slider" min="0" max="{{ frames|length - 1 }}" value="0" style="flex:1" aria-label="Time">
+      <button type="button" id="m-next" class="btn-sm icon" aria-label="Next second">{{ icon('chevron-right') }}</button>
+      <button type="button" id="m-play" class="btn-sm">Play</button>
+      <strong class="tnum" id="m-time">{{ frames[0][0] }}</strong>
+    </div>
+  </div>
+  <script>
+  (() => {
+    const frames = {{ frames|map('list')|list|tojson }}, media = {{ url_for('media', path='')|tojson }};
+    const img = document.getElementById('m-frame'), slider = document.getElementById('m-slider'), label = document.getElementById('m-time');
+    frames.forEach(([, p]) => { const pre = new Image(); pre.src = media + p; });
+    const show = i => { i = Math.max(0, Math.min(frames.length - 1, i)); slider.value = i; img.src = media + frames[i][1]; img.alt = 'The door at ' + frames[i][0]; label.textContent = frames[i][0]; };
+    let timer = null;
+    slider.addEventListener('input', () => show(+slider.value));
+    document.getElementById('m-prev').onclick = () => show(+slider.value - 1);
+    document.getElementById('m-next').onclick = () => show(+slider.value + 1);
+    document.getElementById('m-play').onclick = e => {
+      if (timer) { clearInterval(timer); timer = null; e.target.textContent = 'Play'; return; }
+      e.target.textContent = 'Pause';
+      timer = setInterval(() => { if (+slider.value >= frames.length - 1) { clearInterval(timer); timer = null; e.target.textContent = 'Play'; } else show(+slider.value + 1); }, 500);
+    };
+    document.addEventListener('keydown', e => { if (e.key === 'ArrowLeft') show(+slider.value - 1); if (e.key === 'ArrowRight') show(+slider.value + 1); });
+    {% for t, _ in frames %}{% if t == at %}show({{ loop.index0 }});{% endif %}{% endfor %}
+  })();
+  </script>
+  {% elif here %}
+  <p class="hint">Nothing recorded then. Only the camera hours of the last {{ record_days }} days are kept, from version 1.1.98 on.</p>
+  {% elif fetch and fetch.pending %}
+  <p class="hint">Asked the office computer at {{ fetch.at[11:19] }}; the pictures arrive within a minute. This page reloads by itself.</p>
+  <meta http-equiv="refresh" content="10">
+  {% else %}
+  {% if fetch and fetch.message %}<p class="hint">Office computer: {{ fetch.message }}.</p>{% endif %}
+  <form method="post" action="{{ url_for('moments_fetch') }}">{% include "_csrf.html" %}
+    <input type="hidden" name="day" value="{{ day.isoformat() }}"><input type="hidden" name="start" value="{{ start }}">
+    <input type="hidden" name="end" value="{{ end }}"><input type="hidden" name="at" value="{{ at }}"><input type="hidden" name="span" value="{{ half }}">
+    <p class="hint" style="margin:0 0 8px">The recording is kept on the office computer. Fetch this span ({{ end }} included) to see it here.</p>
+    <button>{{ icon('download') }}Fetch from the office computer</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="card" style="margin-top:16px">
+  <h2 class="row">{{ icon('review') }}Scenes the camera kept · {{ scenes|length }}</h2>
+  {% if scenes %}
+  <div class="crowd-grid">
+    {% for t, path, who in scenes %}
+    <figure class="crowd-card"><a href="{{ url_for('media', path=path) }}" target="_blank" rel="noopener"><img src="{{ url_for('media', path=path) }}" alt="{{ who }} at {{ t }}" loading="lazy"></a>
+      <figcaption><strong class="tnum">{{ t }}</strong> · {{ who }}</figcaption></figure>
+    {% endfor %}
+  </div>
+  {% else %}<p class="hint">The camera kept no face or group in this span.</p>{% endif %}
+</section>
+{% endblock %}

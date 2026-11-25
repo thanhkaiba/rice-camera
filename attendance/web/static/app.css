@@ -660,3 +660,6 @@ button.listen { margin-left: 6px; white-space: nowrap; color: var(--muted); } bu
 .maint-body p { margin: 0; color: var(--text-2); }
 .maint-list { margin: 0; padding: 0 0 0 18px; text-align: left; color: var(--text-2); display: grid; gap: 4px; }
 .maint-buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+
+/* Moments page: the door, second by second */
+.moment-player img { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); background: #000; }

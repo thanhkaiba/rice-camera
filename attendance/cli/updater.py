@@ -307,6 +307,11 @@ class Updater:
             self.ready = self.force()
         elif rollback.exists():
             wanted = _read_json(rollback).get("version", "")
+            if not wanted and camera_hours(load_settings(self.config)):
+                # Forward to the newest (also how a copy built here is installed): kept until the camera
+                # hours end, so nobody walks in while the program restarts. Going back is never held up.
+                write_status(self.data, state="A newer version on this computer starts after camera hours")
+                return
             rollback.unlink(missing_ok=True)
             self.ready = self.go_back(wanted) if wanted else self.go_forward()
         elif restart.exists():

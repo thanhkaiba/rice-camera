@@ -170,6 +170,61 @@ def register(app: Flask, core: "App") -> None:
         d, ev = _evidence(day, employee_id)
         return render_template("evidence.html", ev=ev, day=d, cfg=cfg)
 
+    @app.get("/moments")
+    def moments_page():
+        """Play back a moment at the door: the picture a second recorded around a time (recorder.py), and every
+        scene the camera kept then (faces it found, groups), for checking who was really there."""
+        import re as _re
+
+        from ..core import recorder
+
+        today = service.now().date()
+        day = _date(request.args.get("day"), today)
+        try:
+            at = dt.time.fromisoformat(request.args.get("at") or service.now().strftime("%H:%M:%S"))
+            half = max(5, min(int(request.args.get("span") or 20), recorder.MAX_SPAN_S // 2))
+        except ValueError:
+            abort(400)
+        middle = dt.datetime.combine(day, at)
+        lo, hi = (middle - dt.timedelta(seconds=half)).time(), (middle + dt.timedelta(seconds=half)).time()
+        here = service.greeter is not None  # the camera runs on this computer: its own recordings are read
+        if here:
+            frames = [(t, f"{recorder.FOLDER}/{day.isoformat()}/{p.name}") for t, p in recorder.recorded(core.data_dir, day, lo, hi)]
+        else:
+            frames = recorder.uploaded(core.data_dir, day, lo, hi)
+        names = {e.id: e.name for e in store.all_employees()}
+        scenes = []
+        folder = core.data_dir / "crops" / day.isoformat()
+        if folder.is_dir():
+            a, b = lo.strftime("%H%M%S"), hi.strftime("%H%M%S")
+            for p in sorted(folder.iterdir()):
+                m = _re.fullmatch(r"(\d{6})_\d+_(\w+?)_[0-9a-f]{32}_scene\.jpg", p.name)
+                g = _re.fullmatch(r"crowd_(\d{6})_[0-9a-f]+\.jpg", p.name)
+                t = m.group(1) if m else g.group(1) if g else None
+                if t and a <= t <= b:
+                    who = ("group" if g else "unidentified face" if m.group(2) == "unknown" else names.get(m.group(2), m.group(2)))
+                    scenes.append((f"{t[:2]}:{t[2:4]}:{t[4:]}", f"crops/{day.isoformat()}/{p.name}", who))
+        key = f"moment:{day.isoformat()}:{lo.strftime('%H:%M:%S')}"
+        fetch = json.loads(store.get(key) or "null")
+        return render_template("moments.html", day=day, at=at.strftime("%H:%M:%S"), half=half, frames=frames,
+                               scenes=scenes, here=here, fetch=fetch, record_days=cfg.camera.record_days,
+                               start=lo.strftime("%H:%M:%S"), end=hi.strftime("%H:%M:%S"), today=today)
+
+    @app.post("/moments/fetch")
+    def moments_fetch():
+        """Ask the office computer for the recorded pictures of a time span; they arrive within a minute."""
+        try:
+            day = dt.date.fromisoformat(request.form.get("day", ""))
+            start, end = (dt.time.fromisoformat(request.form.get(k, "")) for k in ("start", "end"))
+        except ValueError:
+            abort(400)
+        key = f"moment:{day.isoformat()}:{start.strftime('%H:%M:%S')}"
+        store.edge_job_add("moment", {"kind": "moment", "day": day.isoformat(), "start": start.strftime("%H:%M:%S"),
+                                      "end": end.strftime("%H:%M:%S")}, service.now())
+        store.put(key, json.dumps({"pending": True, "at": service.now().isoformat()}))
+        store.log(service.now(), current_user(cfg), "fetch moment", f"{day} {start}-{end}")
+        return redirect(url_for("moments_page", day=day.isoformat(), at=request.form.get("at", ""), span=request.form.get("span", "")))
+
     @app.get("/day/<day>/<employee_id>/evidence.zip")
     def evidence_zip(day: str, employee_id: str):
         d, ev = _evidence(day, employee_id)

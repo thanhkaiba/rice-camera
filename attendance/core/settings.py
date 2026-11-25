@@ -19,7 +19,7 @@ SECRET = {"password", "viewer_password", "token", "webhook_url", "system_webhook
 # section ("" = top level) -> editable fields
 EDITABLE: dict[str, list[str]] = {
     "schedule": ["window_start", "late_after", "window_end", "work_days", "maintenance", "maintenance_until"],
-    "camera": ["url", "more", "process_fps", "decode_threads", "enhance_low_light", "area"],
+    "camera": ["url", "more", "process_fps", "decode_threads", "enhance_low_light", "area", "record_days"],
     "tracking": ["mode", "person_conf", "full_frame_every"],
     "recognition": ["accept_score", "min_margin", "votes_required", "min_face_px", "small_face_px", "min_det_score",
                     "min_sharpness", "max_yaw", "max_pitch", "auto_pose", "unknown_min_frames",
@@ -42,7 +42,7 @@ EDITABLE: dict[str, list[str]] = {
                  "voice", "voice_en", "rate", "until", "until_people", "zerotts_speed", "zerotts_liveliness",
                  "elevenlabs_key", "elevenlabs_voice", "elevenlabs_voice_en", "elevenlabs_key2", "elevenlabs_voice2",
                  "elevenlabs_key3", "elevenlabs_voice3", "elevenlabs_model", "elevenlabs_prefix", "elevenlabs_stability", "elevenlabs_speed", "loudness", "birthdays", "speaker", "speaker_min_volume", "speaker_awake", "days_off", "busy_seconds", "call_names", "speaker_awake_from", "speaker_awake_every", "speaker_awake_level", "elevenlabs_emotions", "elevenlabs_tags", "style", "trends", "trends_research", "office", "location",
-                 "unknown", "tease"],
+                 "unknown", "mask_nudge", "tease"],
     "": ["retention_days", "late_evidence_days", "healthcheck_url", "base_api_key", "base_account_key"],
 }
 

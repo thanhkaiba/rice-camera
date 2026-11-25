@@ -293,7 +293,7 @@ def create_app(core: "App") -> "Flask":
 
     @app.get("/media/<path:path>")
     def media(path: str):
-        if not path.startswith(("crops/", "faces/", "review-seed/", "captures/")) or ".." in Path(path).parts:
+        if not path.startswith(("crops/", "faces/", "review-seed/", "captures/", "recordings/")) or ".." in Path(path).parts:
             abort(404)
         return send_from_directory(core.data_dir, path)
 

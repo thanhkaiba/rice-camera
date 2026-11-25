@@ -21,6 +21,12 @@ def _shift(bbox, offset):
     return float(x1 + ox), float(y1 + oy), float(x2 + ox), float(y2 + oy)
 
 
+def _counted(app, employee_id: str) -> bool:
+    """Whether someone's arrivals are counted for lateness: only they may be named by agreeing frames."""
+    person = app.store.employee(employee_id)
+    return person is not None and not person.not_counted
+
+
 class FrameProcessor:
     def __init__(self, app, mode: str | None = None, *, realtime: bool = True, use_area: bool = True):
         """`mode` overrides cfg.tracking.mode (the benchmark runs both); otherwise the setting is
@@ -32,6 +38,7 @@ class FrameProcessor:
         self.cfg = app.cfg
         self.use_area = use_area
         self.face_tracker = FaceTracker(self.cfg.recognition)
+        self.face_tracker.agree_allowed = lambda person: _counted(app, person)
         self._mode = mode
         self._detector: PersonDetector | None = None
         self._people = ByteTracker(new_track=self.cfg.tracking.person_conf)

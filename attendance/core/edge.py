@@ -336,7 +336,9 @@ class EdgeClient:
                 else:
                     result = pending["result"]
             else:
-                if job.get("kind") == "speaker":
+                if job.get("kind") == "moment":
+                    result = self._moment(job["payload"])
+                elif job.get("kind") == "speaker":
                     result = (self.on_speaker() if self.on_speaker is not None else
                               {"ok": False, "message": "The speaker test is not available on this camera. Update the app."})
                 else:
@@ -350,6 +352,27 @@ class EdgeClient:
         unsent = json.loads(self.store.get(JOBS_KEY) or "{}")
         unsent.pop(key, None)  # the server has it and has closed the job: a later job with this id is a new one
         self.store.put(JOBS_KEY, json.dumps(unsent))
+
+    def _moment(self, payload: dict) -> dict:
+        """The pictures recorded (recorder.py) for a time span, sent to the server for its Moments page."""
+        from .recorder import MAX_SPAN_S, recorded
+
+        try:
+            day = dt.date.fromisoformat(payload["day"])
+            start, end = (dt.time.fromisoformat(payload[k]) for k in ("start", "end"))
+        except (KeyError, TypeError, ValueError):
+            return {"ok": False, "message": "bad moment"}
+        span = (dt.datetime.combine(day, end) - dt.datetime.combine(day, start)).total_seconds()
+        if not 0 <= span <= MAX_SPAN_S:
+            return {"ok": False, "message": "moment too long"}
+        frames = recorded(self.data_dir, day, start, end)
+        for t, path in frames:
+            rel = f"crops/{day.isoformat()}/rec_{t.replace(':', '')}.jpg"
+            status, _ = self._send("PUT", "/api/edge/photos/" + urllib.parse.quote(rel), path.read_bytes(), "image/jpeg")
+            if status != 200:
+                raise ConnectionError(f"recorded picture upload answered HTTP {status}")
+        return {"ok": True, "day": day.isoformat(), "start": payload["start"], "end": payload["end"], "frames": len(frames),
+                "message": f"{len(frames)} recorded pictures" if frames else "nothing recorded then (only the camera hours of the last days are kept)"}
 
     def _add_uploaded(self, payload: dict) -> dict:
         status, data = self._send("GET", "/api/edge/files/" + urllib.parse.quote(payload["image"]), b"", "application/octet-stream")

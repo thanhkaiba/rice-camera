@@ -130,6 +130,10 @@ UNKNOWN_GAP_S = 120.0  # at most one hello without a name this often
 HELLO_VI = ["Xin chào! Chúc một ngày làm việc vui vẻ.", "Chào buổi sáng! Chúc mọi người một ngày tốt lành.",
             "Xin chào! Chúc bạn một ngày thật tuyệt."]
 TEST_TEXT = "Xin chào! Đây là lời chào thử của hệ thống chấm công."
+MASK = "mask"  # in the greeting queue instead of a person: someone in a mask could not be named (core/masks.py)
+MASK_VI = "Ơ, em chưa nhận ra... Kéo khẩu trang xuống giúp em một chút nha!"
+MASK_TAG = "[curious]"  # put before MASK_VI when the voice acts on tags
+MASK_GAP_S = 20.0  # at most one request to lower a mask this often
 
 SYSTEM = """You write the spoken greetings of the camera at the front door of an office in Vietnam. \
 A speaker reads each one aloud with a text-to-speech voice the moment the camera recognises someone walking in.
@@ -215,7 +219,7 @@ bạn đồng hành rồi." · late "[playfully] Anh Enzo tới rồi! Lời ch�
 "[playfully] Chị Trang ơi, em chào thế này được mấy điểm ạ?" · short "[cheerfully] A, chị Lucy!"
 {style}"""
 
-EMOTIONS = """- The voice is an actor (Eleven v3) that can also make sounds. Tags go in square brackets, chosen only \
+EMOTIONS = """- The voice is an actor (Eleven v3 or v4) that can also make sounds. Tags go in square brackets, chosen only \
 from: {tags}. A tag is never read aloud: a delivery tag colours the words after it, a sound tag makes that sound right \
 there. The aim is that the listener laughs, not that the camera laughs a lot. Usually zero to two tags in a greeting, \
 more only when the moment really needs another delivery; the "short" one has at most one. Do not tag every sentence by \
@@ -652,7 +656,13 @@ def _smoothed(audio, rate: int, floor: float = 0.01, level: float = 0.09, fade_s
     return audio
 
 
-TAG = re.compile(r"\[([^\[\]\n]{1,30})\]")  # an emotion tag for Eleven v3, e.g. [excited]
+TAG = re.compile(r"\[([^\[\]\n]{1,30})\]")  # an emotion tag for Eleven v3 or v4, e.g. [excited]
+ACTING_MODELS = ("eleven_v3", "eleven_v4")  # the voices that act on audio tags instead of reading them aloud
+
+
+def acts(model: str) -> bool:
+    """Whether an ElevenLabs model acts on audio tags ([excited], [laughs]) instead of reading them aloud."""
+    return model.startswith(ACTING_MODELS)
 
 
 def untagged(text: str) -> str:
@@ -738,6 +748,7 @@ def play_audio(audio, rate: int) -> None:
 
 
 AWAKE_RATE = 24000
+AWAKE_DAY_KEY = "speaker_woken_day"  # the day the wake-up hum was last played, ISO
 AWAKE_KEY = "speaker_awake_at"  # when the speaker last got the hum, ISO: read again when the app starts
 AWAKE_S, AWAKE_FIRST_S = 3.0, 6.0  # the hum that keeps the speaker awake; the first of the day, which wakes it
 AWAKE_FIRST_GAIN = 3.0
@@ -809,6 +820,7 @@ class Greeter:
         self._write = write or self._ask_claude
         self._sleep = sleep
         self._queue: queue.Queue = queue.Queue(maxsize=MAX_WAITING)
+        self._mask_said = -MASK_GAP_S
         self._failed_at = 0.0
         self.error: str | None = None
         self.spoken: dict[str, int] = {}
@@ -856,6 +868,19 @@ class Greeter:
             self._queue.put_nowait((employee_id, ts, time.monotonic()))
         except queue.Full:
             log.info("Greeting skipped for %s: too many people at the door at once", employee_id)
+
+    def mask_nudge(self, ts: dt.datetime) -> None:
+        """Someone in a mask at the door could not be named: ask them to lower it (once; see core/masks.py)."""
+        if not (self.settings.enabled and getattr(self.settings, "mask_nudge", False)):
+            return
+        try:
+            self._queue.put_nowait((MASK, ts, time.monotonic()))
+        except queue.Full:
+            pass
+
+    def mask_line(self) -> str:
+        """The request to lower a mask, as said: with a delivery tag when the voice acts on tags."""
+        return f"{MASK_TAG} {MASK_VI}" if self.emotion_tags("vi") else MASK_VI
 
     def unknown(self, ts: dt.datetime) -> None:
         """A face the camera could not name walked past: a hello without a name, if nobody was greeted lately."""
@@ -999,9 +1024,9 @@ class Greeter:
 
     def emotion_tags(self, language: str | None = None) -> list[str]:
         """The emotion tags Claude may put in a sentence of `language` (any language: None); none unless that
-        language is read by Eleven v3, the only voice that acts on them instead of reading them aloud."""
+        language is read by Eleven v3 or v4, the voices that act on them instead of reading them aloud."""
         s = self.settings
-        if not (s.elevenlabs_emotions and s.elevenlabs_model.startswith("eleven_v3")):
+        if not (s.elevenlabs_emotions and acts(s.elevenlabs_model)):
             return []
         if not any(self.uses_cloud(lang) for lang in ([language] if language else ["vi", "en"])):
             return []
@@ -1755,6 +1780,11 @@ class Greeter:
                             and not self.audio_ready(line, [person], language, day)):
                         wanted.append((self.voiced(line, [person], language, day), self.voice_for(language)))
                 wanted += self._wanted_group_audio(people, day)
+        if (getattr(self.settings, "mask_nudge", False) and self.lines(day) and self.uses_zerotts("vi")
+                and self.voice_ready("vi")):  # last: once the day's sentences are written
+            voice, line = self.voice_for("vi"), self.mask_line()
+            if not self.audio_path(line, voice, day).is_file():
+                wanted.append((line, voice))
         return wanted
 
     def _wanted_group_audio(self, people: list, day: dt.date) -> list[tuple]:
@@ -1845,9 +1875,9 @@ class Greeter:
             raise ValueError("Enter between 1 and 500 characters.")
         if voice == "elevenlabs":  # the saved ElevenLabs voice; costs credits like a greeting
             cloud = dict(cloud or {})
-            if cloud.pop("emotions", "") == "auto":  # Claude says how each part is said; only Eleven v3 can
-                if not (cloud.get("model") or self.settings.elevenlabs_model).startswith("eleven_v3"):
-                    raise ValueError("Emotions chosen by Claude need the Eleven v3 model.")
+            if cloud.pop("emotions", "") == "auto":  # Claude says how each part is said; only Eleven v3 and v4 can
+                if not acts(cloud.get("model") or self.settings.elevenlabs_model):
+                    raise ValueError("Emotions chosen by Claude need the Eleven v3 or v4 model.")
                 try:
                     text = self.acted_line(text, self.now().date())
                 except ValueError:
@@ -1933,8 +1963,11 @@ class Greeter:
                 batch.append(self._queue.get_nowait())
             except queue.Empty:
                 break
-        waiting, strangers = [], []
+        waiting, strangers, masked = [], [], []
         for employee_id, ts, queued in batch:
+            if employee_id == MASK:
+                masked.append((ts, queued))
+                continue
             if employee_id is None:
                 strangers.append((ts, queued))
                 continue
@@ -1942,6 +1975,8 @@ class Greeter:
             if person is not None and person.greet and person.id not in {p.id for p, _, _ in waiting}:
                 waiting.append((person, ts, queued))
         said_any = False
+        if not waiting and masked:
+            return self._ask_mask(masked)
         if not waiting and strangers:
             return self._hello(strangers)
         busy = self.busy()
@@ -1975,6 +2010,24 @@ class Greeter:
             self._record(group, ts, text)
             said_any = True
         return said_any
+
+    def _ask_mask(self, masked: list) -> bool:
+        """Ask the masked face at the door to lower the mask, unless that was asked a moment ago."""
+        now = time.monotonic()
+        fresh = [(ts, queued) for ts, queued in masked if now - queued <= STALE_S]
+        if not fresh or now - self._mask_said < MASK_GAP_S:
+            return False
+        try:
+            self._speak(self.mask_line(), "vi")
+        except Exception as exc:
+            self.error = f"{fresh[0][0]:%H:%M} could not speak: {type(exc).__name__}: {str(exc)[:200]}"
+            self.speak_failed = self.error
+            log.warning("Greetings: %s", self.error)
+            return False
+        self.speak_failed = None
+        self._mask_said = self._last_said = time.monotonic()
+        log.info("Asked a masked face to lower the mask: %s", MASK_VI)
+        return True
 
     def _hello(self, strangers: list) -> bool:
         """One hello without a name for the faces nobody could name, unless someone was greeted lately."""
@@ -2075,22 +2128,25 @@ class Greeter:
             self._sleep(0.2 if made else RENDER_IDLE_S)
 
     def awake_due(self, now: dt.datetime) -> str | None:
-        """"first" or "again" when the hum that keeps the speaker awake is due now, else None: on work days from
-        Settings → "from" until the door stops greeting, when the speaker had no signal for "every" minutes."""
+        """"first" or "again" when a signal for the speaker is due now, else None. "first", the soft hum that can
+        be heard, once a work day at Settings → "from" (or later in the camera hours, if missed). "again", the
+        tone nobody hears, whenever the speaker had no signal for "every" minutes, day and night, every day:
+        the office's speaker (Edifier MR4) switches itself off after about 15 minutes without sound and only its
+        own button switches it on again, so the signal must never stop."""
         from .config import parse_clock
 
         s = self.settings
-        if not (s.enabled and s.speaker_awake) or not self.rules(now.date()).get("workday", True):
-            return None
-        if self.cfg.schedule.in_maintenance(now):
+        if not (s.enabled and s.speaker_awake):
             return None
         _, _, end = self.cfg.schedule.clocks()
         if s.until_people:  # some people are greeted after the camera hours
             end = max(end, parse_clock(s.until))
-        if not parse_clock(s.speaker_awake_from) <= now.time() < end:
-            return None
-        if self._sound_at is None or self._sound_at.date() != now.date():
+        if (self.rules(now.date()).get("workday", True) and not self.cfg.schedule.in_maintenance(now)
+                and parse_clock(s.speaker_awake_from) <= now.time() < end
+                and (self.store.get(AWAKE_DAY_KEY) or "") != now.date().isoformat()):
             return "first"
+        if self._sound_at is None:
+            return "again"
         return "again" if now - self._sound_at >= dt.timedelta(minutes=s.speaker_awake_every) else None
 
     def keep_awake(self, play=None) -> bool:
@@ -2109,6 +2165,8 @@ class Greeter:
             self._sound_at = self.now()  # after a failure too: tried again in "every" minutes, not at once
             try:
                 self.store.put(AWAKE_KEY, self._sound_at.isoformat())
+                if due == "first":
+                    self.store.put(AWAKE_DAY_KEY, now.date().isoformat())
             except Exception:
                 log.exception("Could not remember when the speaker was woken")
         if due == "first":

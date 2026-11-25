@@ -37,6 +37,15 @@ STRONG_BONUS = 0.05
 # and a camera mounted above head height makes every face look tilted down; tested on doorway
 # video, such faces matched the right person at 0.85-0.9 while everyone else stayed below 0.2.
 STRONG_MATCH = 0.15
+# A track that ends without enough votes is still named when every frame's best match was the same
+# person, at this average score or more, with at least one real vote: in a crowd a face shows for a
+# second or two, often too few frames for votes_required. Measured on the review cards of 13-25/11
+# 2026 (406 unnamed tracks): 18 such tracks, all the right person (15 confirmed by an admin, 3 checked
+# by eye), and 11 more of Head Chef, whose references all wore a mask: people not counted for
+# lateness are left out (see FaceTracker.agree_allowed). Tracks of fewer than three frames were never
+# reported, so the rule was measured on three or more and is kept to that.
+AGREE_MEAN = 0.38
+AGREE_FRAMES = 3
 
 
 def clear_match(candidates, params) -> bool:
@@ -115,6 +124,7 @@ class Decision:
     frames: int = 0  # frames the track was seen in
     votes: int = 0  # of those, votes for `employee_id` (the decision, or the unknown's closest person)
     trace: str = ""  # for an unknown: what each frame of the track looked like and why it did not vote
+    rule: str = ""  # for an identified: "agreeing frames" when named by that rule (see AGREE_MEAN), else ""
 
 
 @dataclass
@@ -132,6 +142,7 @@ class _Track:
     decided: str | None = None
     person_id: int | None = None
     trace: list = field(default_factory=list)
+    tops: list = field(default_factory=list)  # (best match, its score) of every frame that had a match
 
 
 def iou(a, b) -> float:
@@ -153,6 +164,7 @@ class FaceTracker:
         self._recent: dict[str, dt.datetime] = {}  # employee -> last time a track identified them
         self._people: dict[int, dt.datetime] = {}  # person tracks currently followed
         self._reported: list[_Track] = []  # the last unknown tracks reported, newest last (see _continues)
+        self.agree_allowed = lambda person: True  # who may be named by agreeing frames (see AGREE_MEAN)
 
     def update(self, observations: list[Observation], ts: dt.datetime,
                people: dict[int, dt.datetime] | None = None, *, frame_interval_s: float = 0.0) -> list[Decision]:
@@ -209,6 +221,8 @@ class FaceTracker:
             t.best = obs
         for person, score in obs.candidates:
             t.best_score[person] = max(score, t.best_score.get(person, -1.0))
+        if obs.candidates:
+            t.tops.append(obs.candidates[0])
         person = vote_for(obs.candidates, obs.quality_ok, obs.size_ok, self.p)
         if person is not None:
             t.votes[person] += 1
@@ -236,6 +250,20 @@ class FaceTracker:
         strong = t.best_score.get(person, 0) >= self.p.accept_score + STRONG_BONUS
         return person if strong and n >= max(1, self.p.votes_required - 1) else None
 
+    def _agreeing_exit(self, t: _Track) -> str | None:
+        """The person every frame of `t` matched best, when they also had a vote and the average is high enough."""
+        if len(t.tops) < AGREE_FRAMES or len({person for person, _ in t.tops}) != 1:
+            return None
+        person = t.tops[0][0]
+        if not t.votes.get(person) or len(t.votes) != 1:
+            return None
+        if sum(score for _, score in t.tops) / len(t.tops) < AGREE_MEAN:
+            return None
+        try:
+            return person if self.agree_allowed(person) else None
+        except Exception:
+            return None
+
     def _expire(self, now: dt.datetime, force: bool = False, frame_interval_s: float = 0.0) -> list[Decision]:
         timeout = dt.timedelta(seconds=self.p.track_timeout_s + frame_interval_s)
         alive, decisions = [], []
@@ -247,6 +275,10 @@ class FaceTracker:
                 self._recent[t.decided] = t.last_ts
             elif (person := self._strong_exit(t)) is not None:
                 decisions.append(self._decide(t, person, t.last_ts))
+            elif (person := self._agreeing_exit(t)) is not None:
+                decision = self._decide(t, person, t.last_ts)
+                decision.rule, decision.trace = "agreeing frames", " | ".join(t.trace)
+                decisions.append(decision)
             elif t.frames >= self.p.unknown_min_frames:
                 self._ended.append(t)
         self._tracks = alive
