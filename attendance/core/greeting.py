@@ -53,16 +53,16 @@ def fixed_short(said: str) -> bool:
 # fine for coming late, the amount as Settings → Greeting → late fine says it ("hai mươi nghìn"; empty: off, they hear
 # the greeting written for them). The name is read once and kept (names), so are these lines: no credits per arrival.
 LATE_FINE_VI = [
-    "[playfully] Hôm nay góp quỹ {amount} nha!",
-    "Hơi muộn chút rồi, nhớ nộp {amount} vô quỹ nha.",
-    "[playfully] Quỹ văn phòng vừa có thêm {amount} rồi đó!",
-    "Muộn một chút thôi mà, {amount} là xong nha.",
-    "Chào buổi sáng! Nhớ ghé thủ quỹ gửi {amount} nha.",
-    "[cheerfully] Tới rồi là vui rồi, góp quỹ {amount} là vui hơn nữa!",
-    "Quỹ liên hoan cảm ơn {amount} của mình trước nha!",
-    "Sáng nay chậm một xíu, quỹ văn phòng nhận thêm {amount} nha.",
-    "Không sao đâu, góp quỹ {amount} là hòa cả làng nha!",
-    "[cheerfully] Một ngày mới bắt đầu bằng {amount} cho quỹ chung nha!",
+    "Cho em xin {amount} nhá!",
+    "[playfully] Hôm nay cho em xin {amount} nha!",
+    "Dạ, cho em xin {amount} góp quỹ nhá!",
+    "[cheerfully] {Amount} thôi ạ, cho em xin nhá!",
+    "Muộn xíu thôi mà, cho em xin {amount} là xong nhá.",
+    "Em không nói nhiều đâu, cho em xin {amount} nhá!",
+    "[cheerfully] Chào buổi sáng! Cho em xin {amount} vô quỹ nhá.",
+    "Quỹ văn phòng nhờ em xin {amount} nhá!",
+    "[playfully] {Amount} thôi mà, cho em xin nha, em cảm ơn!",
+    "Em xin phép thu {amount} tiền quỹ nhá!",
 ]
 
 SHORT_KEY = "greeting_short"  # person id -> {"text", "language", "honorific", "called"}: their short hello, kept
@@ -1034,7 +1034,7 @@ class Greeter:
     def fine_lines(self) -> list[str]:
         """The late-fine lines with the amount in them; empty when Settings has no amount."""
         amount = " ".join(str(getattr(self.settings, "late_fine", "") or "").split())
-        return [line.format(amount=amount) for line in LATE_FINE_VI] if amount else []
+        return [line.format(amount=amount, Amount=amount[:1].upper() + amount[1:]) for line in LATE_FINE_VI] if amount else []
 
     def fine_line(self, person, day: dt.date) -> str:
         """The late-fine line someone hears after their name today; empty for a boss, an English speaker or when
