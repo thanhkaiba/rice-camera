@@ -20,8 +20,9 @@ def test_someone_late_hears_their_name_then_a_fine_line(core):
     late = g.sentence(alice, at(10, 15))
     name, line = [part.strip() for part in late.split(PART)]
     assert name == g.name_called(alice)
-    assert line in g.fine_lines() and "hai mươi nghìn" in line
+    assert line in g.fine_lines(g.pronoun(alice)) and "hai mươi nghìn" in line
     assert len(g.fine_lines()) == len(LATE_FINE_VI) == 10
+    assert any("chị" in l for l in g.fine_lines("chị")) and not any("{" in l for l in g.fine_lines("chị"))
     assert g.sentence(alice, at(10, 20)) == late  # the same line all day
 
 
@@ -31,7 +32,7 @@ def test_no_fine_for_a_boss_or_when_it_is_off(core):
     app, clock, g, made = fined(core)
     clock.t = at(7, 0)
     g.write_if_due()
-    boss = SimpleNamespace(id="B", not_counted=True, greet_language="vi")
+    boss = SimpleNamespace(id="B", not_counted=True, greet_language="vi", honorific="anh")
     assert g.fine_line(boss, DAY) == "" and g.fine_line(app.store.employee("A"), DAY)
     app.cfg.greeting.late_fine = ""
     assert g.fine_lines() == [] and g.sentence(app.store.employee("A"), at(10, 15)) == "Chào Alice!"
@@ -52,3 +53,10 @@ def test_the_fine_lines_are_read_once_and_written_late_lines_are_not_read(core):
     audio, rate = g._joined(g.voiced(g.sentence(app.store.employee("A"), at(10, 15)), [app.store.employee("A")], "vi", DAY),
                             "maichi", DAY)
     assert rate == 48000 and made == []
+
+
+def test_no_english_group_lines_for_a_single_english_speaker(core):
+    app, clock, g, made = fined(core)
+    assert "en" not in g.together_languages()
+    g._note_together(DAY, [{"language": "en", "text": "Morning, everyone!"}, {"language": "vi", "text": "Chào cả nhà!"}])
+    assert [l["language"] for l in g.together_lines(DAY)] == ["vi"]

@@ -65,6 +65,7 @@ def test_kept_sentences_keep_their_audio(core, monkeypatch):
 
 def test_a_group_hears_their_names_then_one_of_claudes_lines(core, monkeypatch):
     app, _, g, said, _ = make(core)
+    g.together_languages = lambda: {"vi", "en"}  # an office with English speakers
     monkeypatch.setattr(greeting.random, "choice", lambda options: options[0])
     app.store.set_greetings({"A": {"honorific": "chi"}, "B": {"honorific": "anh"}})
     g._note_together(DAY, [{"language": "vi", "text": "[gasps] Ui giời ơi, cả hội tới cùng lúc luôn!"},
@@ -81,6 +82,7 @@ def test_a_group_hears_their_names_then_one_of_claudes_lines(core, monkeypatch):
 
 def test_unheard_group_lines_are_kept_for_the_next_days_and_topped_up(core):
     app, _, g, _, _ = make(core)
+    g.together_languages = lambda: {"vi", "en"}  # an office with English speakers
     g._note_together(YESTERDAY, [{"language": "vi", "text": f"Câu {n}!"} for n in range(5)]
                      + [{"language": "en", "text": "Hi all!"}, {"language": "en", "text": "Hey team!"}])
     g.together([app.store.employee("A"), app.store.employee("B")], "vi", YESTERDAY)  # one heard yesterday

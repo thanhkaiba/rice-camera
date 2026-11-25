@@ -52,17 +52,17 @@ def fixed_short(said: str) -> bool:
 # Someone who comes in late hears their name ("Anh Terry!"), then one of these, picked anew each day: the office's
 # fine for coming late, the amount as Settings → Greeting → late fine says it ("hai mươi nghìn"; empty: off, they hear
 # the greeting written for them). The name is read once and kept (names), so are these lines: no credits per arrival.
-LATE_FINE_VI = [
+LATE_FINE_VI = [  # {you}: how they are addressed (anh, chị); {amount}: as Settings says it
     "Cho em xin {amount} nhá!",
-    "[playfully] Hôm nay cho em xin {amount} nha!",
+    "[playfully] Của {you} hết {amount} ạ!",
     "Dạ, cho em xin {amount} góp quỹ nhá!",
-    "[cheerfully] {Amount} thôi ạ, cho em xin nhá!",
+    "[playfully] Ơ, {you} rơi mất {amount} kìa!",
     "Muộn xíu thôi mà, cho em xin {amount} là xong nhá.",
     "Em không nói nhiều đâu, cho em xin {amount} nhá!",
-    "[cheerfully] Chào buổi sáng! Cho em xin {amount} vô quỹ nhá.",
-    "Quỹ văn phòng nhờ em xin {amount} nhá!",
+    "[cheerfully] Phí vào cửa của {you} hôm nay là {amount} nha!",
+    "Chị Hana nhờ em xin {amount} nhá!",
     "[playfully] {Amount} thôi mà, cho em xin nha, em cảm ơn!",
-    "Em xin phép thu {amount} tiền quỹ nhá!",
+    "Hôm nay {you} góp {amount} cho quỹ nhá!",
 ]
 
 SHORT_KEY = "greeting_short"  # person id -> {"text", "language", "honorific", "called"}: their short hello, kept
@@ -1031,15 +1031,20 @@ class Greeter:
                             "called": called(person)}
         self.store.put(SHORT_KEY, json.dumps(saved, ensure_ascii=False))
 
-    def fine_lines(self) -> list[str]:
-        """The late-fine lines with the amount in them; empty when Settings has no amount."""
+    def fine_lines(self, you: str = "anh") -> list[str]:
+        """The late-fine lines with the amount in them, said to `you` (anh, chị); empty when Settings has no amount."""
         amount = " ".join(str(getattr(self.settings, "late_fine", "") or "").split())
-        return [line.format(amount=amount, Amount=amount[:1].upper() + amount[1:]) for line in LATE_FINE_VI] if amount else []
+        return ([line.format(amount=amount, Amount=amount[:1].upper() + amount[1:], you=you) for line in LATE_FINE_VI]
+                if amount else [])
+
+    @staticmethod
+    def pronoun(person) -> str:
+        return HONORIFICS.get(person.honorific, ("", "anh"))[1] or "anh"
 
     def fine_line(self, person, day: dt.date) -> str:
         """The late-fine line someone hears after their name today; empty for a boss, an English speaker or when
         it is off."""
-        lines = self.fine_lines()
+        lines = self.fine_lines(self.pronoun(person))
         if not lines or person.not_counted or person.greet_language != "vi":
             return ""
         return lines[int(hashlib.sha1(f"{person.id}{day.isoformat()}".encode()).hexdigest(), 16) % len(lines)]
@@ -1049,7 +1054,7 @@ class Greeter:
         if fixed_short(said):
             return True
         plain_said = untagged(said)
-        return any(untagged(line) == plain_said for line in self.fine_lines())
+        return any(untagged(line) == plain_said for _, you in HONORIFICS.values() for line in self.fine_lines(you))
 
     def short_line(self, person, day: dt.date) -> str:
         """The short hello for a busy door. Vietnamese: one of SHORT_VI, picked once per person (the same every day).
@@ -1309,16 +1314,26 @@ class Greeter:
             self.store.put(TOGETHER_KEY, json.dumps({"day": day.isoformat(), "lines": kept}, ensure_ascii=False))
             return kept
 
+    def together_languages(self) -> set[str]:
+        """The languages a group can be greeted in: two or more people greeted in it."""
+        counts: dict[str, int] = {}
+        for p in self.store.all_employees():
+            if p.active and p.greet:
+                counts[p.greet_language] = counts.get(p.greet_language, 0) + 1
+        return {language for language, n in counts.items() if n >= 2}
+
     def _want_more_together(self, day: dt.date) -> bool:
         left = [line["language"] for line in self.together_lines(day) if not line.get("used")]
-        return any(left.count(language) < n for language, n in TOGETHER_MIN.items())
+        wanted = self.together_languages()
+        return any(left.count(language) < n for language, n in TOGETHER_MIN.items() if language in wanted)
 
     def _note_together(self, day: dt.date, lines: list) -> None:
         have = self.together_lines(day)
         seen = {untagged(line["text"]).lower() for line in have}
         for line in lines:
             text = " ".join(str(line.get("text") or "").split()) if isinstance(line, dict) else ""
-            if (line.get("language") in ("vi", "en") and text and len(text) <= 200 and "{" not in text
+            if (line.get("language") in ("vi", "en") and line.get("language") in self.together_languages()
+                    and text and len(text) <= 200 and "{" not in text
                     and PART not in text and untagged(text).lower() not in seen):
                 have.append({"language": line["language"], "text": text, "written": day.isoformat()})
                 seen.add(untagged(text).lower())
@@ -1449,7 +1464,8 @@ class Greeter:
             user += "\n\nalready_written_today:\n" + json.dumps(list(dict.fromkeys(self._taken))[-80:], ensure_ascii=False)
         system = SYSTEM.format(n=VARIANTS, style=style)
         if self._want_together:
-            system += TOGETHER_RULES.format(vi=6, en=3)
+            wanted = self.together_languages()
+            system += TOGETHER_RULES.format(vi=6 if "vi" in wanted else 0, en=3 if "en" in wanted else 0)
             kept = [line["text"] for line in self.together_lines(day)]
             if kept:
                 user += "\n\ntogether_written:\n" + json.dumps(kept, ensure_ascii=False)
@@ -1874,7 +1890,8 @@ class Greeter:
                 wanted += self._wanted_group_audio(people, day)
                 if self.lines(day) and any(self.fine_line(p, day) for p in people) and self.voice_ready("vi"):
                     voice = self.voice_for("vi")
-                    for line in self.fine_lines():
+                    pronouns = dict.fromkeys(self.pronoun(p) for p in people if self.fine_line(p, day))
+                    for line in [line for you in pronouns for line in self.fine_lines(you)]:
                         said = self.voiced(line, [], "vi", day)
                         if not self.audio_path(said, voice, day).is_file():
                             wanted.append((said, voice))
