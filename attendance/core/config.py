@@ -424,6 +424,9 @@ class GreetingConfig:
     # A person who arrives this many seconds after the last greeting ended, or while someone else waits, hears their
     # short hello: people coming in one after another are all greeted before they walk on. 0: only while someone waits.
     busy_seconds: int = 8
+    # How the door calls someone whose name or email has no accents: "who = name", one per line or comma separated;
+    # who is their email, its first part or their full name ("tan.nguyen@offspringdigital.com = Tân").
+    call_names: str = ""
     style: str = ""  # extra wishes for the sentences, e.g. "mention the weather" (any language)
     # The office, for the morning weather: coordinates as Google Maps gives them ("21.0285, 105.8542", or the
     # address of a place there: kept as "lat,lon"), or a place name ("Hà Nội"); empty: no weather.

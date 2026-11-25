@@ -247,15 +247,18 @@ def test_zerotts_reads_the_days_sentences_ahead_and_the_door_plays_the_file(core
     app.service.on_identified("C", at(7, 1), 0.9, None)  # already in: no audio needed for them
     while g.render_next():
         pass
-    assert [text for text, _ in made] == ["Chào Alice một!", "Chào Bob một!", "Alice!", "Bob!",  # names, for groups
+    shorts = [greeting.untagged(g.short_line(app.store.employee(i), at(7, 0).date())) for i in "AB"]
+    assert [text for text, _ in made] == ["Chào Alice một!", "Chào Bob một!", *shorts,  # the short hellos of a busy door
+                                          "Alice!", "Bob!",  # names, for groups
                                           "Alice đến rồi!", "Bob đến rồi!"]
-    assert g.audio_count(at(7, 0).date()) == 4 and g.status()["audio"] == 4
+    made[:] = [m for m in made if greeting.untagged(m[0]) not in shorts]
+    assert g.audio_count(at(7, 0).date()) == 6 and g.status()["audio"] == 6
     person = app.store.employee("A")
     assert {g.sentence(person, at(8, 30)) for _ in range(20)} == {"Chào Alice một!"}  # the variant that has a file
     audio, rate = g._audio("Chào Alice một!", "maichi", at(7, 0).date())
     assert rate == 48000 and len(audio) == 480 and len(made) == 6  # played from the file, not made again
     g._audio("Chào cả nhà!", "maichi", at(7, 0).date())  # a sentence nobody expected is made on the spot, and kept
-    assert len(made) == 7 and g.audio_count(at(7, 0).date()) == 5
+    assert len(made) == 7 and g.audio_count(at(7, 0).date()) == 7
     g.arrived("A", at(8, 30))
     assert not g.render_next()  # someone is waiting to be greeted: the speaker comes first
 

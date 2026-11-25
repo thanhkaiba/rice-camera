@@ -36,6 +36,7 @@ from .voice import voice_names
 log = logging.getLogger(__name__)
 
 LINES_KEY = "greeting_lines"
+SHORT_VI = ["[cheerfully] Chào buổi sáng {who}!", "[happily] Em chào {who} ạ!", "[excited] {Who} tới rồi ạ!"]
 SHORT_KEY = "greeting_short"  # person id -> {"text", "language", "honorific", "called"}: their short hello, kept
 HEARD_KEY = "greeting_heard"  # person id -> [[day, sentence], ...]: what they heard lately, so Claude does not repeat it
 HEARD_DAYS = 7
@@ -308,9 +309,34 @@ def call_name(name: str) -> str:
     return name.strip()
 
 
+CALL_NAMES_FROM = [lambda: ""]  # set by the Greeter: Settings → Greeting → call names, "who = name" per line or comma
+_call_names: tuple[str, dict] = ("", {})
+
+
+def call_names() -> dict[str, str]:
+    """{email, email's first part or full name, lower case: the name to call them}, from Settings."""
+    global _call_names
+    text = str(CALL_NAMES_FROM[0]() or "")
+    if _call_names[0] != text:
+        found = {}
+        for item in re.split(r"[\n,;]", text):
+            who, sep, name = item.partition("=")
+            if sep and who.strip() and name.strip():
+                found[" ".join(who.split()).lower()] = " ".join(name.split())
+        _call_names = (text, found)
+    return _call_names[1]
+
+
 def called(person) -> str:
-    """What the greeting calls someone: their email's first part (alan@… is Alan), else from their name. When it is
-    a word of their name without the accents (bach@ for Hoàng Minh Bách), the accented word, so the voice says it right."""
+    """What the greeting calls someone: as set in Settings → Greeting → call names (Tân for tan.nguyen@), else their
+    email's first part (alan@… is Alan), else from their name. When it is a word of their name without the accents
+    (bach@ for Hoàng Minh Bách), the accented word, so the voice says it right."""
+    names = call_names()
+    if names:
+        email = (person.email or "").strip().lower()
+        for key in (email, email.partition("@")[0], " ".join(person.name.split()).lower()):
+            if key and key in names:
+                return names[key]
     local = re.split(r"[._+\-]", (person.email or "").partition("@")[0])[0]
     local = re.sub(r"\d+", "", local)
     if not local:
@@ -777,6 +803,7 @@ class Greeter:
     def __init__(self, cfg, store, now, late_from, speak=None, write=None, sleep=time.sleep):
         """`cfg` is the whole Config; `late_from(day)` the usual first late minute of a day."""
         self.cfg, self.store, self.now, self.late_from = cfg, store, now, late_from
+        CALL_NAMES_FROM[0] = lambda: getattr(cfg.greeting, "call_names", "")
         self._speak = speak or self._say
         self.speak_failed: str | None = None  # the last greeting that could not be played; None once one plays
         self._write = write or self._ask_claude
@@ -900,12 +927,17 @@ class Greeter:
         what the door is going to say to whom, and the lines kept for a group."""
         people = {pid: {"on_time": [untagged(t) for t in entry.get("on_time") or []],
                         "late": [untagged(t) for t in entry.get("late") or []],
-                        "short": [untagged(t) for t in entry.get("short") or []],
+                        "short": [untagged(t) for t in self._short_of(pid, entry, day)],
                         "timed": entry.get("timed", True) is not False, "note": entry.get("note", "")}
                   for pid, entry in self.lines(day).items()}
         together = [{"language": line.get("language", "vi"), "text": untagged(line.get("text", ""))}
                     for line in self.together_lines(day)]
         return {"day": day.isoformat(), "people": people, "together": together}
+
+    def _short_of(self, pid: str, entry: dict, day: dt.date) -> list[str]:
+        person = self.store.employee(pid)
+        line = self.short_line(person, day) if person is not None else ""
+        return [line] if line else list(entry.get("short") or [])
 
     def saved_short(self, person) -> str:
         """Their short hello from an earlier day, when it was written for the language, address and name they have now."""
@@ -921,7 +953,12 @@ class Greeter:
         self.store.put(SHORT_KEY, json.dumps(saved, ensure_ascii=False))
 
     def short_line(self, person, day: dt.date) -> str:
-        """The short hello for a busy door: today's, else the one kept for them; empty when there is none."""
+        """The short hello for a busy door. Vietnamese: one of SHORT_VI, picked once per person (the same every day).
+        English: today's from Claude, else the one kept for them; empty when there is none."""
+        if person.greet_language == "vi":
+            who = addressed(called(person), person.honorific)
+            line = SHORT_VI[int(hashlib.sha1(person.id.encode()).hexdigest(), 16) % len(SHORT_VI)]
+            return line.format(who=who, Who=who[:1].upper() + who[1:])
         written = self._entry(person, day).get("short") or []
         return written[0] if written else self.saved_short(person)
 
@@ -1714,7 +1751,8 @@ class Greeter:
             if kind == "on_time":  # then the short hellos of a busy door, then what a group hears
                 for person in people:
                     line, language = self.short_line(person, day), person.greet_language
-                    if line and self.voice_ready(language) and not self.audio_ready(line, [person], language, day):
+                    if (line and self._entry(person, day) and self.voice_ready(language)
+                            and not self.audio_ready(line, [person], language, day)):
                         wanted.append((self.voiced(line, [person], language, day), self.voice_for(language)))
                 wanted += self._wanted_group_audio(people, day)
         return wanted

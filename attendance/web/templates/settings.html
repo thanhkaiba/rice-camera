@@ -247,6 +247,9 @@
       {{ check('greeting', 'enabled', 'Greet people at the door', 'Off: silent') }}
       {{ check('greeting', 'unknown', 'Say hello to faces the camera cannot name', '“Xin chào!” without a name, at most once every 2 minutes') }}
       {{ check('greeting', 'birthdays', 'Wish a happy birthday', 'On their birthday (People page, or from Base Account) the greeting is a birthday wish, also when they come late; only when they come in that day; a Saturday birthday is wished on the Friday before, a Sunday one on Monday; once per birthday') }}
+      <label class="field">Call names
+        <textarea name="greeting.call_names" rows="2" placeholder="tan.nguyen@offspringdigital.com = Tân">{{ s.greeting.call_names }}</textarea>
+        <span class="hint">For someone whose name or email has no accents: email (or its first part, or the full name) = the name the door says, one per line. Their greetings are written again.</span>{{ src('greeting.call_names') }}</label>
       {{ field('greeting', 'busy_seconds', 'Busy door (seconds)', 'Someone who arrives this soon after the last greeting, or while others wait, hears their short hello (“A, anh Terry!”). 0: only while others wait.', type='number') }}
       {{ check('greeting', 'days_off', 'Write greetings on days off too', 'Off: Claude writes the sentences and ElevenLabs reads them ahead only on work days, so weekends and holidays cost nothing; someone who comes in then hears a plain hello') }}
       {{ check('greeting', 'tease', 'Joke about how people have arrived lately', 'Someone often late who comes early, or on time many days in a row. Only that label goes to Claude with the name, never a time. A late arrival is never teased about the habit.') }}
