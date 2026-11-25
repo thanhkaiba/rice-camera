@@ -38,6 +38,17 @@ log = logging.getLogger(__name__)
 
 LINES_KEY = "greeting_lines"
 SHORT_VI = ["[cheerfully] Chào buổi sáng {who}!", "[happily] Em chào {who} ạ!", "[excited] {Who} tới rồi ạ!"]
+# The audio of a fixed short hello ("[happily] Em chào chị Rose ạ!") is the same every day: kept with the names
+# (NAMES_DIR), read once, not every morning. A tag in front is optional: it may be left out (acted()).
+WHO = r"[^,.!?\n]{1,40}"  # how someone is addressed: "chị Rose", never a sentence
+FIXED_SHORT = [re.compile(r"^(?:\[[^\]\n]{1,30}\]\s*)?" + re.escape(line.split("] ", 1)[-1]).replace(
+    re.escape("{who}"), WHO).replace(re.escape("{Who}"), WHO) + "$") for line in SHORT_VI]
+
+
+def fixed_short(said: str) -> bool:
+    return any(p.match(said.strip()) for p in FIXED_SHORT)
+
+
 SHORT_KEY = "greeting_short"  # person id -> {"text", "language", "honorific", "called"}: their short hello, kept
 HEARD_KEY = "greeting_heard"  # person id -> [[day, sentence], ...]: what they heard lately, so Claude does not repeat it
 HEARD_DAYS = 7
@@ -607,6 +618,7 @@ def rules_for(service, day: dt.date) -> dict:
             after = max(w.late_after, dt.datetime.combine(day, until, tzinfo=service.tz))
             people[emp] = (after + dt.timedelta(minutes=1)).isoformat()
     rules = {"day": day.isoformat(), "workday": service.is_workday(day), "people": people,
+             "away": sorted({*service.store.leaves_on(day), *absent}),  # nothing read ahead for them
              "day_notes": day_notes(service, day), "notes": person_notes(service, day),
              "habits": person_habits(service, day),
              "pending": {emp: shift for emp, shift in waiting.items() if people.get(emp)}}
@@ -925,6 +937,21 @@ class Greeter:
                     return {}
             return self._local[2]
         return {}
+
+    def away(self, day: dt.date) -> set[str]:
+        """Who is on leave, or has an absence (working from home) approved, on `day`: their greetings are not read
+        ahead (ElevenLabs credits). Should one come in after all, theirs is read at the door. From the server's
+        rules ("away"; older servers: the people never late that day), and this computer's own leave list."""
+        rules = self.rules(day)
+        if "away" in rules:
+            away = set(rules.get("away") or [])
+        else:
+            away = {e for e, late in (rules.get("people") or {}).items() if late is None}
+        try:
+            away |= set(self.store.leaves_on(day))
+        except Exception:
+            log.exception("Could not read the day's leave")
+        return away
 
     def note(self, person, day: dt.date) -> str:
         return self.rules(day).get("notes", {}).get(person.id, "")
@@ -1629,6 +1656,7 @@ class Greeter:
         else:
             made = f"{voice}\n{said}" if how == (1.0, 0.8) else f"{voice}\n{said}\n{how[0]}\n{how[1]}"  # changed: made again
         key = hashlib.sha1(made.encode()).hexdigest()[:24]
+        keep = keep or fixed_short(said)  # the same every day: read once
         return self.cfg.path(self.cfg.data_dir) / AUDIO_DIR / (NAMES_DIR if keep else day.isoformat()) / f"{key}.wav"
 
     def audio_ready(self, text: str, people: list, language: str, day: dt.date) -> bool:
@@ -1783,8 +1811,10 @@ class Greeter:
         if self.settings.unknown and self.uses_zerotts("vi") and self.voice_ready("vi"):
             voice = self.voice_for("vi")
             wanted += [(text, voice) for text in HELLO_VI[:1] if not self.audio_path(text, voice, day).is_file()]
+        away = self.away(day)  # on leave or working from home: not expected at the door, nothing read ahead
         people = [p for p in self.store.all_employees()
-                  if p.active and p.greet and p.id not in arrived and self.uses_zerotts(p.greet_language)]
+                  if p.active and p.greet and p.id not in arrived and p.id not in away
+                  and self.uses_zerotts(p.greet_language)]
         for kind in ("on_time", "late"):
             for person in people:
                 lines = self._entry(person, day).get(kind) or []

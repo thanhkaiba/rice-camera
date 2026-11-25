@@ -119,7 +119,7 @@ def test_rules_from_base_requests(core):
     app, clock, _ = core
     app.store.put(f"base_timeoffs:{DAY}", "{}")
     rules = rules_for(app.service, DAY)
-    assert rules == {"day": DAY.isoformat(), "workday": True, "people": {}, "day_notes": [], "notes": {}, "habits": {}, "pending": {}}
+    assert rules == {"day": DAY.isoformat(), "workday": True, "people": {}, "away": [], "day_notes": [], "notes": {}, "habits": {}, "pending": {}}
 
 
 def test_honorifics_are_set_on_the_server_and_reach_the_mac(live, tmp_path):  # noqa: F811
