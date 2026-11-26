@@ -64,6 +64,7 @@ class EdgeClient:
         self.on_arrived = lambda arrived: None
         self.on_say = lambda: {"ok": False, "message": "no greetings on this computer"}
         self.on_speaker = None  # plays a test sound and tells what it played on
+        self.on_output = None  # ("external" | "builtin") -> the greetings play there from now on
         self.render_text = None
         self.made_audio = None  # (employee id, on_time/late/short, index, day) -> the WAV made ahead, for the Greetings page
         self.on_create_voice = None
@@ -370,6 +371,9 @@ class EdgeClient:
                 elif job.get("kind") == "speaker":
                     result = (self.on_speaker() if self.on_speaker is not None else
                               {"ok": False, "message": "The speaker test is not available on this camera. Update the app."})
+                elif job.get("kind") == "speaker_output":
+                    result = (self.on_output(str(job["payload"].get("output") or "")) if self.on_output is not None else
+                              {"ok": False, "message": "Choosing the speaker is not available on this camera. Update the app."})
                 else:
                     result = self.on_say() if job.get("kind") == "say" else self._add_uploaded(job["payload"])
             unsent[key] = result

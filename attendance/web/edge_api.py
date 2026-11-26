@@ -104,9 +104,14 @@ def _speaker_status(value) -> dict | None:
                  "corr": float(corr) if isinstance(corr, (int, float)) else None,
                  "at_text": str(heard.get("at_text") or "")[:8],
                  "kind": str(heard.get("kind") or "")[:20], "message": str(heard.get("message") or "")[:200]}
+    output = value.get("output") if isinstance(value.get("output"), dict) else None
+    if output is not None:
+        output = {"output": output.get("output") if output.get("output") in ("external", "builtin") else None,
+                  "why": str(output.get("why") or "")[:200], "at": str(output.get("at") or "")[:16],
+                  "heard": output.get("heard") if isinstance(output.get("heard"), bool) else None}
     return {"device": str(value.get("device") or "")[:80], "devices": names,
             "volume": int(volume) if isinstance(volume, (int, float)) and 0 <= volume <= 100 else None,
-            "muted": bool(value.get("muted")), "heard": heard}
+            "muted": bool(value.get("muted")), "heard": heard, "output": output}
 
 
 def heartbeat(store) -> dict | None:
@@ -401,6 +406,10 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
             return jsonify(ok=True)
         if payload.get("kind") == "speaker":
             store.log(service.now(), "office computer", "test speaker",
+                      ("ok: " if result.get("ok") else "problem: ") + str(result.get("message", ""))[:400])
+            return jsonify(ok=True)
+        if payload.get("kind") == "speaker_output":
+            store.log(service.now(), "office computer", "speaker in use",
                       ("ok: " if result.get("ok") else "problem: ") + str(result.get("message", ""))[:400])
             return jsonify(ok=True)
         if payload.get("kind") == "say":

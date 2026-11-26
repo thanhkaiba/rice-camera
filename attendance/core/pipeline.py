@@ -109,6 +109,8 @@ class App:
         self.machine.speak_failed = lambda: self.greeter.speak_failed
         self.machine.heard = self.greeter.listener.status
         self.edge.on_speaker = self.speaker_test
+        self.edge.on_output = self.greeter.use_output
+        self.greeter.on_output = lambda: setattr(self.machine, "_speaker_read", 0.0)  # read again at once
         self.edge.render_text = self.greeter.render_text
         self.edge.made_audio = self.greeter.made_audio
         self.edge.upcoming = self.greeter.upcoming
@@ -169,8 +171,9 @@ class App:
                                        "at": self.service.now().isoformat()}
         return {"camera_ok": self.live.camera_state == "ok", "camera_state": self.live.camera_state, "version": __version__,
                 "greeting": greeting,
-                "speaker": ({**self.machine.speaker, "heard": self.greeter.listener.status()}
-                            if self.machine.speaker is not None else None),
+                "speaker": ({**self.machine.speaker, "heard": self.greeter.listener.status(),
+                             "output": self.greeter.output_status()} if self.machine.speaker is not None else
+                            {"output": self.greeter.output_status()} if self.greeter.output else None),
                 "person_model": self.cfg.path(self.cfg.tracking.person_model).exists()}
 
     def recognizer(self):

@@ -29,7 +29,7 @@ import urllib.request
 
 from ..store import Employee
 from ..store.schema import HONORIFICS
-from . import fines
+from . import fines, outputs
 from .listen import Listener
 from .voice_models import ensure as ensure_voice_models
 from .voice import voice_names
@@ -816,18 +816,18 @@ AWAKE_DAY_KEY = "speaker_woken_day"  # the day the wake-up hum was last played, 
 AWAKE_KEY = "speaker_awake_at"  # when the speaker last got the hum, ISO: read again when the app starts
 AWAKE_S, AWAKE_FIRST_S = 3.0, 6.0  # the hum that keeps the speaker awake; the first of the day, which wakes it
 AWAKE_FIRST_GAIN = 3.0
-AWAKE_SILENT_HZ = 20  # the later signals of the day: too low to be heard
+AWAKE_SILENT_HZ = 60  # the later signals: the lowest the Edifier MR4 plays (a 20 Hz tone did not keep it on)
 
 
 def awake_signal(level: int, first: bool = False):
     """The signal for a speaker that sleeps without one, `level` percent of full scale (never above half scale).
-    The first of the day is a soft low hum that can be heard (55 and 110 Hz, longer and louder): it wakes the
-    speaker. The later ones are a 20 Hz tone, below what a small speaker can play and what people hear: the
-    speaker's input still sees a signal, the office hears nothing. Both are faded in and out, so nothing clicks."""
+    The first of the day is a soft low hum (55 and 110 Hz, longer): it wakes the speaker. The later ones are a
+    60 Hz tone of 3 seconds: low and soft, but within what the speaker plays, so it counts as sound (a 20 Hz
+    tone, below it, let the office's Edifier MR4 switch itself off). Both are faded in and out, so nothing clicks."""
     import numpy as np
 
     seconds = AWAKE_FIRST_S if first else AWAKE_S
-    peak = min(level / 100 * AWAKE_FIRST_GAIN, 0.5)  # the silent tone as strong as the wake-up: nobody hears it
+    peak = min(level / 100 * AWAKE_FIRST_GAIN, 0.5)  # the later tone as strong as the wake-up
     t = np.arange(int(AWAKE_RATE * seconds)) / AWAKE_RATE
     audio = (np.sin(2 * np.pi * 55 * t) + 0.6 * np.sin(2 * np.pi * 110 * t)) if first else np.sin(2 * np.pi * AWAKE_SILENT_HZ * t)
     audio *= peak / float(np.abs(audio).max())
@@ -916,6 +916,18 @@ class Greeter:
         except (TypeError, ValueError):
             pass
         self.awake_error: str | None = None
+        # The speaker the greetings play on (outputs.py): the external one, or the computer's own after the morning
+        # check did not hear the external one. Kept in the store, so the app starting again keeps it.
+        self._outputs = outputs
+        self.output: str | None = None
+        self.output_note: dict = {}
+        try:
+            kept = json.loads(self.store.get(outputs.KEY) or "{}")
+            if kept.get("output") in outputs.NAMES:
+                self.output, self.output_note = kept["output"], kept
+        except (TypeError, ValueError):
+            pass
+        self.on_output = lambda: None  # told when the speaker in use changes
         self._taken: list[str] = []  # today's sentences of the others, while more are being written
         self._want_together = False
         self._carry_lock = threading.Lock()
@@ -1705,6 +1717,7 @@ class Greeter:
 
     def _say(self, text: str, language: str = "vi") -> None:
         with self._speech_lock:
+            self._outputs.ensure(self.output)  # the speaker chosen, if something else took the output meanwhile
             if self.uses_zerotts(language) and not self.uses_cloud(language):
                 ensure_voice_models(self.cfg)
             voice = self.voice_for(language)
@@ -1716,7 +1729,7 @@ class Greeter:
                     audio, rate = self._joined(text, voice, self.now().date())
                 else:
                     audio, rate = self._audio(text, voice, self.now().date())
-                audio = louder(audio, self.settings.loudness)
+                audio = louder(audio, self.loudness())
                 if self.settings.speaker_listen and self.listener.may_listen():
                     self.listener.play_and_check(play_audio, audio, rate, "greeting", background=True)
                 else:
@@ -2308,13 +2321,15 @@ class Greeter:
     def awake_due(self, now: dt.datetime) -> str | None:
         """"first" or "again" when a signal for the speaker is due now, else None. "first", the soft hum that can
         be heard, once a work day at Settings → "from" (or later in the camera hours, if missed). "again", the
-        tone nobody hears, whenever the speaker had no signal for "every" minutes, day and night, every day:
+        60 Hz tone, whenever the speaker had no signal for "every" minutes, day and night, every day:
         the office's speaker (Edifier MR4) switches itself off after about 15 minutes without sound and only its
         own button switches it on again, so the signal must never stop."""
         from .config import parse_clock
 
         s = self.settings
         if not s.speaker_awake:  # greeting at the door switched off too: the speaker must not switch itself off
+            return None
+        if self.output == outputs.BUILTIN:  # the computer's own speaker is in use: it never switches off
             return None
         _, _, end = self.cfg.schedule.clocks()
         if s.until_people:  # some people are greeted after the camera hours
@@ -2351,12 +2366,111 @@ class Greeter:
             log.info("Speaker: woken for the day (hum at level %d)", self.settings.speaker_awake_level)
         return True
 
+    # the speaker in use: the external one or the computer's own (outputs.py) ------------------------------
+
+    def loudness(self) -> float:
+        """How much louder the greetings are played: "Louder at the door", and at least BUILTIN_LOUDNESS on the
+        computer's own speaker."""
+        gain = self.settings.loudness
+        return max(gain, outputs.BUILTIN_LOUDNESS) if self.output == outputs.BUILTIN else gain
+
+    def output_status(self) -> dict | None:
+        if not self.output:
+            return None
+        return {**self.output_note, "name": outputs.NAMES[self.output], "volume": outputs.VOLUME[self.output]}
+
+    def _keep_output(self, kind: str, why: str, day: str | None = None, heard=None) -> None:
+        note = {"output": kind, "why": why, "at": self.now().isoformat(timespec="minutes"),
+                "day": day if day is not None else self.output_note.get("day", ""), "heard": heard}
+        self.output, self.output_note = kind, note
+        try:
+            self.store.put(outputs.KEY, json.dumps(note))
+        except Exception:
+            log.exception("Could not remember the speaker in use")
+        self.on_output()
+
+    def _test_sound(self, play=None) -> dict:
+        """The speaker test (listen.chime) on the output in use, heard by the microphone (Listener.judge)."""
+        from .listen import chime
+
+        audio, rate = chime()
+        try:
+            return self.listener.play_and_check(play or play_audio, audio, rate, "speaker check", wait_s=30.0) or {}
+        except Exception as exc:
+            return {"heard": None, "corr": None,
+                    "message": f"could not play the test sound: {type(exc).__name__}: {exc}"[:300]}
+
+    def output_due(self, now: dt.datetime) -> bool:
+        return (self._outputs.SUPPORTED and now.time() >= outputs.CHECK_AT
+                and self.output_note.get("day") != now.date().isoformat())
+
+    def check_output(self, play=None) -> bool:
+        """Once a day from CHECK_AT: the test sound on the external speaker, heard by the microphone. Heard, the
+        greetings play there; not heard (it switched itself off and only its button switches it on), they play on
+        the computer's own speaker at full volume and louder. A microphone that cannot be used changes nothing.
+        True if the check ran."""
+        now = self.now()
+        if not self.output_due(now) or not self._queue.empty():
+            return False
+        day = now.date().isoformat()
+        with self._speech_lock:
+            chosen = self._outputs.use(outputs.EXTERNAL)
+            heard: dict = {}
+            if chosen["ok"]:
+                for _ in range(outputs.CHECK_TRIES):
+                    heard = self._test_sound(play)
+                    if heard.get("heard") is True or heard.get("corr") is None:
+                        break
+                self._sound_at = self.now()
+            if chosen["ok"] and heard.get("heard") is True:
+                self._keep_output(outputs.EXTERNAL, f"{now:%H:%M} check: the microphone heard the external speaker",
+                                  day, True)
+            elif chosen["ok"] and heard.get("corr") is None:
+                self._keep_output(outputs.EXTERNAL, f"{now:%H:%M} check: the microphone could not tell "
+                                  f"({heard.get('message') or 'no answer'}); the external speaker is kept", day, None)
+            else:
+                reason = chosen["message"] if not chosen["ok"] else "the microphone did not hear the external speaker"
+                own = self._outputs.use(outputs.BUILTIN)
+                if own["ok"]:
+                    self._keep_output(outputs.BUILTIN, f"{now:%H:%M} check: {reason}", day, heard.get("heard"))
+                else:
+                    self._keep_output(self.output or outputs.EXTERNAL, f"{now:%H:%M} check: {reason}; the computer's "
+                                      f"own speaker could not be used either: {own['message']}", day, heard.get("heard"))
+        log.log(logging.INFO if self.output == outputs.EXTERNAL else logging.WARNING, "Speaker in use: %s (%s)",
+                outputs.NAMES[self.output], self.output_note["why"])
+        return True
+
+    def use_output(self, kind: str, who: str = "") -> dict:
+        """Asked from the Settings page, e.g. by whoever has just pressed the external speaker's button: the
+        greetings play on `kind` from now on, until the next morning check. The test sound is played there and
+        heard by the microphone."""
+        if kind not in outputs.NAMES:
+            return {"ok": False, "message": f"unknown speaker: {kind}"[:100]}
+        now = self.now()
+        with self._speech_lock:
+            chosen = self._outputs.use(kind)
+            if not chosen["ok"]:
+                return {"ok": False, "message": f"could not switch to {outputs.NAMES[kind]}: {chosen['message']}"}
+            heard = self._test_sound()
+            self._sound_at = self.now()
+        day = now.date().isoformat() if now.time() >= outputs.CHECK_AT else None
+        self._keep_output(kind, f"{now:%H:%M} chosen on the Settings page" + (f" by {who}" if who else ""), day,
+                          heard.get("heard"))
+        message = f"{chosen['message']} · {heard.get('message') or 'no answer from the microphone'}"
+        if heard.get("heard") is False:
+            message += ": nothing was heard, is the speaker switched on?"
+        log.info("Speaker in use: %s (%s)", outputs.NAMES[kind], message)
+        return {"ok": heard.get("heard") is not False, "message": message, "heard": heard.get("heard")}
+
     def _awake_loop(self) -> None:
+        if self.output and self._outputs.SUPPORTED:  # the app started again: the speaker chosen before, at its volume
+            log.info("Speaker in use: %s (%s)", outputs.NAMES[self.output], self._outputs.use(self.output)["message"])
         while True:
-            try:
-                self.keep_awake()
-            except Exception:
-                log.exception("Keeping the speaker awake failed")
+            for step in (self.check_output, self.keep_awake):
+                try:
+                    step()
+                except Exception:
+                    log.exception("Choosing the speaker or keeping it awake failed")
             time.sleep(15)
 
     def start(self) -> None:

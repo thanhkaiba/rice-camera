@@ -388,17 +388,25 @@
       </div>
       <div class="stack" style="margin:10px 0 4px">
         {{ check('greeting', 'speaker_listen', 'Listen with the computer\'s microphone', 'While a greeting plays, the office computer (a MacBook) records a few seconds with its own microphone and checks that the speaker really made the sound; after three greetings in a row it did not hear, the system space is told. Nothing is kept. The first time, macOS asks at the office computer whether “FaceAttendance Mic” may use the microphone: someone there clicks OK (or “Test the speaker” asks it). The test always listens.') }}
-        {{ check('greeting', 'speaker_awake', 'Keep the speaker awake', 'For a mains speaker that goes to sleep without sound and then swallows a greeting. On work days, at the time below, the office computer plays a soft low hum of 6 seconds that wakes the speaker (it can be heard). After that, until the door stops greeting, whenever the speaker had no sound for the minutes below it gets a 20 Hz tone of 3 seconds that nobody hears.') }}
+        {{ check('greeting', 'speaker_awake', 'Keep the speaker awake', 'For a mains speaker that goes to sleep without sound and then swallows a greeting. On work days, at the time below, the office computer plays a soft low hum of 6 seconds that wakes the speaker (it can be heard). After that, day and night, whenever the speaker had no sound for the minutes below it gets a soft 60 Hz tone of 3 seconds. Not while the computer\'s own speaker is in use.') }}
       </div>
       <div class="form-row">
         {{ time24('greeting', 'speaker_awake_from', 'Wake it at') }}
-        {{ field('greeting', 'speaker_awake_every', 'Silent signal every (min)', 'Day and night, every day · shorter than the time after which the speaker switches off · 1–480', type='number') }}
-        {{ field('greeting', 'speaker_awake_level', 'Hum level (%)', '1–50 · the wake-up hum; the silent tone is three times as strong', type='number') }}
+        {{ field('greeting', 'speaker_awake_every', 'Keep-awake tone every (min)', 'Day and night, every day · shorter than the time after which the speaker switches off · 1–480', type='number') }}
+        {{ field('greeting', 'speaker_awake_level', 'Hum level (%)', '1–50 · the wake-up hum and the 60 Hz tone are three times this', type='number') }}
       </div>
       <div class="row between">
         <span class="hint">{% if sp %}Office computer now: <strong>{{ sp.device or 'unknown output' }}</strong> · {{ 'volume ' ~ sp.volume ~ '%' if sp.volume is not none else 'volume unknown' }} · {% if sp.muted %}<span class="badge bad">muted</span>{% else %}not muted{% endif %}{% set hd = sp.heard %}{% if hd %}<br>Microphone: {% if hd.allowed is sameas false %}<span class="badge bad">not allowed</span> (System Settings → Privacy &amp; Security → Microphone → FaceAttendance Mic){% elif hd.heard is sameas true %}<span class="badge ok">heard the speaker</span>{% elif hd.heard is sameas false %}<span class="badge bad">did not hear the speaker</span>{% else %}{{ hd.message or 'no answer yet' }}{% endif %}{% if hd.at_text %} · {{ hd.kind }} at {{ hd.at_text }}{% endif %}{% if hd.corr is not none %} · match {{ '%.2f' % hd.corr }}{% endif %}{% endif %}{% else %}No speaker reading from the office computer yet (greetings on, version 1.1.83 or later).{% endif %}</span>
         <button formaction="{{ url_for('speaker_test') }}" formnovalidate title="The office computer plays one short sound; what it played on is written to Audit">{{ icon('play') }}Test the speaker</button>
         <span class="plays" title="You hear nothing in this browser: someone has to be at the office">{{ icon('wave') }}Plays on the office speaker</span>
+      </div>
+      {% set out = (sp or {}).get('output') %}
+      <div class="row between" id="speaker-output" style="margin-top:10px">
+        <span class="hint">Greetings play on: <strong>{% if out and out.output == 'builtin' %}the computer's own speaker (volume 100%, louder){% elif out and out.output == 'external' %}the external speaker (volume 95%){% else %}not chosen yet{% endif %}</strong>{% if out and out.why %} · {{ out.why }}{% endif %}<br>Every morning at 07:00 the office computer plays the test on the external speaker and listens: not heard (switched off: only its own button switches it on), the greetings go to the computer's own speaker. After pressing the speaker's button, switch back here.</span>
+        <span class="row">
+          <button formaction="{{ url_for('speaker_output') }}" name="output" value="external" formnovalidate title="The greetings play on the external speaker from now on; a test sound is played there">{{ icon('wave') }}Use the external speaker</button>
+          <button formaction="{{ url_for('speaker_output') }}" name="output" value="builtin" formnovalidate title="The greetings play on the computer's own speaker, at full volume and louder">{{ icon('wave') }}Use the computer's speaker</button>
+        </span>
       </div>
     </div>
 

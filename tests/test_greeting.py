@@ -779,7 +779,7 @@ def test_the_speaker_is_not_woken_twice_when_the_app_starts_again(core):
     assert again.awake_due(clock.t) == "first"  # a new day: woken again
 
 
-def test_only_the_wake_up_can_be_heard():
+def test_the_wake_up_hum_and_the_60_hz_keep_awake_tone():
     import numpy as np
 
     def loudest_hz(audio):
@@ -788,10 +788,10 @@ def test_only_the_wake_up_can_be_heard():
 
     assert loudest_hz(greeting.awake_signal(6, first=True)) == pytest.approx(55, abs=2)
     silent = greeting.awake_signal(6)
-    assert loudest_hz(silent) == pytest.approx(20, abs=1) and abs(float(silent[0])) < 1e-6 and abs(float(silent[-1])) < 1e-3
+    assert loudest_hz(silent) == pytest.approx(60, abs=1) and abs(float(silent[0])) < 1e-6 and abs(float(silent[-1])) < 1e-3
     spectrum = np.abs(np.fft.rfft(silent)) ** 2
     hz = np.fft.rfftfreq(len(silent), 1 / greeting.AWAKE_RATE)
-    assert spectrum[hz > 60].sum() / spectrum.sum() < 1e-4  # nothing of it where a small speaker plays
+    assert spectrum[hz > 120].sum() / spectrum.sum() < 1e-3  # one low tone (a 20 Hz one let the speaker switch off)
 
 
 def test_awake_settings_are_checked(core):

@@ -411,6 +411,28 @@ def register(app: Flask, core: "App") -> None:
         return done("The office computer plays a test sound within a minute; what it played on is in Audit.",
                     "settings_page", _anchor="greeting")
 
+    @app.post("/settings/speaker/output")
+    def speaker_output():
+        """The greetings play on the external speaker or the computer's own from now on (core/outputs.py)."""
+        output = request.form.get("output", "")
+        names = {"external": "the external speaker", "builtin": "the computer's own speaker"}
+        if output not in names:
+            return failed("Choose the external speaker or the computer's own.", "settings_page", _anchor="greeting")
+        who = current_user(cfg)
+        if service.greeter is not None:  # the camera runs on this computer
+            def switch():
+                result = service.greeter.use_output(output, who)
+                store.log(service.now(), who, "speaker in use",
+                          ("ok: " if result.get("ok") else "problem: ") + str(result.get("message", ""))[:400])
+
+            threading.Thread(target=switch, name="speaker-output", daemon=True).start()
+            return done(f"The greetings play on {names[output]} now; a test sound is played there and the result "
+                        "is in Audit.", "settings_page", _anchor="greeting")
+        store.edge_job_add("speaker_output", {"kind": "speaker_output", "output": output}, service.now())
+        store.log(service.now(), who, "speaker in use", f"asked the office computer: {names[output]}")
+        return done(f"The office computer switches to {names[output]} within a minute and plays a test sound there; "
+                    "the result is in Audit.", "settings_page", _anchor="greeting")
+
     def background_gallery() -> dict:
         """The pictures to choose from on the Settings page, which one is selected, and today's."""
         lm = cfg.late_message
