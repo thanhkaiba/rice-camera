@@ -5,8 +5,11 @@ good frames agree on them with a clear margin over the runner-up. Tracks that en
 a decision become "unknown" so an admin can look at them.
 
 With person tracking on, each face carries the id of the person (body) it belongs to. Faces of
-the same person always join the same track, faces of different people never do, and the track
-lives as long as the person is followed, even while their face is hidden.
+the same person join the same track, faces of different people never do, and the track lives as long
+as the person is followed, even while their face is hidden. In a crowd a person's box can pass from
+one body to another: a face that clearly votes for someone other than the one its person's track
+voted for starts a track of its own (26/11/2026: Peter's three clear votes were outvoted by two
+other people's in one track, and nobody was named).
 """
 from __future__ import annotations
 
@@ -176,7 +179,7 @@ class FaceTracker:
         decisions = self._expire(ts, frame_interval_s=frame_interval_s)
         free = list(self._tracks)
         for obs in observations:
-            track = self._link(obs, free)
+            track = self._link(obs, free, vote_for(obs.candidates, obs.quality_ok, obs.size_ok, self.p))
             if track is None:
                 first = min(ts, self._people.get(obs.person_id, ts))  # arrival = when the person appeared
                 track = _Track(next(self._ids), first, ts, obs.bbox, obs.embedding, first_embedding=obs.embedding,
@@ -197,11 +200,19 @@ class FaceTracker:
         far_future = dt.datetime.max.replace(tzinfo=dt.timezone.utc)
         return self._expire(far_future, force=True)
 
-    def _link(self, obs: Observation, tracks: list[_Track]) -> _Track | None:
+    def _link(self, obs: Observation, tracks: list[_Track], vote: str | None = None) -> _Track | None:
         if obs.person_id is not None:
-            for t in tracks:
-                if t.person_id == obs.person_id:
-                    return t
+            same = [t for t in tracks if t.person_id == obs.person_id]
+            if same:
+                if vote is None:  # an unclear face says nothing about who it is: the most alike track
+                    return max(same, key=lambda t: float(np.dot(obs.embedding, t.embedding)))
+                for t in same:  # the track already voting for this person
+                    if t.votes and t.votes.most_common(1)[0][0] == vote:
+                        return t
+                open_ = [t for t in same if not t.votes]
+                if open_:
+                    return max(open_, key=lambda t: float(np.dot(obs.embedding, t.embedding)))
+                return None  # every track of this body voted for someone else: another face, a track of its own
         best, best_value = None, 0.0
         for t in tracks:
             if obs.person_id is not None and t.person_id is not None:

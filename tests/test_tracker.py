@@ -265,3 +265,28 @@ def test_an_unknown_track_says_what_each_frame_looked_like_and_why_it_did_not_vo
     assert notes[0] == "80px A 0.40 +0.30 low score"
     assert notes[1] == "81px A 0.60 +0.03 close second"
     assert notes[2] == "82px A 0.50 +0.40 small, blurred or turned and not a clear match"
+
+
+def test_a_crowd_mixing_faces_in_one_person_box_still_names_each_of_them():
+    """26/11/2026 09:24: one person box carried Dũng (2 votes), Talon (1) and Peter (3): nobody was named."""
+    tr = tracker()
+    tr.p.accept_score = 0.35
+    out = []
+    seq = [("D", 0.55), ("D", 0.44), ("T", 0.57), ("P", 0.58), ("P", 0.60), ("P", 0.46)]
+    for i, (who, score) in enumerate(seq):
+        v = np.zeros(512, np.float32); v["DTP".index(who)] = 1
+        face = Observation((100, 100, 180, 180), v, [(who, score), ("x", 0.1)], True, 0.8, person_id=7)
+        out += tr.update([face], T0 + dt.timedelta(seconds=0.3 * i), people={7: T0})
+    out += tr.update([], T0 + dt.timedelta(seconds=30), people={}) + tr.flush()
+    named = {d.employee_id for d in out if d.kind == "identified"}
+    assert "P" in named and "T" not in named  # Peter's three votes are his own track now
+
+
+def test_unclear_frames_stay_with_the_person_track():
+    tr = tracker()
+    out = []
+    for i in range(5):
+        cands = [("A", 0.9), ("B", 0.1)] if i % 2 == 0 else [("B", 0.2), ("A", 0.19)]  # odd frames: no vote
+        face = Observation((100, 100, 180, 180), A, cands, True, 0.8, person_id=3)
+        out += tr.update([face], T0 + dt.timedelta(seconds=0.3 * i), people={3: T0})
+    assert len(tr._tracks) == 1 and [d.employee_id for d in out if d.kind == "identified"] == ["A"]
