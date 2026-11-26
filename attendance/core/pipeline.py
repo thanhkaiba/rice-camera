@@ -117,6 +117,11 @@ class App:
         from .voice import install_voice
 
         self.edge.add_voice = lambda name, data: install_voice(cfg.path("data/voices"), name, data)
+        from . import photobatch
+
+        self.edge.faces_from_photos = lambda archive, folder, stem: (
+            *photobatch.extract(cfg, archive, folder, stem), self.service.model_id)
+        self.edge.faces_busy = lambda: self.service.in_window(self.service.now())  # not while people walk in
         from .voice_creation import VoiceCreator
 
         self.voice_creator = VoiceCreator(cfg, self.store, self.greeter)

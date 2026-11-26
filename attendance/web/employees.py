@@ -25,6 +25,7 @@ def register(app: Flask, core: "App") -> None:
     @app.get("/employees")
     def employees():
         from ..cli import seed
+        from ..core import photobatch
         from ..vision.faces import GOOD_PHOTOS
         from ..integrations.base_timeoff import permissions
 
@@ -55,7 +56,8 @@ def register(app: Flask, core: "App") -> None:
                                quality_report=quality_report, portal_roles=store.web_roles(),
                                on_leave={**permissions(store, service.now().date(), cfg.leave_api.pending_counts)[1],
                                          **store.leaves_on(service.now().date())},
-                               seed_status=seed.read_status(core), in_window=service.in_window(service.now()))
+                               seed_status=seed.read_status(core), in_window=service.in_window(service.now()),
+                               faces_status=json.loads(store.get(photobatch.STATUS_KEY) or "{}"))
 
     @app.post("/employees/quality")
     def reevaluate_quality():
@@ -127,6 +129,33 @@ def register(app: Flask, core: "App") -> None:
             archive.unlink(missing_ok=True)
             return failed(f"Seed import not started: {exc}.", "employees")
         return done("Seed import started. The camera is paused until it finishes (a few minutes).", "employees")
+
+    @app.post("/employees/faces-from-photos")
+    def faces_from_photos():
+        """A .zip of photos (a trip, a team day): the camera computer finds the good faces in them and they go
+        to Review, where confirming one teaches the camera that face (core/photobatch.py)."""
+        from ..core import photobatch
+
+        request.max_content_length = SEED_UPLOAD_MB * 1024 * 1024
+        check_csrf()
+        file = request.files.get("file")
+        if not file or not file.filename:
+            return failed("Choose a .zip of photos.", "employees")
+        folder = core.data_dir / "uploads"
+        folder.mkdir(parents=True, exist_ok=True)
+        rel = f"uploads/{uuid.uuid4().hex}"
+        file.save(core.data_dir / rel)
+        if not photobatch.is_zip(core.data_dir / rel):
+            (core.data_dir / rel).unlink(missing_ok=True)
+            return failed("That is not a .zip file. Put the photos in a .zip (Google Drive's Download makes one).", "employees")
+        now = service.now()
+        batch = uuid.uuid4().hex[:8]
+        store.edge_job_add("faces", {"kind": "faces", "image": rel, "filename": file.filename[:120], "batch": batch}, now)
+        store.put(photobatch.STATUS_KEY, json.dumps({"state": "waiting", "filename": file.filename[:120], "at": now.isoformat(),
+                                                     "message": "", "cards": 0}))
+        store.log(now, current_user(cfg), "faces from photos", file.filename[:200])
+        return done("Photos uploaded. The office computer finds the faces outside the camera hours; they appear on "
+                    "Review as seed samples (this page says when).", "employees")
 
     @app.get("/employees/seed.json")
     def seed_status():

@@ -357,7 +357,7 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
     @app.post("/api/edge/jobs/<int:job_id>/result")
     @from_the_mac
     def edge_job_result(job_id: int):
-        request.max_content_length = 256 * 1024
+        request.max_content_length = 4 * 1024 * 1024  # faces from photos bring a vector for each face
         result = request.get_json(silent=True) or {}
         if not isinstance(result, dict):
             abort(400, "expected a job result")
@@ -375,6 +375,21 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
             return jsonify(ok=True)
         if payload.get("kind") == "create_voice":
             core.voice_creator.complete(payload, result)
+            return jsonify(ok=True)
+        if payload.get("kind") == "faces":
+            from ..core import photobatch
+
+            if UPLOAD_PATH.fullmatch(payload.get("image", "")):
+                (core.data_dir / payload["image"]).unlink(missing_ok=True)
+            samples = result.get("samples") if result.get("ok") and isinstance(result.get("samples"), list) else []
+            cards = photobatch.add_to_review(core, samples, str(result.get("model") or service.model_id)) if samples else 0
+            message = (f"{cards} faces on Review ({result.get('message', '')})" if result.get("ok")
+                       else str(result.get("message", "failed"))[:400])
+            store.put(photobatch.STATUS_KEY, json.dumps({"state": "done" if result.get("ok") else "failed",
+                                                         "filename": payload.get("filename", ""), "cards": cards,
+                                                         "at": service.now().isoformat(), "message": message,
+                                                         "counts": result.get("counts", {})}))
+            store.log(service.now(), "office computer", "faces from photos", f"{payload.get('filename', '')}: {message}"[:500])
             return jsonify(ok=True)
         if payload.get("kind") == "moment":
             store.put(f"moment:{payload.get('day')}:{payload.get('start')}", json.dumps({**result, "at": service.now().isoformat()}))

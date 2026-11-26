@@ -69,6 +69,11 @@ class EdgeClient:
         self.upcoming = None  # day -> the day's written greetings, shown on the server's Greetings page
         self._preview_results = {}
         self._creation_jobs = {}
+        # Faces from a .zip of photos for Review (core/photobatch.py): (archive, folder, stem) -> (samples, counts,
+        # model); never started while faces_busy() (the camera hours), and run beside the camera, not in its way.
+        self.faces_from_photos = None
+        self.faces_busy = lambda: False
+        self._face_jobs = {}
 
     @property
     def enabled(self) -> bool:
@@ -259,6 +264,7 @@ class EdgeClient:
                                  if key in active and time.time() < item["expires"]}
         self._creation_jobs = {key: item for key, item in self._creation_jobs.items()
                                if item["thread"].is_alive() or key in active and time.time() < item["expires"]}
+        self._face_jobs = {key: item for key, item in self._face_jobs.items() if item["thread"].is_alive() or key in active}
         for job in jobs:
             self._do_job(job)
 
@@ -320,7 +326,21 @@ class EdgeClient:
         unsent = json.loads(self.store.get(JOBS_KEY) or "{}")
         result = unsent.get(key)
         if result is None:  # a result the server did not get is sent again, the photo is not added twice
-            if job.get("kind") == "create_voice":
+            if job.get("kind") == "faces":
+                pending = self._face_jobs.get(key)
+                if pending is None:
+                    if self.faces_busy():
+                        return  # the camera hours: asked again until they are over
+                    pending = {}
+                    pending["thread"] = threading.Thread(target=self._run_faces, args=(key, job["payload"], pending),
+                                                         name="edge-faces", daemon=True)
+                    self._face_jobs[key] = pending
+                    pending["thread"].start()
+                    return
+                if pending["thread"].is_alive():
+                    return
+                result = pending["result"]
+            elif job.get("kind") == "create_voice":
                 pending = self._creation_jobs.get(key)
                 if pending is None and time.time() >= job["payload"]["expires"]:
                     result = {"ok": False, "message": "Voice creation expired. Upload the recording again."}
@@ -352,6 +372,44 @@ class EdgeClient:
         unsent = json.loads(self.store.get(JOBS_KEY) or "{}")
         unsent.pop(key, None)  # the server has it and has closed the job: a later job with this id is a new one
         self.store.put(JOBS_KEY, json.dumps(unsent))
+
+    def _run_faces(self, key: str, payload: dict, pending: dict) -> None:
+        """The faces worth reviewing in an uploaded .zip of photos: found here, their pictures sent to the server,
+        their face vectors in the result (the server has no face models), for it to put them on Review."""
+        import shutil
+
+        folder = self.data_dir / "photo-batches" / key
+        try:
+            if self.faces_from_photos is None:
+                raise ValueError("Faces from photos are not available on this camera computer. Update the app.")
+            status, data = self._send("GET", "/api/edge/files/" + urllib.parse.quote(payload["image"]), b"",
+                                      "application/octet-stream")
+            if status != 200:
+                raise ConnectionError(f"the photos answered HTTP {status}")
+            folder.mkdir(parents=True, exist_ok=True)
+            archive = folder / "photos.zip"
+            archive.write_bytes(data)
+            del data
+            samples, counts, model = self.faces_from_photos(archive, folder / "faces", f"faces_{payload.get('batch', key)}")
+            day = dt.date.today().isoformat()
+            sent = []
+            for sample in samples:
+                rel = f"crops/{day}/{sample['file']}"
+                for path, name in ((rel, sample["file"]), (scene_photo(rel), sample["scene"])):
+                    status, _ = self._send("PUT", "/api/edge/photos/" + urllib.parse.quote(path),
+                                           (folder / "faces" / name).read_bytes(), "image/jpeg")
+                    if status != 200:
+                        raise ConnectionError(f"face picture upload answered HTTP {status}")
+                sent.append({"image": rel, "photo": sample.get("photo", ""),
+                             "vector": base64.b64encode(np.asarray(sample["vector"], np.float32).tobytes()).decode()})
+            pending["result"] = {"ok": True, "samples": sent, "model": model, "counts": counts,
+                                 "message": f"{len(sent)} faces of {counts.get('people', 0)} people from "
+                                            f"{counts.get('photos', 0)} photos"}
+        except Exception as exc:
+            log.exception("Faces from photos failed")
+            pending["result"] = {"ok": False, "message": f"Camera: {type(exc).__name__}: {exc}"[:400]}
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
 
     def _moment(self, payload: dict) -> dict:
         """The pictures recorded (recorder.py) for a time span, sent to the server for its Moments page."""

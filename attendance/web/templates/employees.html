@@ -44,6 +44,15 @@
 {% elif seed_status.state == 'failed' %}
   <div class="alert error"><span class="ico">{{ icon('alert') }}</span><span><strong>Seed import failed</strong>: {{ seed_status.message }}</span></div>
 {% endif %}
+{% if faces_status.state == 'waiting' %}
+  <div class="alert info"><span class="ico">{{ icon('upload') }}</span><span><strong>Faces from photos</strong> · {{ faces_status.filename }} is waiting for
+    the office computer, which reads the photos outside the camera hours. The faces then appear on Review.</span></div>
+{% elif faces_status.state == 'done' %}
+  <div class="alert ok"><span class="ico">{{ icon('check') }}</span><span><strong>Faces from photos</strong> · {{ faces_status.filename }}:
+    {{ faces_status.message }}. <a href="{{ url_for('unknowns') }}">Open Review</a></span></div>
+{% elif faces_status.state == 'failed' %}
+  <div class="alert error"><span class="ico">{{ icon('alert') }}</span><span><strong>Faces from photos failed</strong> · {{ faces_status.filename }}: {{ faces_status.message }}</span></div>
+{% endif %}
 {% if people and not counts %}
   <div class="alert info"><span class="ico">{{ icon('sparkles') }}</span><span><strong>No photos yet?</strong> Upload some, or let the camera run and name faces under <a href="{{ url_for('unknowns') }}">Review</a>.</span></div>
 {% endif %}
@@ -144,6 +153,14 @@
       <label class="switch"><input type="checkbox" name="review_only"><span>Review samples only
         <span class="hint">Keep people and reference photos as they are.</span></span></label>
       <div><button {{ 'disabled' if seed_status.state == 'running' }}>{{ icon('upload') }}Import seed</button></div>
+    </form>
+    <div class="divider" style="margin:0"></div>
+    <form method="post" action="{{ url_for('faces_from_photos') }}" enctype="multipart/form-data">{% include "_csrf.html" %}
+      <strong class="row">{{ icon('upload') }}Faces from photos (.zip)</strong>
+      <label class="field"><span>Photos of a trip or a team day. The office computer keeps the clear faces (at most three of one
+        person, no masks, no small or blurred faces) and puts them on Review: confirm each to teach the camera that face.</span>
+        <input type="file" name="file" accept=".zip,application/zip" required></label>
+      <div><button {{ 'disabled' if faces_status.state == 'waiting' }}>{{ icon('upload') }}Upload photos</button></div>
     </form>
   </div>
 </dialog>
