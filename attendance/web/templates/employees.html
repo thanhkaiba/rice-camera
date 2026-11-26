@@ -45,7 +45,7 @@
   <div class="alert info"><span class="ico">{{ icon('upload') }}</span><span><strong>Seed imported in part</strong> ({{ seed_status.finished|replace('T', ' ') }}): {{ seed_status.message }}.
     They appear on Review when it is done.</span></div>
 {% elif seed_status.state == 'failed' %}
-  <div class="alert error"><span class="ico">{{ icon('alert') }}</span><span><strong>Seed import failed</strong>: {{ seed_status.message }}</span></div>
+  <div class="alert error"><span class="ico">{{ icon('alert') }}</span><span><strong>Seed import failed</strong>{% if seed_status.finished %} ({{ seed_status.finished|replace('T', ' ') }}){% endif %}: {{ seed_status.message }}</span></div>
 {% endif %}
 {% if faces_status.state == 'waiting' %}
   <div class="alert info"><span class="ico">{{ icon('upload') }}</span><span><strong>Faces from photos</strong> · {{ faces_status.filename }} is waiting for
