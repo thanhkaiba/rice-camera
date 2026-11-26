@@ -74,6 +74,7 @@ class EdgeClient:
         # model); never started while faces_busy() (the camera hours), and run beside the camera, not in its way.
         self.faces_from_photos = None
         self.faces_busy = lambda: False
+        self.seed_vectors = None  # (seed zip, folder) -> the face vectors of its review samples, for the server
         self._face_jobs = {}
 
     @property
@@ -333,13 +334,14 @@ class EdgeClient:
         unsent = json.loads(self.store.get(JOBS_KEY) or "{}")
         result = unsent.get(key)
         if result is None:  # a result the server did not get is sent again, the photo is not added twice
-            if job.get("kind") == "faces":
+            if job.get("kind") in ("faces", "seed_vectors"):  # face models on the photos: outside the camera hours
                 pending = self._face_jobs.get(key)
                 if pending is None:
                     if self.faces_busy():
                         return  # the camera hours: asked again until they are over
                     pending = {}
-                    pending["thread"] = threading.Thread(target=self._run_faces, args=(key, job["payload"], pending),
+                    run = self._run_faces if job.get("kind") == "faces" else self._run_seed_vectors
+                    pending["thread"] = threading.Thread(target=run, args=(key, job["payload"], pending),
                                                          name="edge-faces", daemon=True)
                     self._face_jobs[key] = pending
                     pending["thread"].start()
@@ -414,6 +416,29 @@ class EdgeClient:
                                             f"{counts.get('photos', 0)} photos"}
         except Exception as exc:
             log.exception("Faces from photos failed")
+            pending["result"] = {"ok": False, "message": f"Camera: {type(exc).__name__}: {exc}"[:400]}
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def _run_seed_vectors(self, key: str, payload: dict, pending: dict) -> None:
+        """The face vectors of the review samples of a seed uploaded on the server, which has no face models."""
+        import shutil
+
+        folder = self.data_dir / "seed-vectors" / key
+        try:
+            if self.seed_vectors is None:
+                raise ValueError("A seed with review samples needs a newer app on the camera computer.")
+            status, data = self._send("GET", "/api/edge/files/" + urllib.parse.quote(payload["image"]), b"",
+                                      "application/octet-stream")
+            if status != 200:
+                raise ConnectionError(f"the seed answered HTTP {status}")
+            folder.mkdir(parents=True, exist_ok=True)
+            archive = folder / "seed.zip"
+            archive.write_bytes(data)
+            del data
+            pending["result"] = self.seed_vectors(archive, folder / "seed")
+        except Exception as exc:
+            log.exception("Reading the faces of a seed failed")
             pending["result"] = {"ok": False, "message": f"Camera: {type(exc).__name__}: {exc}"[:400]}
         finally:
             shutil.rmtree(folder, ignore_errors=True)

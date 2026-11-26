@@ -391,6 +391,11 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
                                                          "counts": result.get("counts", {})}))
             store.log(service.now(), "office computer", "faces from photos", f"{payload.get('filename', '')}: {message}"[:500])
             return jsonify(ok=True)
+        if payload.get("kind") == "seed_vectors":
+            from ..cli import seed as seed_import
+
+            seed_import.finish_remote(core, job_id, payload, result)
+            return jsonify(ok=True)
         if payload.get("kind") == "moment":
             store.put(f"moment:{payload.get('day')}:{payload.get('start')}", json.dumps({**result, "at": service.now().isoformat()}))
             return jsonify(ok=True)

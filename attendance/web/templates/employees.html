@@ -41,6 +41,9 @@
 {% elif seed_status.state == 'done' %}
   <div class="alert ok"><span class="ico">{{ icon('check') }}</span><span><strong>Seed imported</strong> ({{ seed_status.finished|replace('T', ' ') }}): {{ seed_status.message }}.
     Backup from before: <code>{{ seed_status.backup }}</code></span></div>
+{% elif seed_status.state == 'waiting' %}
+  <div class="alert info"><span class="ico">{{ icon('upload') }}</span><span><strong>Seed imported in part</strong> ({{ seed_status.finished|replace('T', ' ') }}): {{ seed_status.message }}.
+    They appear on Review when it is done.</span></div>
 {% elif seed_status.state == 'failed' %}
   <div class="alert error"><span class="ico">{{ icon('alert') }}</span><span><strong>Seed import failed</strong>: {{ seed_status.message }}</span></div>
 {% endif %}

@@ -123,6 +123,9 @@ class App:
         self.edge.faces_from_photos = lambda archive, folder, stem: (
             *photobatch.extract(cfg, archive, folder, stem), self.service.model_id)
         self.edge.faces_busy = lambda: self.service.in_window(self.service.now())  # not while people walk in
+        from ..cli import seed as seed_cli
+
+        self.edge.seed_vectors = lambda archive, folder: seed_cli.review_vectors(self, archive, folder)
         from .voice_creation import VoiceCreator
 
         self.voice_creator = VoiceCreator(cfg, self.store, self.greeter)

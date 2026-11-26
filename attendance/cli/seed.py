@@ -12,6 +12,7 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import re
 from pathlib import Path
 import shutil
 import threading
@@ -27,15 +28,19 @@ from ..store import body_photo, scene_photo, normalize_email
 log = logging.getLogger(__name__)
 
 STATUS_FILE = "seed-import.json"  # in the data folder: progress and result of the last import from the page
+# The server: the seed whose review samples wait for the office computer's face vectors (a seed_vectors job),
+# {"job_id", "image" (a copy of the zip under uploads/), "report", "user"}.
+REMOTE_KEY = "seed_import_remote"
 
 
 def _print(text: str) -> None:
     print(text, flush=True)
 
 
-def _review_vector(app, path: Path, row: dict | None = None):
+def _review_vector(app, path: Path, row: dict | None = None, analyze: bool = True):
     """The face embedding of a one-face review sample, or None. A row may bring it ("vector": base64 float32,
-    "vector_model"): the server has no face models, so a seed built on the camera computer carries them."""
+    "vector_model"): the server has no face models, so a seed built on the camera computer carries them.
+    `analyze` False (the server): never read the photo here, None without a vector."""
     if row and row.get("vector") and row.get("vector_model") == app.service.model_id:
         import base64
 
@@ -43,6 +48,8 @@ def _review_vector(app, path: Path, row: dict | None = None):
         norm = float(np.linalg.norm(vector))
         if vector.size >= 64 and np.all(np.isfinite(vector)) and norm > 1e-6:
             return vector / norm
+    if not analyze:
+        return None
     image = read_image(path)
     if image is None:
         raise ValueError(f"Review sample cannot be decoded: {path}")
@@ -53,7 +60,7 @@ def _review_vector(app, path: Path, row: dict | None = None):
     return None
 
 
-def _review_metadata(app, row, seed, uid, report):
+def _review_metadata(app, row, seed, uid, report, analyze: bool = True):
     sample = app.store.unknown(uid)
     if sample.source != "seed":
         return
@@ -70,7 +77,7 @@ def _review_metadata(app, row, seed, uid, report):
     if person is None or not person.active:
         return
     # Recheck the actual photo; portable metadata alone never establishes identity.
-    vector = _review_vector(app, seed / row["file"], row)
+    vector = _review_vector(app, seed / row["file"], row, analyze)
     if vector is None or not np.isfinite(vector).all() or np.linalg.norm(vector) < 1e-12:
         return
     matches = app.gallery.match(vector)
@@ -86,7 +93,11 @@ def _review_metadata(app, row, seed, uid, report):
         report["auto_pending"] -= 1
 
 
-def import_review_samples(app, seed: Path, progress: Callable[[str], None] = _print) -> dict:
+def import_review_samples(app, seed: Path, progress: Callable[[str], None] = _print,
+                          vectors: dict | None = None, model: str = "") -> dict:
+    """`vectors` (the server): {sha256: base64 float32} read by the office computer with `model`; no photo is
+    read here then."""
+    analyze = vectors is None
     if not (seed / "review.csv").exists():
         return {"imported": 0, "skipped": 0, "refreshed": 0, "resolved": 0, "auto_pending": 0}
     seed = seed.resolve()
@@ -110,6 +121,8 @@ def import_review_samples(app, seed: Path, progress: Callable[[str], None] = _pr
         if row["auto_resolve_email"] and (row["auto_resolve_email"] != row["expected_email"]
                                           or not row.get("auto_resolve_model")):
             raise ValueError("Seed auto-resolution email must match the source email and include its model")
+        if vectors and model and row["sha256"] in vectors and not row.get("vector"):
+            row["vector"], row["vector_model"] = vectors[row["sha256"]], model
     existing = {}
     for face in app.store.unknowns(status=None):
         path = app.data_dir / face.image if face.image else None
@@ -123,15 +136,15 @@ def import_review_samples(app, seed: Path, progress: Callable[[str], None] = _pr
             if digest in existing:
                 sample = app.store.unknown(existing[digest])
                 if sample.source == "seed" and sample.status == "pending" and sample.vector is None:
-                    vector = _review_vector(app, seed / row["file"], row)
+                    vector = _review_vector(app, seed / row["file"], row, analyze)
                     if vector is not None:
                         report["refreshed"] += app.store.refresh_seed_vector(sample.id, app.service.model_id, vector)
                 app.store.put(key, str(existing[digest]))
-                _review_metadata(app, row, seed, existing[digest], report)
+                _review_metadata(app, row, seed, existing[digest], report, analyze)
             report["skipped"] += 1
             continue
         source = seed / row["file"]
-        vector = _review_vector(app, source, row)
+        vector = _review_vector(app, source, row, analyze)
         relative = "review-seed/" + digest + source.suffix.lower()
         target = app.data_dir / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -144,7 +157,7 @@ def import_review_samples(app, seed: Path, progress: Callable[[str], None] = _pr
                                     vector, None, None, source="seed")
         app.store.put(key, str(uid))
         existing[digest] = uid
-        _review_metadata(app, row, seed, uid, report)
+        _review_metadata(app, row, seed, uid, report, analyze)
         report["imported"] += 1
         if report["imported"] % 25 == 0:
             progress(f'Review samples imported: {report["imported"]}')
@@ -325,7 +338,131 @@ def start(app, archive: Path, review_only: bool = False, user: str = "admin") ->
         raise ValueError("a seed import is already running")
     _write_status(app, state="running", started=dt.datetime.now().isoformat(timespec="seconds"),
                   review_only=review_only, progress="Checking the seed")
-    threading.Thread(target=_run, args=(app, archive, review_only, user), name="seed-import", daemon=True).start()
+    remote = getattr(app, "photos_read_elsewhere", False)  # the server: the face models are on the office computer
+    threading.Thread(target=_run_remote if remote else _run, args=(app, archive, review_only, user),
+                     name="seed-import", daemon=True).start()
+
+
+def _forget_remote(app) -> None:
+    """The review samples of an earlier seed still waiting: no longer (a new seed was uploaded)."""
+    waiting = json.loads(app.store.get(REMOTE_KEY) or "{}")
+    if waiting.get("job_id"):
+        app.store.edge_job_take(waiting["job_id"])
+    if re.fullmatch(r"uploads/[0-9a-f]{32}", waiting.get("image", "")):
+        (app.data_dir / waiting["image"]).unlink(missing_ok=True)
+    app.store.put(REMOTE_KEY, "")
+
+
+def _run_remote(app, archive: Path, review_only: bool, user: str) -> None:
+    """The server, which has no face models: the people of the seed now, their photos sent to the office computer
+    as if uploaded on each person's page, and the review samples once the office computer read their faces."""
+    work = archive.with_suffix("")
+    try:
+        try:
+            seed = unpack(archive, work).resolve()
+            people, photos = check(seed) if not review_only else ([], {})
+            folder, _ = backup(app)
+            report = {"employees": len(people), "sent_photos": 0, "backup": str(folder)}
+            if not review_only:
+                app.store.import_employees((seed / "employees.csv").read_text(encoding="utf-8-sig"))
+                app.store.put("employee_email_csv_imported", "1")
+                (app.data_dir / "uploads").mkdir(parents=True, exist_ok=True)
+                for row in people:
+                    person = app.store.employee_by_email(row["email"])
+                    for employee_id, image, source, _ in app.store.reference_images():
+                        if employee_id == person.id and source == "enroll":
+                            app.library.delete_photo(image)
+                    for path in photos[row["email"]]:
+                        rel = f"uploads/{uuid.uuid4().hex}"
+                        shutil.copyfile(path, app.data_dir / rel)
+                        app.store.edge_job_add("add_photo", {"employee_id": person.id, "image": rel, "filename": path.name,
+                                                             "source": "enroll"}, app.service.now())
+                        report["sent_photos"] += 1
+                app.library.reload()
+            _forget_remote(app)
+            if (seed / "review.csv").exists():
+                rel = f"uploads/{uuid.uuid4().hex}"
+                (app.data_dir / "uploads").mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(archive, app.data_dir / rel)
+                job = app.store.edge_job_add("seed_vectors", {"kind": "seed_vectors", "image": rel}, app.service.now())
+                app.store.put(REMOTE_KEY, json.dumps({"job_id": job, "image": rel, "report": report, "user": user}))
+                done = summary(report)
+                result = dict(state="waiting", backup=report["backup"], message=(done + "; " if done else "")
+                              + "the review samples wait for the office computer to read their faces (outside the camera hours)")
+            else:
+                app.store.log(app.service.now(), user, "import seed", summary(report))
+                result = dict(state="done", message=summary(report), backup=report["backup"])
+        except Exception as exc:  # shown on the People page
+            log.exception("Seed import failed")
+            result = dict(state="failed", message=str(exc))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+            archive.unlink(missing_ok=True)
+        _write_status(app, **result, finished=dt.datetime.now().isoformat(timespec="seconds"))
+    finally:
+        _running.release()
+
+
+def finish_remote(app, job_id: int, payload: dict, result: dict) -> threading.Thread:
+    """The server: the office computer's answer to a seed_vectors job; the review samples are imported with
+    its face vectors, in a thread."""
+    def run():
+        with _running:
+            waiting = json.loads(app.store.get(REMOTE_KEY) or "{}")
+            if waiting.get("job_id") != job_id:  # an older seed, replaced by a newer one
+                return
+            image = waiting.get("image", "")
+            work = app.data_dir / "seed-upload" / f"review-{job_id}"
+            try:
+                if not result.get("ok"):
+                    raise ValueError(str(result.get("message") or "the office computer could not read the faces")[:400])
+                if not re.fullmatch(r"uploads/[0-9a-f]{32}", image):
+                    raise ValueError("the seed is no longer on the server")
+                _write_status(app, state="running", started=dt.datetime.now().isoformat(timespec="seconds"),
+                              progress="Importing the review samples")
+                seed = unpack(app.data_dir / image, work).resolve()
+                vectors = result.get("vectors") if isinstance(result.get("vectors"), dict) else {}
+                review = import_review_samples(app, seed, lambda text: _write_status(app, progress=text),
+                                               vectors=vectors, model=str(result.get("model") or ""))
+                report = {**waiting.get("report", {}), "review": review}
+                app.store.log(app.service.now(), waiting.get("user", "admin"), "import seed", summary(report))
+                status = dict(state="done", message=summary(report), backup=report.get("backup"))
+            except Exception as exc:
+                log.exception("Seed import failed")
+                status = dict(state="failed", message=str(exc))
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+                _forget_remote(app)
+            _write_status(app, **status, finished=dt.datetime.now().isoformat(timespec="seconds"))
+
+    thread = threading.Thread(target=run, name="seed-review-import", daemon=True)
+    thread.start()
+    return thread
+
+
+def review_vectors(app, archive: Path, work: Path) -> dict:
+    """The office computer: the face vector of each review sample of a seed uploaded on the server, which has
+    no face models. {"ok", "model", "vectors": {sha256: base64 float32}, "message"}."""
+    import base64
+
+    seed = unpack(archive, work).resolve()
+    rows = []
+    if (seed / "review.csv").exists():
+        with (seed / "review.csv").open(encoding="utf-8-sig", newline="") as file:
+            rows = list(csv.DictReader(file))
+    vectors = {}
+    for row in rows:
+        path = (seed / row.get("file", "")).resolve()
+        if not row.get("sha256") or not path.is_relative_to(seed) or not path.is_file():
+            continue
+        try:
+            vector = _review_vector(app, path)
+        except ValueError:
+            continue
+        if vector is not None:
+            vectors[row["sha256"]] = base64.b64encode(np.asarray(vector, np.float32).tobytes()).decode()
+    return {"ok": True, "model": app.service.model_id, "vectors": vectors,
+            "message": f"{len(vectors)} of {len(rows)} review faces read"}
 
 
 def _run(app, archive: Path, review_only: bool, user: str) -> None:
@@ -362,6 +499,9 @@ def summary(report: dict) -> str:
     """The result in one line, for the People page."""
     review = report.get("review", {} if "expected_photos" in report else report)
     parts = []
+    if report.get("sent_photos") or report.get("employees") and "expected_photos" not in report:
+        parts.append(f'{report["employees"]} employees, {report.get("sent_photos", 0)} photos sent to the office '
+                     "computer (each person has them in a few minutes)")
     if "expected_photos" in report:
         parts.append(f'{report["employees"]} employees, {report["imported"]}/{report["expected_photos"]} photos')
         if report["warnings"]:
