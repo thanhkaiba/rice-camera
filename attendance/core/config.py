@@ -622,6 +622,9 @@ class Config:
         g.speaker_volume_external, g.speaker_volume_builtin = int(g.speaker_volume_external), int(g.speaker_volume_builtin)
         if not (1 <= g.speaker_volume_external <= 100 and 1 <= g.speaker_volume_builtin <= 100):
             raise ValueError("greeting.speaker_volume_external and speaker_volume_builtin must be between 1 and 100")
+        if min(g.speaker_volume_external, g.speaker_volume_builtin) < g.speaker_min_volume:
+            raise ValueError(f"greeting.speaker_volume_external and speaker_volume_builtin must be at least the volume "
+                             f"alert ({g.speaker_min_volume}%), or the system space is told again and again")
         g.speaker_awake_from = parse_clock(g.speaker_awake_from).strftime("%H:%M")
         g.speaker_awake_every, g.speaker_awake_level = int(g.speaker_awake_every), int(g.speaker_awake_level)
         if not 1 <= g.speaker_awake_every <= 480:

@@ -11,6 +11,7 @@ The macOS output is chosen through CoreAudio (ctypes): nothing to install. The v
 """
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import datetime as dt
 import subprocess
@@ -153,6 +154,27 @@ def use(kind: str, volume: int | None = None, run=subprocess.run) -> dict:
                 "message": f"playing on {device['name']}, but its volume could not be set: {type(exc).__name__}"}
     return {"ok": True, "device": device["name"], "volume": volume,
             "message": f"playing on {device['name']} at volume {volume}%"}
+
+
+@contextlib.contextmanager
+def on(kind: str):
+    """`kind` is the output for a moment (the keep-awake tone for the external speaker while the computer's own
+    greets), then the output before it again. OSError when it cannot be chosen."""
+    if not SUPPORTED:
+        raise OSError("choosing the speaker works on macOS only")
+    device = pick(devices(), kind)
+    if device is None:
+        raise OSError(f"{NAMES[kind]} is not connected")
+    before = current()
+    _choose(device)
+    try:
+        yield device
+    finally:
+        if before and before != device["id"]:
+            try:
+                _choose({"id": before, "name": "the output in use before"})
+            except OSError:
+                pass
 
 
 def ensure(kind: str | None) -> None:

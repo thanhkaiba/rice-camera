@@ -2329,12 +2329,11 @@ class Greeter:
         s = self.settings
         if not s.speaker_awake:  # greeting at the door switched off too: the speaker must not switch itself off
             return None
-        if self.output == outputs.BUILTIN:  # the computer's own speaker is in use: it never switches off
-            return None
         _, _, end = self.cfg.schedule.clocks()
         if s.until_people:  # some people are greeted after the camera hours
             end = max(end, parse_clock(s.until))
         if (self.rules(now.date()).get("workday", True) and not self.cfg.schedule.in_maintenance(now)
+                and self.output != outputs.BUILTIN  # the external speaker is not greeting: the 60 Hz tone only
                 and parse_clock(s.speaker_awake_from) <= now.time() < end
                 and (self.store.get(AWAKE_DAY_KEY) or "") != now.date().isoformat()):
             return "first"
@@ -2350,7 +2349,15 @@ class Greeter:
             return False
         with self._speech_lock:
             try:
-                (play or play_audio)(awake_signal(self.settings.speaker_awake_level, first=due == "first"), AWAKE_RATE)
+                signal = awake_signal(self.settings.speaker_awake_level, first=due == "first")
+                if self.output == outputs.BUILTIN:
+                    # The computer's own speaker greets; the external one still gets its tone, played on it for a
+                    # moment: when it was misheard at the morning check, or switched on later, it stays on.
+                    with self._outputs.on(outputs.EXTERNAL):
+                        (play or play_audio)(signal, AWAKE_RATE)
+                else:
+                    self._outputs.ensure(self.output)
+                    (play or play_audio)(signal, AWAKE_RATE)
                 self.awake_error = None
             except Exception as exc:
                 self.awake_error = f"{now:%H:%M} could not play the hum: {type(exc).__name__}: {str(exc)[:200]}"
@@ -2401,8 +2408,12 @@ class Greeter:
         from .listen import chime
 
         audio, rate = chime()
+        started = time.time()
         try:
-            return self.listener.play_and_check(play or play_audio, audio, rate, "speaker check", wait_s=30.0) or {}
+            heard = self.listener.play_and_check(play or play_audio, audio, rate, "speaker check", wait_s=30.0) or {}
+            if (heard.get("at") or 0) < started - 1:  # the microphone did not start: its last answer is an old one
+                return {"heard": None, "corr": None, "message": "no answer from the microphone"}
+            return heard
         except Exception as exc:
             return {"heard": None, "corr": None,
                     "message": f"could not play the test sound: {type(exc).__name__}: {exc}"[:300]}

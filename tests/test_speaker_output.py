@@ -1,8 +1,10 @@
 """Two speakers on the office MacBook: the external one (the Edifier, which switches itself off) and the computer's
 own. A check every morning at 07:00 chooses, the Settings page switches by hand. Nothing here plays or switches
 anything on the test computer: the outputs and the microphone are replaced."""
+import contextlib
 import datetime as dt
 import json
+import time
 
 import pytest
 
@@ -17,7 +19,7 @@ class FakeOutputs:
     SUPPORTED = True
 
     def __init__(self, broken=()):
-        self.used, self.volumes, self.ensured, self.broken = [], [], [], set(broken)
+        self.used, self.volumes, self.ensured, self.moments, self.broken = [], [], [], [], set(broken)
 
     def use(self, kind, volume=None):
         self.used.append(kind)
@@ -29,6 +31,13 @@ class FakeOutputs:
     def ensure(self, kind):
         self.ensured.append(kind)
 
+    @contextlib.contextmanager
+    def on(self, kind):
+        self.moments.append(kind)
+        if kind in self.broken:
+            raise OSError(f"{outputs.NAMES[kind]} is not connected")
+        yield {"id": 1, "name": kind}
+
 
 class FakeMicrophone:
     def __init__(self, *answers):
@@ -38,7 +47,10 @@ class FakeMicrophone:
         self.played += 1
         heard = self.answers.pop(0)
         corr = {True: 0.8, False: 0.2, None: 0.4, "no mic": None}[heard]
-        return {"heard": None if heard == "no mic" else heard, "corr": corr, "message": f"answer {heard}"}
+        at = time.time() - (3600 if heard == "stale" else 0)
+        if heard == "stale":  # the microphone did not start: its last answer, from long ago
+            return {"heard": True, "corr": 0.9, "at": at, "message": "old answer"}
+        return {"heard": None if heard == "no mic" else heard, "corr": corr, "at": at, "message": f"answer {heard}"}
 
     def status(self):
         return None
@@ -75,7 +87,10 @@ def test_a_silent_external_speaker_sends_the_greetings_to_the_computer_louder(co
     assert g.loudness() == outputs.BUILTIN_LOUDNESS  # louder on the computer's own speaker
     g._sound_at = None
     clock.t = at(7, 45)
-    assert g.awake_due(clock.t) is None  # the computer's own speaker needs no keep-awake tone
+    assert g.awake_due(clock.t) == "again"  # the external speaker still kept on, never the audible wake-up hum
+    played = []
+    assert g.keep_awake(lambda audio, rate: played.append(len(audio) / rate))
+    assert played == [greeting.AWAKE_S] and g._outputs.moments == ["external"]  # on the external speaker, for a moment
     again = Greeter(app.cfg, app.store, clock, lambda d: app.service.window(d).late_from, speak=lambda *a, **k: None,
                     write=lambda people, day: {}, sleep=lambda s: None)  # the app started again: still the computer's
     assert again.output == "builtin" and not again.output_due(clock.t)
@@ -180,3 +195,29 @@ def test_the_speaker_volumes_are_on_the_settings_page_and_saved(core):
     page = create_app(app).test_client().get("/settings").get_data(as_text=True)
     assert 'name="greeting.speaker_volume_external"' in page and 'name="greeting.speaker_volume_builtin"' in page
     assert "speaker_volume_external" in settings.EDITABLE["greeting"] and "speaker_volume_builtin" in settings.EDITABLE["greeting"]
+
+
+def test_an_old_microphone_answer_is_never_taken_for_the_morning_check(core):
+    _, clock, g = setup(core, "stale")
+    clock.t = at(7, 0)
+    assert g.check_output()
+    assert g.output == "external" and "could not tell" in g.output_note["why"] and g.output_note["heard"] is None
+
+
+def test_the_keep_awake_tone_on_an_unplugged_external_speaker_is_an_error_not_a_crash(core):
+    app, clock, g = setup(core, broken=("external",))
+    app.cfg.greeting.speaker_awake, app.cfg.greeting.speaker_awake_every = True, 10
+    clock.t = at(7, 0)
+    g.check_output()
+    assert g.output == "builtin"
+    g._sound_at = None
+    assert g.keep_awake(lambda audio, rate: None) and "not connected" in g.awake_error
+
+
+def test_a_speaker_volume_below_the_volume_alert_is_refused(core):
+    app, _, _ = core
+    app.cfg.greeting.speaker_min_volume, app.cfg.greeting.speaker_volume_builtin = 30, 25
+    with pytest.raises(ValueError):
+        app.cfg.validate()
+    app.cfg.greeting.speaker_min_volume = 0
+    app.cfg.validate()

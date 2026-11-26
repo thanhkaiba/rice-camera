@@ -404,8 +404,8 @@
       <div class="row between" id="speaker-output" style="margin-top:10px">
         <span class="hint">Greetings play on: <strong>{% if out and out.output == 'builtin' %}the computer's own speaker (louder){% elif out and out.output == 'external' %}the external speaker{% else %}not chosen yet{% endif %}</strong>{% if out and out.why %} · {{ out.why }}{% endif %}<br>Every morning at 07:00 the office computer plays the test on the external speaker and listens: not heard (switched off: only its own button switches it on), the greetings go to the computer's own speaker. After pressing the speaker's button, switch back here. Each speaker is set to its volume below at every switch: save first, then switch.</span>
         <span class="row">
-          {{ field('greeting', 'speaker_volume_external', 'External speaker volume (%)', 'set at every switch to it · 1–100', type='number') }}
-          {{ field('greeting', 'speaker_volume_builtin', 'Computer speaker volume (%)', 'set at every switch to it · 1–100', type='number') }}
+          {{ field('greeting', 'speaker_volume_external', 'External speaker volume (%)', 'set at every switch to it · not below the volume alert', type='number') }}
+          {{ field('greeting', 'speaker_volume_builtin', 'Computer speaker volume (%)', 'set at every switch to it · not below the volume alert', type='number') }}
         </span>
         <span class="row">
           <button formaction="{{ url_for('speaker_output') }}" name="output" value="external" formnovalidate title="The greetings play on the external speaker from now on; a test sound is played there">{{ icon('wave') }}Use the external speaker</button>
