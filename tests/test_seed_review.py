@@ -403,3 +403,20 @@ def test_review_seed_photos_are_backed_up_and_restored_without_camera_snapshots(
     cfg = Config(base_dir=restored)
     restore(cfg, destination)
     assert (restored/'data/review-seed/sample.jpg').read_bytes() == b'sample'
+
+
+def test_a_seed_built_on_the_camera_computer_brings_its_vectors_for_a_server_without_face_models(core, tmp_path):
+    import base64
+
+    from attendance.cli.seed import import_review_samples
+    app, _, _ = core
+    seed = make_seed(tmp_path, b'not decoded: the vector comes with the row')
+    vector = person_vector(7).astype(np.float32)
+    seed_metadata(seed, vector=base64.b64encode(vector.tobytes()).decode(), vector_model=app.service.model_id)
+
+    def no_models():
+        raise RuntimeError('det_10g.onnx not found')
+    app.recognizer = no_models
+    assert import_review_samples(app, seed)['imported'] == 1
+    u = app.store.unknowns(status=None)[0]
+    assert u.source == 'seed' and np.allclose(u.vector, vector / np.linalg.norm(vector), atol=1e-6)

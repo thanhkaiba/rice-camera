@@ -33,7 +33,16 @@ def _print(text: str) -> None:
     print(text, flush=True)
 
 
-def _review_vector(app, path: Path):
+def _review_vector(app, path: Path, row: dict | None = None):
+    """The face embedding of a one-face review sample, or None. A row may bring it ("vector": base64 float32,
+    "vector_model"): the server has no face models, so a seed built on the camera computer carries them."""
+    if row and row.get("vector") and row.get("vector_model") == app.service.model_id:
+        import base64
+
+        vector = np.frombuffer(base64.b64decode(row["vector"]), dtype=np.float32).copy()
+        norm = float(np.linalg.norm(vector))
+        if vector.size >= 64 and np.all(np.isfinite(vector)) and norm > 1e-6:
+            return vector / norm
     image = read_image(path)
     if image is None:
         raise ValueError(f"Review sample cannot be decoded: {path}")
@@ -61,7 +70,7 @@ def _review_metadata(app, row, seed, uid, report):
     if person is None or not person.active:
         return
     # Recheck the actual photo; portable metadata alone never establishes identity.
-    vector = _review_vector(app, seed / row["file"])
+    vector = _review_vector(app, seed / row["file"], row)
     if vector is None or not np.isfinite(vector).all() or np.linalg.norm(vector) < 1e-12:
         return
     matches = app.gallery.match(vector)
@@ -114,7 +123,7 @@ def import_review_samples(app, seed: Path, progress: Callable[[str], None] = _pr
             if digest in existing:
                 sample = app.store.unknown(existing[digest])
                 if sample.source == "seed" and sample.status == "pending" and sample.vector is None:
-                    vector = _review_vector(app, seed / row["file"])
+                    vector = _review_vector(app, seed / row["file"], row)
                     if vector is not None:
                         report["refreshed"] += app.store.refresh_seed_vector(sample.id, app.service.model_id, vector)
                 app.store.put(key, str(existing[digest]))
@@ -122,7 +131,7 @@ def import_review_samples(app, seed: Path, progress: Callable[[str], None] = _pr
             report["skipped"] += 1
             continue
         source = seed / row["file"]
-        vector = _review_vector(app, source)
+        vector = _review_vector(app, source, row)
         relative = "review-seed/" + digest + source.suffix.lower()
         target = app.data_dir / relative
         target.parent.mkdir(parents=True, exist_ok=True)
