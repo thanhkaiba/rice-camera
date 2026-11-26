@@ -52,17 +52,18 @@ def fixed_short(said: str) -> bool:
 # Someone who comes in late hears their name ("Anh Terry!"), then one of these, picked anew each day: the office's
 # fine for coming late, the amount as Settings → Greeting → late fine says it ("hai mươi nghìn"; empty: off, they hear
 # the greeting written for them). The name is read once and kept (names), so are these lines: no credits per arrival.
-LATE_FINE_VI = [  # {you}: how they are addressed (anh, chị); {amount}: as Settings says it
-    "Cho em xin {amount} nhá!",
-    "[playfully] Của {you} hết {amount} ạ!",
-    "Dạ, cho em xin {amount} góp quỹ nhá!",
-    "[playfully] Ơ, {you} rơi mất {amount} kìa!",
-    "Muộn xíu thôi mà, cho em xin {amount} là xong nhá.",
-    "Em không nói nhiều đâu, cho em xin {amount} nhá!",
-    "[cheerfully] Phí vào cửa của {you} hôm nay là {amount} nha!",
-    "Chị Hana nhờ em xin {amount} nhá!",
-    "[playfully] {Amount} thôi mà, cho em xin nha, em cảm ơn!",
-    "Hôm nay {you} góp {amount} cho quỹ nhá!",
+LATE_FINE_VI = [  # {you}: how they are addressed (anh, chị); {amount}: as Settings says it. Teasing, never scolding:
+    # each opens with a playful delivery and most end on a small laugh (the office asked for them funny)
+    "[playfully] Cho em xin {amount} nhá! [giggles]",
+    "[playfully] Của {you} hết {amount} ạ! [chuckles]",
+    "[cheerfully] Dạ, cho em xin {amount} góp quỹ nhá!",
+    "[surprised] Ơ, {you} rơi mất {amount} kìa! [chuckles]",
+    "[playfully] Muộn xíu thôi mà, cho em xin {amount} là xong nhá. [giggles]",
+    "[playfully] Em không nói nhiều đâu, cho em xin {amount} nhá!",
+    "[cheerfully] Phí vào cửa của {you} hôm nay là {amount} nha! [chuckles]",
+    "[playfully] Chị Hana nhờ em xin {amount} nhá! [giggles]",
+    "[playfully] {Amount} thôi mà, cho em xin nha, em cảm ơn! [chuckles]",
+    "[cheerfully] Hôm nay {you} góp {amount} cho quỹ nhá! [giggles]",
 ]
 
 SHORT_KEY = "greeting_short"  # person id -> {"text", "language", "honorific", "called"}: their short hello, kept
