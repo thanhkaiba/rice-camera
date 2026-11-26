@@ -543,3 +543,14 @@ def test_base_is_asked_hourly_outside_working_hours(core):
     assert app.leave_sync.due()
     clock.t = at(6, 0, day=dt.date(2026, 10, 17))  # a Saturday: nothing to read ahead
     assert not app.leave_sync.due()
+
+
+def test_an_absence_waiting_for_approval_is_not_read_ahead(core, monkeypatch):
+    """Leave or WFH asked on Base but not approved yet: no greeting audio made ahead, attendance unchanged."""
+    from attendance.core.greeting import rules_for
+
+    app, clock, _ = core
+    connect(app, monkeypatch, [item('alice', '1967', 'Full day')], approved=False)
+    assert app.leave_sync.sync()['ok']
+    rules = rules_for(app.service, DAY)
+    assert rules['away'] == ['A'] and 'A' not in rules['people']

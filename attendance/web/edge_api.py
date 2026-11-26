@@ -299,10 +299,11 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
             answer.update(employees=store.edge_employee_rows(), embedding_keys=store.edge_embedding_keys())
         if request.args.get("config") != config_version:
             answer["config"] = config
-        if core.cfg.greeting.enabled:
-            from ..core.greeting import rules_for
+        # Sent even while the door greeting is off: the Mac keeps the last rules it got, and must not read the
+        # day's greetings ahead for people on leave or working from home once the greeting is on again.
+        from ..core.greeting import rules_for
 
-            answer["greeting"] = rules_for(service, service.now().date())
+        answer["greeting"] = rules_for(service, service.now().date())
         today = service.now().date()  # also the arrivals an admin recorded here: the Mac only knows its own
         answer["arrived"] = {"day": today.isoformat(), "people": sorted(store.checkins(today))}
         return jsonify(answer)

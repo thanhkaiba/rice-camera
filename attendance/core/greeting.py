@@ -645,6 +645,7 @@ def rules_for(service, day: dt.date) -> dict:
     w = service.window(day)
     counts = service.cfg.leave_api.pending_counts
     late, absent, _ = permissions(service.store, day, counts)
+    _, asked, _ = permissions(service.store, day, True)  # leave or WFH still waiting for approval: not read ahead
     waiting: dict[str, str] = {}  # whose late time comes from a request not approved yet: the door tells them
     for emp, shift in pending_arrivals(service.store, day, counts).items():
         until = parse_clock(shift.split("-")[1].strip())
@@ -659,7 +660,7 @@ def rules_for(service, day: dt.date) -> dict:
             after = max(w.late_after, dt.datetime.combine(day, until, tzinfo=service.tz))
             people[emp] = (after + dt.timedelta(minutes=1)).isoformat()
     rules = {"day": day.isoformat(), "workday": service.is_workday(day), "people": people,
-             "away": sorted({*service.store.leaves_on(day), *absent}),  # nothing read ahead for them
+             "away": sorted({*service.store.leaves_on(day), *absent, *asked}),  # nothing read ahead for them
              "day_notes": day_notes(service, day), "notes": person_notes(service, day),
              "habits": person_habits(service, day),
              "pending": {emp: shift for emp, shift in waiting.items() if people.get(emp)}}

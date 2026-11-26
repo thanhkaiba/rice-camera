@@ -146,7 +146,8 @@ def test_the_mac_gets_the_settings_and_the_days_rules_and_says_the_test(live, tm
     configs, rules = [], []
     edge.on_config, edge.on_rules = configs.append, rules.append
     edge.follow()
-    assert "greeting" in configs[0] and rules == []  # off: no rules sent
+    assert "greeting" in configs[0] and rules[0]["day"] == DAY.isoformat()  # sent while off too
+    rules.clear()
     core.cfg.greeting.enabled = True
     page = c.get("/settings", headers=admin()).get_data(as_text=True)
     assert 'name="greeting.key"' in page and "Say a test greeting" in page
