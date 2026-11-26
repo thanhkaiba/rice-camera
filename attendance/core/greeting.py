@@ -37,7 +37,7 @@ from .voice import voice_names
 log = logging.getLogger(__name__)
 
 LINES_KEY = "greeting_lines"
-SHORT_VI = ["[cheerfully] Chào buổi sáng {who}!", "[happily] Em chào {who} ạ!", "[excited] {Who} tới rồi ạ!"]
+SHORT_VI = ["[cheerfully] Chào buổi sáng {who}!", "[happily] Em chào {who} ạ!", "[cheerfully] {Who} tới rồi ạ!"]
 # The audio of a fixed short hello ("[happily] Em chào chị Rose ạ!") is the same every day: kept with the names
 # (NAMES_DIR), read once, not every morning. A tag in front is optional: it may be left out (acted()).
 WHO = r"[^,.!?\n]{1,40}"  # how someone is addressed: "chị Rose", never a sentence
@@ -62,7 +62,7 @@ LATE_FINE_VI = [  # {you}: how they are addressed (anh, chị); {amount}: as Set
     "[playfully] Em không nói nhiều đâu, cho em xin {amount} nhá!",
     "[cheerfully] Phí vào cửa của {you} hôm nay là {amount} nha! [chuckles]",
     "[playfully] Chị Hana nhờ em xin {amount} nhá! [giggles]",
-    "[playfully] {Amount} thôi mà, cho em xin nha, em cảm ơn! [chuckles]",
+    "[playfully] {Amount} thôi mà, em ghi sổ rồi ạ! [chuckles]",
     "[cheerfully] Hôm nay {you} góp {amount} cho quỹ nhá! [giggles]",
 ]
 
