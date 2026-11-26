@@ -2374,10 +2374,17 @@ class Greeter:
         gain = self.settings.loudness
         return max(gain, outputs.BUILTIN_LOUDNESS) if self.output == outputs.BUILTIN else gain
 
+    def output_volume(self, kind: str) -> int:
+        """The volume `kind` is set to when the greetings switch to it (Settings)."""
+        return int(getattr(self.settings, f"speaker_volume_{kind}", 0) or outputs.VOLUME[kind])
+
+    def _use(self, kind: str) -> dict:
+        return self._outputs.use(kind, self.output_volume(kind))
+
     def output_status(self) -> dict | None:
         if not self.output:
             return None
-        return {**self.output_note, "name": outputs.NAMES[self.output], "volume": outputs.VOLUME[self.output]}
+        return {**self.output_note, "name": outputs.NAMES[self.output], "volume": self.output_volume(self.output)}
 
     def _keep_output(self, kind: str, why: str, day: str | None = None, heard=None) -> None:
         note = {"output": kind, "why": why, "at": self.now().isoformat(timespec="minutes"),
@@ -2414,7 +2421,7 @@ class Greeter:
             return False
         day = now.date().isoformat()
         with self._speech_lock:
-            chosen = self._outputs.use(outputs.EXTERNAL)
+            chosen = self._use(outputs.EXTERNAL)
             heard: dict = {}
             if chosen["ok"]:
                 for _ in range(outputs.CHECK_TRIES):
@@ -2430,7 +2437,7 @@ class Greeter:
                                   f"({heard.get('message') or 'no answer'}); the external speaker is kept", day, None)
             else:
                 reason = chosen["message"] if not chosen["ok"] else "the microphone did not hear the external speaker"
-                own = self._outputs.use(outputs.BUILTIN)
+                own = self._use(outputs.BUILTIN)
                 if own["ok"]:
                     self._keep_output(outputs.BUILTIN, f"{now:%H:%M} check: {reason}", day, heard.get("heard"))
                 else:
@@ -2448,7 +2455,7 @@ class Greeter:
             return {"ok": False, "message": f"unknown speaker: {kind}"[:100]}
         now = self.now()
         with self._speech_lock:
-            chosen = self._outputs.use(kind)
+            chosen = self._use(kind)
             if not chosen["ok"]:
                 return {"ok": False, "message": f"could not switch to {outputs.NAMES[kind]}: {chosen['message']}"}
             heard = self._test_sound()
@@ -2464,7 +2471,7 @@ class Greeter:
 
     def _awake_loop(self) -> None:
         if self.output and self._outputs.SUPPORTED:  # the app started again: the speaker chosen before, at its volume
-            log.info("Speaker in use: %s (%s)", outputs.NAMES[self.output], self._outputs.use(self.output)["message"])
+            log.info("Speaker in use: %s (%s)", outputs.NAMES[self.output], self._use(self.output)["message"])
         while True:
             for step in (self.check_output, self.keep_awake):
                 try:

@@ -3,8 +3,8 @@ Edifier MR4 at the door) and the computer's own.
 
 The Edifier switches itself off after about 15 minutes without sound and only its own button switches it on
 again. So every morning at CHECK_AT the computer plays the speaker test on the external speaker and listens
-with its microphone (listen.py): heard, the greetings play there at volume VOLUME[EXTERNAL]; not heard, they
-play on the computer's own speaker at full volume and louder (BUILTIN_LOUDNESS), until someone switches back
+with its microphone (listen.py): heard, the greetings play there; not heard, they play on the computer's own
+speaker, louder (BUILTIN_LOUDNESS). Each speaker is set to its own volume at every switch (Settings), until someone switches back
 on the Settings page after pressing the speaker's button (Greeter.use_output).
 
 The macOS output is chosen through CoreAudio (ctypes): nothing to install. The volume is set with osascript.
@@ -18,7 +18,7 @@ import sys
 
 EXTERNAL, BUILTIN = "external", "builtin"
 NAMES = {EXTERNAL: "the external speaker", BUILTIN: "the computer's own speaker"}
-VOLUME = {EXTERNAL: 95, BUILTIN: 100}
+VOLUME = {EXTERNAL: 95, BUILTIN: 100}  # unless Settings say otherwise
 BUILTIN_LOUDNESS = 2.0  # the greetings on the computer's own speaker: as "Louder at the door" 2.0, or more if set
 KEY = "speaker_output"  # store: {"output", "why", "at", "day", "heard"}, the speaker in use and why
 CHECK_AT = dt.time(7, 0)  # the morning check; later that day when the app was not running at that time
@@ -132,8 +132,9 @@ def _choose(device: dict) -> None:
         raise OSError(f"CoreAudio could not choose {device['name']} (status {status})")
 
 
-def use(kind: str, run=subprocess.run) -> dict:
-    """Makes `kind` the computer's output, at its volume and not muted: {"ok", "device", "volume", "message"}."""
+def use(kind: str, volume: int | None = None, run=subprocess.run) -> dict:
+    """Makes `kind` the computer's output, at `volume` (else VOLUME[kind]) and not muted:
+    {"ok", "device", "volume", "message"}."""
     if not SUPPORTED:
         return {"ok": False, "message": "choosing the speaker works on macOS only"}
     try:
@@ -143,7 +144,7 @@ def use(kind: str, run=subprocess.run) -> dict:
         _choose(device)
     except OSError as exc:
         return {"ok": False, "message": str(exc)[:200]}
-    volume = VOLUME[kind]
+    volume = int(volume or VOLUME[kind])
     try:
         run(["osascript", "-e", f"set volume output volume {volume} without output muted"],
             capture_output=True, timeout=10, check=True)

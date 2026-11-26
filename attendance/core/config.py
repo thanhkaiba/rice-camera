@@ -413,13 +413,17 @@ class GreetingConfig:
     birthdays: bool = True  # someone whose birthday it is hears a birthday wish instead of the usual greeting
     speaker: str = ""
     speaker_min_volume: int = 30
+    # The volume (%) each speaker is set to whenever the greetings switch to it: by the 07:00 check or on the
+    # Settings page (outputs.py). External: the headphone socket (the Edifier); builtin: the computer's own.
+    speaker_volume_external: int = 95
+    speaker_volume_builtin: int = 100
     # Listen with the office computer's own microphone while a greeting plays (macOS, see listen.py): a speaker
     # that is switched off, asleep or turned down by its knob is told to the system space after three greetings
     # the microphone did not hear. The speaker test always listens.
     speaker_listen: bool = False
     # A mains speaker that goes to sleep without a signal swallows a greeting, or its first words. On work
     # days at speaker_awake_from a soft low hum of a few seconds wakes it (it can be heard); day and night, every
-    # day, whenever the speaker had no sound for speaker_awake_every minutes, a 20 Hz tone nobody hears is played
+    # day, whenever the speaker had no sound for speaker_awake_every minutes, a soft 60 Hz tone is played
     # (the office's speaker switches itself off for good after about 15 minutes without sound). speaker_awake_level: percent of full scale, 1-50, of the hum.
     speaker_awake: bool = False
     speaker_awake_from: str = "07:30"
@@ -615,6 +619,9 @@ class Config:
         g.speaker_min_volume = int(g.speaker_min_volume)
         if not 0 <= g.speaker_min_volume <= 100:
             raise ValueError("greeting.speaker_min_volume must be between 0 and 100")
+        g.speaker_volume_external, g.speaker_volume_builtin = int(g.speaker_volume_external), int(g.speaker_volume_builtin)
+        if not (1 <= g.speaker_volume_external <= 100 and 1 <= g.speaker_volume_builtin <= 100):
+            raise ValueError("greeting.speaker_volume_external and speaker_volume_builtin must be between 1 and 100")
         g.speaker_awake_from = parse_clock(g.speaker_awake_from).strftime("%H:%M")
         g.speaker_awake_every, g.speaker_awake_level = int(g.speaker_awake_every), int(g.speaker_awake_level)
         if not 1 <= g.speaker_awake_every <= 480:

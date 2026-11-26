@@ -17,13 +17,14 @@ class FakeOutputs:
     SUPPORTED = True
 
     def __init__(self, broken=()):
-        self.used, self.ensured, self.broken = [], [], set(broken)
+        self.used, self.volumes, self.ensured, self.broken = [], [], [], set(broken)
 
-    def use(self, kind):
+    def use(self, kind, volume=None):
         self.used.append(kind)
+        self.volumes.append(volume)
         if kind in self.broken:
             return {"ok": False, "message": f"{outputs.NAMES[kind]} is not connected"}
-        return {"ok": True, "device": kind, "volume": outputs.VOLUME[kind], "message": f"playing on {kind}"}
+        return {"ok": True, "device": kind, "volume": volume, "message": f"playing on {kind} at volume {volume}%"}
 
     def ensure(self, kind):
         self.ensured.append(kind)
@@ -90,6 +91,7 @@ def test_switched_back_by_hand_after_the_speaker_button_was_pressed(core):
     clock.t = at(8, 40)
     result = g.use_output("external", "admin")
     assert result["ok"] and result["heard"] is True and g.output == "external"
+    assert g._outputs.volumes == [95, 100, 95]  # each speaker at its own volume, at every switch
     assert "chosen on the Settings page by admin" in g.output_note["why"] and g._outputs.used[-1] == "external"
     assert not g.output_due(clock.t)  # the morning check is not done again today
     clock.t = at(8, 50)
@@ -154,3 +156,27 @@ def test_the_heartbeat_tells_which_speaker_is_in_use():
                                        "heard": False, "name": "x"}})
     assert seen["output"] == {"output": "builtin", "why": "07:00 check: not heard", "at": "2026-11-27T07:00", "heard": False}
     assert _speaker_status({"device": "x", "output": {"output": "<b>"}})["output"]["output"] is None
+
+
+def test_each_speaker_is_set_to_its_own_volume_from_the_settings(core):
+    app, clock, g = setup(core, False, False, True)
+    app.cfg.greeting.speaker_volume_external, app.cfg.greeting.speaker_volume_builtin = 80, 90
+    clock.t = at(7, 0)
+    g.check_output()
+    assert g._outputs.used == ["external", "builtin"] and g._outputs.volumes == [80, 90]
+    assert g.output_status()["volume"] == 90
+    clock.t = at(8, 40)
+    assert "at volume 80%" in g.use_output("external")["message"]
+    app.cfg.greeting.speaker_volume_external = 101
+    with pytest.raises(ValueError):
+        app.cfg.validate()
+
+
+def test_the_speaker_volumes_are_on_the_settings_page_and_saved(core):
+    from attendance.core import settings
+    from attendance.web import create_app
+
+    app, _, _ = core
+    page = create_app(app).test_client().get("/settings").get_data(as_text=True)
+    assert 'name="greeting.speaker_volume_external"' in page and 'name="greeting.speaker_volume_builtin"' in page
+    assert "speaker_volume_external" in settings.EDITABLE["greeting"] and "speaker_volume_builtin" in settings.EDITABLE["greeting"]
