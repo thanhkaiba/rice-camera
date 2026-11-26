@@ -1071,9 +1071,19 @@ class Greeter:
         """The late-fine line someone hears after their name today; empty for a boss, an English speaker or when
         it is off."""
         lines = self.fine_lines(self.pronoun(person))
-        if not lines or person.not_counted or person.greet_language != "vi":
+        if not lines or person.not_counted or person.greet_language != "vi" or self.birthday(person, day):
             return ""
         return lines[int(hashlib.sha1(f"{person.id}{day.isoformat()}".encode()).hexdigest(), 16) % len(lines)]
+
+    def birthday(self, person, day: dt.date) -> bool:
+        """Wished a happy birthday today (the server's note, or a line written for it by hand: "birthday" in their
+        entry): they hear it even when late, never the fine line. The fine itself still counts; only the words change."""
+        if "birthday" in self.note(person, day):
+            return True
+        try:
+            return bool(self.lines(day).get(person.id, {}).get("birthday"))
+        except Exception:
+            return False
 
     def _kept_line(self, said: str) -> bool:
         """A line said the same way every day: its audio is kept with the names and read once."""

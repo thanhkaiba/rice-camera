@@ -60,3 +60,21 @@ def test_no_english_group_lines_for_a_single_english_speaker(core):
     assert "en" not in g.together_languages()
     g._note_together(DAY, [{"language": "en", "text": "Morning, everyone!"}, {"language": "vi", "text": "Chào cả nhà!"}])
     assert [l["language"] for l in g.together_lines(DAY)] == ["vi"]
+
+
+def test_a_birthday_is_wished_even_when_late(core):
+    import json
+
+    app, clock, g, made = fined(core)
+    clock.t = at(7, 0)
+    assert g.write_if_due()
+    alice = app.store.employee("A")
+    assert g.fine_line(alice, DAY)
+    lines = json.loads(app.store.get(greeting.LINES_KEY))
+    lines["people"]["A"]["birthday"] = True  # a birthday line written by hand
+    app.store.put(greeting.LINES_KEY, json.dumps(lines))
+    assert g.fine_line(alice, DAY) == "" and PART not in g.sentence(alice, at(10, 15))
+    lines["people"]["A"].pop("birthday")
+    app.store.put(greeting.LINES_KEY, json.dumps(lines))
+    g.note = lambda person, day: "their birthday is today"  # the server's note
+    assert g.fine_line(alice, DAY) == ""
