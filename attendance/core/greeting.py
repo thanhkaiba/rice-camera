@@ -61,7 +61,7 @@ LATE_FINE_VI = [  # {you}: how they are addressed (anh, chị); {amount}: as Set
     "[playfully] Muộn xíu thôi mà, cho em xin {amount} là xong nhá. [giggles]",
     "[playfully] Em không nói nhiều đâu, cho em xin {amount} nhá!",
     "[cheerfully] Phí vào cửa của {you} hôm nay là {amount} nha! [chuckles]",
-    "[playfully] Chị Hana nhờ em xin {amount} nhá! [giggles]",
+    "[playfully] Em đã báo chị Hana ghi sổ {amount} rồi nha!",
     "[playfully] {Amount} thôi mà, em ghi sổ rồi ạ! [chuckles]",
     "[cheerfully] Hôm nay {you} góp {amount} cho quỹ nhá! [giggles]",
 ]
@@ -1073,7 +1073,8 @@ class Greeter:
         lines = self.fine_lines(self.pronoun(person))
         if not lines or person.not_counted or person.greet_language != "vi" or self.birthday(person, day):
             return ""
-        return lines[int(hashlib.sha1(f"{person.id}{day.isoformat()}".encode()).hexdigest(), 16) % len(lines)]
+        mine = [line for line in lines if called(person).lower() not in line.lower()] or lines  # chị Hana: not "báo chị Hana"
+        return mine[int(hashlib.sha1(f"{person.id}{day.isoformat()}".encode()).hexdigest(), 16) % len(mine)]
 
     def birthday(self, person, day: dt.date) -> bool:
         """Wished a happy birthday today (the server's note, or a line written for it by hand: "birthday" in their

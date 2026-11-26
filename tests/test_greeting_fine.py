@@ -78,3 +78,14 @@ def test_a_birthday_is_wished_even_when_late(core):
     app.store.put(greeting.LINES_KEY, json.dumps(lines))
     g.note = lambda person, day: "their birthday is today"  # the server's note
     assert g.fine_line(alice, DAY) == ""
+
+
+def test_nobody_hears_a_fine_line_about_themselves(core):
+    from types import SimpleNamespace
+
+    app, clock, g, made = fined(core)
+    for n in range(40):
+        hana = SimpleNamespace(id=f"H{n}", name="Hana Dang", email="hana@example.com", not_counted=False,
+                               greet_language="vi", honorific="chi")
+        line = g.fine_line(hana, DAY)
+        assert line and "Hana" not in line
