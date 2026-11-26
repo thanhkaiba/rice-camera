@@ -155,13 +155,45 @@
       <div><button {{ 'disabled' if seed_status.state == 'running' }}>{{ icon('upload') }}Import seed</button></div>
     </form>
     <div class="divider" style="margin:0"></div>
-    <form method="post" action="{{ url_for('faces_from_photos') }}" enctype="multipart/form-data">{% include "_csrf.html" %}
+    <form method="post" action="{{ url_for('faces_from_photos') }}" enctype="multipart/form-data" id="faces-form"
+          data-part-url="{{ url_for('faces_from_photos_part') }}">{% include "_csrf.html" %}
       <strong class="row">{{ icon('upload') }}Faces from photos (.zip)</strong>
       <label class="field"><span>Photos of a trip or a team day. The office computer keeps the clear faces (at most three of one
         person, no masks, no small or blurred faces) and puts them on Review: confirm each to teach the camera that face.</span>
         <input type="file" name="file" accept=".zip,application/zip" required></label>
-      <div><button {{ 'disabled' if faces_status.state == 'waiting' }}>{{ icon('upload') }}Upload photos</button></div>
+      <div class="row"><button {{ 'disabled' if faces_status.state == 'waiting' }}>{{ icon('upload') }}Upload photos</button>
+        <span class="hint" id="faces-progress" aria-live="polite"></span></div>
     </form>
+    <script>
+    (function () {  // sent in parts: the web server in front takes about 100 MB at a time
+      const form = document.getElementById('faces-form');
+      if (!form || !window.fetch) return;
+      form.addEventListener('submit', async (event) => {
+        const file = form.querySelector('input[type=file]').files[0];
+        if (!file) return;
+        event.preventDefault();
+        const say = (text) => { document.getElementById('faces-progress').textContent = text; };
+        const button = form.querySelector('button'); button.disabled = true;
+        const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+        const token = document.querySelector('meta[name="csrf-token"]').content;
+        const part = 32 * 1024 * 1024;
+        try {
+          for (let offset = 0; offset < file.size; offset += part) {
+            say('Uploading ' + Math.floor(100 * offset / file.size) + '%');
+            const url = form.dataset.partUrl + '?upload=' + id + '&offset=' + offset + '&total=' + file.size +
+                        '&name=' + encodeURIComponent(file.name);
+            const answer = await fetch(url, {method: 'POST', body: file.slice(offset, offset + part),
+                                              headers: {'X-CSRF-Token': token, 'Content-Type': 'application/octet-stream'}});
+            const data = await answer.json().catch(() => ({ok: false, message: 'HTTP ' + answer.status}));
+            if (!data.ok) throw new Error(data.message || ('HTTP ' + answer.status));
+          }
+          say('Uploaded'); window.location.reload();
+        } catch (error) {
+          say('Upload failed: ' + error.message); button.disabled = false;
+        }
+      });
+    })();
+    </script>
   </div>
 </dialog>
 {% endblock %}

@@ -130,32 +130,75 @@ def register(app: Flask, core: "App") -> None:
             return failed(f"Seed import not started: {exc}.", "employees")
         return done("Seed import started. The camera is paused until it finishes (a few minutes).", "employees")
 
+    def start_faces_job(rel: str, filename: str):
+        """Hand an uploaded .zip of photos to the camera computer (core/photobatch.py). None when it is no zip."""
+        from ..core import photobatch
+
+        if not photobatch.is_zip(core.data_dir / rel):
+            (core.data_dir / rel).unlink(missing_ok=True)
+            return None
+        now = service.now()
+        store.edge_job_add("faces", {"kind": "faces", "image": rel, "filename": filename[:120],
+                                     "batch": uuid.uuid4().hex[:8]}, now)
+        store.put(photobatch.STATUS_KEY, json.dumps({"state": "waiting", "filename": filename[:120], "at": now.isoformat(),
+                                                     "message": "", "cards": 0}))
+        store.log(now, current_user(cfg), "faces from photos", filename[:200])
+        return True
+
+    FACES_DONE = ("Photos uploaded. The office computer finds the faces outside the camera hours; they appear on "
+                  "Review as seed samples (this page says when).")
+    FACES_NO_ZIP = "That is not a .zip file. Put the photos in a .zip (Google Drive's Download makes one)."
+
     @app.post("/employees/faces-from-photos")
     def faces_from_photos():
         """A .zip of photos (a trip, a team day): the camera computer finds the good faces in them and they go
-        to Review, where confirming one teaches the camera that face (core/photobatch.py)."""
-        from ..core import photobatch
-
+        to Review, where confirming one teaches the camera that face. The page sends a big file in parts
+        (faces_from_photos_part): the web server in front takes about 100 MB at a time."""
         request.max_content_length = SEED_UPLOAD_MB * 1024 * 1024
         check_csrf()
         file = request.files.get("file")
         if not file or not file.filename:
             return failed("Choose a .zip of photos.", "employees")
-        folder = core.data_dir / "uploads"
-        folder.mkdir(parents=True, exist_ok=True)
+        (core.data_dir / "uploads").mkdir(parents=True, exist_ok=True)
         rel = f"uploads/{uuid.uuid4().hex}"
         file.save(core.data_dir / rel)
-        if not photobatch.is_zip(core.data_dir / rel):
-            (core.data_dir / rel).unlink(missing_ok=True)
-            return failed("That is not a .zip file. Put the photos in a .zip (Google Drive's Download makes one).", "employees")
-        now = service.now()
-        batch = uuid.uuid4().hex[:8]
-        store.edge_job_add("faces", {"kind": "faces", "image": rel, "filename": file.filename[:120], "batch": batch}, now)
-        store.put(photobatch.STATUS_KEY, json.dumps({"state": "waiting", "filename": file.filename[:120], "at": now.isoformat(),
-                                                     "message": "", "cards": 0}))
-        store.log(now, current_user(cfg), "faces from photos", file.filename[:200])
-        return done("Photos uploaded. The office computer finds the faces outside the camera hours; they appear on "
-                    "Review as seed samples (this page says when).", "employees")
+        if not start_faces_job(rel, file.filename):
+            return failed(FACES_NO_ZIP, "employees")
+        return done(FACES_DONE, "employees")
+
+    FACES_PART_MB = 32
+
+    @app.post("/employees/faces-from-photos/part")
+    def faces_from_photos_part():
+        """One part of a big .zip of photos, in order: ?upload=<32 hex>&offset=&total=&name=. The last one
+        starts the job."""
+        request.max_content_length = (FACES_PART_MB + 1) * 1024 * 1024
+        check_csrf()
+        upload = request.args.get("upload", "")
+        try:
+            offset, total = int(request.args["offset"]), int(request.args["total"])
+        except (KeyError, ValueError):
+            abort(400, "expected offset and total")
+        if len(upload) != 32 or any(c not in "0123456789abcdef" for c in upload):
+            abort(400, "bad upload id")
+        if not 0 < total <= SEED_UPLOAD_MB * 1024 * 1024 or not 0 <= offset < total:
+            return jsonify(ok=False, message=f"The .zip must be at most {SEED_UPLOAD_MB} MB."), 400
+        chunk = request.get_data()
+        (core.data_dir / "uploads").mkdir(parents=True, exist_ok=True)
+        part = core.data_dir / "uploads" / f"{upload}.part"
+        have = part.stat().st_size if part.exists() else 0
+        if offset != have or not chunk or offset + len(chunk) > total:
+            return jsonify(ok=False, message="Upload out of order: choose the file again.", have=have), 409
+        with part.open("ab") as fh:
+            fh.write(chunk)
+        if offset + len(chunk) < total:
+            return jsonify(ok=True, done=False)
+        rel = f"uploads/{upload}"
+        part.replace(core.data_dir / rel)
+        if not start_faces_job(rel, request.args.get("name", "photos.zip")):
+            return jsonify(ok=False, message=FACES_NO_ZIP), 400
+        flash(FACES_DONE, "ok")
+        return jsonify(ok=True, done=True)
 
     @app.get("/employees/seed.json")
     def seed_status():

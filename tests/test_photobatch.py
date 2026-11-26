@@ -132,3 +132,31 @@ def test_the_camera_computer_reads_the_zip_outside_the_camera_hours_and_sends_th
     assert sent["ok"] and sent["model"] == "w600k_r50" and sent["samples"][0]["image"].endswith("/faces_ab_000.jpg")
     assert np.allclose(np.frombuffer(base64.b64decode(sent["samples"][0]["vector"]), np.float32), vec(2))
     assert not (tmp_path / "photo-batches" / "7").exists()  # the photos are not kept here
+
+
+def test_a_big_zip_comes_in_parts_and_starts_the_job_with_the_last(core):
+    from attendance.web import create_app
+
+    app, _, _ = core
+    client = create_app(app).test_client()
+    page = client.get("/employees").get_data(as_text=True)
+    token = re.search(r'name="csrf-token" content="([^"]*)"', page)
+    headers = {"X-CSRF-Token": token.group(1)} if token else {}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("a.jpg", b"\xff\xd8" * 1000)
+    data, upload = buf.getvalue(), "c" * 32
+    half = len(data) // 2
+
+    def part(offset, chunk):
+        return client.post(f"/employees/faces-from-photos/part?upload={upload}&offset={offset}&total={len(data)}&name=trip.zip",
+                           data=chunk, headers=headers, content_type="application/octet-stream")
+    assert part(half, data[half:]).status_code == 409  # out of order
+    first = part(0, data[:half])
+    assert first.get_json() == {"ok": True, "done": False} and not app.store.edge_jobs()
+    last = part(half, data[half:])
+    assert last.get_json() == {"ok": True, "done": True}
+    job = app.store.edge_jobs()[-1]
+    assert job["kind"] == "faces" and job["payload"]["image"] == f"uploads/{upload}"
+    assert (app.data_dir / job["payload"]["image"]).read_bytes() == data
+    assert "faces-progress" in client.get("/employees").get_data(as_text=True)
