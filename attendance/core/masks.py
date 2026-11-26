@@ -35,10 +35,10 @@ class MaskWatch:
             return False
         for pid in [p for p, s in self._seen.items() if (ts - s[2]).total_seconds() > FORGET_S]:
             del self._seen[pid]
-        named = {t.person_id for t in tracks if t.person_id is not None and t.decided}
+        named = {id(t.embedding) for t in tracks if t.decided}  # the face's own track, not its person box
         rc, asked = self.cfg.recognition, False
         for face, _, pid in matched:
-            if pid is None or pid in named or face.size < rc.min_face_px:
+            if pid is None or id(face.embedding) in named or face.size < rc.min_face_px:
                 continue
             if not looks_covered(frame, face.landmarks):
                 continue

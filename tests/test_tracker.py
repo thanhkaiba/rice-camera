@@ -290,3 +290,31 @@ def test_unclear_frames_stay_with_the_person_track():
         face = Observation((100, 100, 180, 180), A, cands, True, 0.8, person_id=3)
         out += tr.update([face], T0 + dt.timedelta(seconds=0.3 * i), people={3: T0})
     assert len(tr._tracks) == 1 and [d.employee_id for d in out if d.kind == "identified"] == ["A"]
+
+
+def test_a_face_behind_in_a_named_persons_box_gets_a_track_of_its_own():
+    """26/11/2026 08:54: Beny (0.67, clear) walked in inside the box of someone named a moment before."""
+    tr = tracker()
+    tr.p.accept_score = 0.35
+    first = np.zeros(512, np.float32); first[0] = 1
+    beny = np.zeros(512, np.float32); beny[1] = 1
+    out = []
+    for i in range(3):  # the person in front: named
+        face = Observation((100, 100, 180, 180), first, [("X", 0.7), ("y", 0.1)], True, 0.8, person_id=4)
+        out += tr.update([face], T0 + dt.timedelta(seconds=0.2 * i), people={4: T0})
+    for i in range(3, 7):  # the same box now holds Beny's face: the first frame unclear, then clear ones
+        cands = [("B", 0.3), ("y", 0.25)] if i == 3 else [("B", 0.67), ("y", 0.2)]
+        face = Observation((100, 100, 180, 180), beny, cands, True, 0.8, person_id=4)
+        out += tr.update([face], T0 + dt.timedelta(seconds=0.2 * i), people={4: T0})
+    assert [d.employee_id for d in out if d.kind == "identified"] == ["X", "B"]
+
+
+def test_one_person_turning_stays_one_track():
+    tr = tracker()
+    front = np.zeros(512, np.float32); front[0] = 1
+    side = np.zeros(512, np.float32); side[0], side[1] = 0.6, 0.8  # 0.6 alike: the same face, turned
+    for i, (v, c) in enumerate([(front, [("A", 0.8), ("b", 0.1)]), (side, [("A", 0.3), ("b", 0.2)]),
+                                (front, [("A", 0.8), ("b", 0.1)])]):
+        tr.update([Observation((100, 100, 180, 180), v, c, True, 0.8, person_id=2)],
+                  T0 + dt.timedelta(seconds=0.2 * i), people={2: T0})
+    assert len(tr._tracks) == 1

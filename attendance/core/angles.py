@@ -42,13 +42,15 @@ class AngleLearner:
         c, rc = self.cfg.collect, self.cfg.recognition
         if not getattr(c, "angles", True) or self.cfg.tracking.mode != "person":
             return 0
-        named = {t.person_id: t.decided for t in tracks if t.person_id is not None and t.decided}
+        # The track each face of this frame joined (a person box can hold two tracks: someone right behind gets one
+        # of their own, see tracker.SAME_FACE_SIM), so a face is only taken for the person its own track named.
+        named = {id(t.embedding): t.decided for t in tracks if t.person_id is not None and t.decided}
         if not named:
             return 0
         skip = {v for v in c.skip_people.split(",") if v}
         sent, added = None, 0
         for face, candidates, pid in matched:
-            employee = named.get(pid)
+            employee = named.get(id(face.embedding)) if pid is not None else None
             if employee is None or employee in skip or face.quality_ok:
                 continue
             if not face.size_ok or face.size < rc.min_face_px or not rc.max_yaw < abs(face.yaw) <= MAX_TURN:

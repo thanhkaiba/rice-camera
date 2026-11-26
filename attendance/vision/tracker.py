@@ -24,6 +24,13 @@ import numpy as np
 LINK_IOU = 0.2  # same position as the previous frame
 LINK_SIM = 0.5  # or clearly the same face
 LINK_MIN_SIM = 0.3  # never link faces that look like different people, even at the same position
+# A person box can hold the face of someone standing right behind (the box takes its largest face, and when
+# the person in front turns away that is the face behind). A face this unlike the faces of the box's tracks
+# starts a track of its own (see FaceTracker._link). Measured on the picture-a-second recordings of 26/11/2026
+# (08:50-09:10, 09:20-09:30): one person's face from one second to the next was 0.28 alike at worst and 0.33
+# or more in 95 of 100 pairs (2 of 48 below 0.3); two different people within 250 px, 0.34 at most and
+# 0.23 or less in 95 of 100 (1 of 46 above 0.3). Live frames are closer together than a second.
+SAME_FACE_SIM = 0.3
 SPLIT_WINDOW = dt.timedelta(seconds=5)
 # An unknown track that starts this soon after an unknown track ended, and looks like it, continues
 # that track's Review card instead of opening a new one: a few frames a second and a face that
@@ -148,6 +155,13 @@ class _Track:
     tops: list = field(default_factory=list)  # (best match, its score) of every frame that had a match
 
 
+def _alike(obs: "Observation", t: "_Track") -> float:
+    """How alike a face is to a track's faces: its latest, its best and its first, whichever is closest."""
+    refs = [t.embedding] + [e for e in (t.best.embedding if t.best is not None else None, t.first_embedding)
+                            if e is not None]
+    return max(float(np.dot(obs.embedding, e)) for e in refs)
+
+
 def iou(a, b) -> float:
     x1, y1 = max(a[0], b[0]), max(a[1], b[1])
     x2, y2 = min(a[2], b[2]), min(a[3], b[3])
@@ -204,15 +218,15 @@ class FaceTracker:
         if obs.person_id is not None:
             same = [t for t in tracks if t.person_id == obs.person_id]
             if same:
-                if vote is None:  # an unclear face says nothing about who it is: the most alike track
-                    return max(same, key=lambda t: float(np.dot(obs.embedding, t.embedding)))
-                for t in same:  # the track already voting for this person
-                    if t.votes and t.votes.most_common(1)[0][0] == vote:
-                        return t
-                open_ = [t for t in same if not t.votes]
-                if open_:
-                    return max(open_, key=lambda t: float(np.dot(obs.embedding, t.embedding)))
-                return None  # every track of this body voted for someone else: another face, a track of its own
+                if vote is not None:
+                    for t in same:  # the track already voting for this person
+                        if t.votes and t.votes.most_common(1)[0][0] == vote:
+                            return t
+                    same = [t for t in same if not t.votes]  # not one voting for someone else
+                best = max(same, key=lambda t: _alike(obs, t), default=None)
+                if best is not None and _alike(obs, best) >= SAME_FACE_SIM:
+                    return best
+                return None  # another face in this person's box: a track of its own
         best, best_value = None, 0.0
         for t in tracks:
             if obs.person_id is not None and t.person_id is not None:

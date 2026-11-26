@@ -9,8 +9,11 @@ from conftest import at
 FRAME = np.zeros((400, 400, 3), dtype=np.uint8)
 
 
-def face(yaw, quality_ok=False, size=120.0, size_ok=True):
-    return SimpleNamespace(bbox=(50.0, 50.0, 170.0, 170.0), embedding=np.ones(4, np.float32), yaw=yaw, pitch=0.0,
+E7, E8, EB = np.ones(4, np.float32), np.ones(4, np.float32), np.ones(4, np.float32)  # each track's latest face
+
+
+def face(yaw, quality_ok=False, size=120.0, size_ok=True, emb=E7):
+    return SimpleNamespace(bbox=(50.0, 50.0, 170.0, 170.0), embedding=emb, yaw=yaw, pitch=0.0,
                            quality_ok=quality_ok, quality=0.5, size=size, size_ok=size_ok, landmarks=None)
 
 
@@ -21,8 +24,8 @@ def learner(core, mode="person"):
     return app, AngleLearner(app.cfg, app.store, report=lambda f, frame, now, candidates: sent.append(candidates)), sent
 
 
-TRACKS = [SimpleNamespace(person_id=7, decided="A"), SimpleNamespace(person_id=8, decided=None),
-          SimpleNamespace(person_id=None, decided="B")]
+TRACKS = [SimpleNamespace(person_id=7, decided="A", embedding=E7), SimpleNamespace(person_id=8, decided=None, embedding=E8),
+          SimpleNamespace(person_id=None, decided="B", embedding=EB)]
 LIKE_A = [("A", 0.31), ("B", 0.22)]
 
 
@@ -40,8 +43,9 @@ def test_one_turned_face_per_side_and_person_a_day_with_the_name_suggested(core)
 
 def test_only_clear_turned_faces_of_a_named_body(core):
     app, angles, sent = learner(core)
-    cases = [(face(-50), LIKE_A, 8),  # the body has no name yet
-             (face(-50), LIKE_A, None),  # a face without a body
+    cases = [(face(-50, emb=E8), LIKE_A, 8),  # the body has no name yet
+             (face(-50, emb=EB), LIKE_A, None),  # a face without a body
+             (face(-50, emb=np.ones(4, np.float32)), LIKE_A, 7),  # in A's box, but a track of its own
              (face(-50, quality_ok=True), LIKE_A, 7),  # a good face: the usual collection takes care of it
              (face(-20), LIKE_A, 7),  # not turned: refused for another reason (blur, pitch)
              (face(-85), LIKE_A, 7),  # too far round
@@ -60,8 +64,8 @@ def test_switched_off_faces_only_or_skipped_people(core):
     app.cfg.collect.angles, app.cfg.collect.skip_people = True, "A"
     assert angles.observe(TRACKS, [(face(-50), LIKE_A, 7)], FRAME, at(8, 30)) == 0
     app.cfg.collect.skip_people = ""
-    many = [SimpleNamespace(person_id=n, decided=f"P{n}") for n in range(40)]
-    faces = [(face(-50), [(f"P{n}", 0.3)], n) for n in range(40)]
+    many = [SimpleNamespace(person_id=n, decided=f"P{n}", embedding=np.ones(4, np.float32)) for n in range(40)]
+    faces = [(face(-50, emb=t.embedding), [(f"P{n}", 0.3)], n) for n, t in enumerate(many)]
     assert angles.observe(many, faces, FRAME, at(8, 30)) == PER_DAY  # a day's cards are limited
 
 
