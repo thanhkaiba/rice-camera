@@ -61,7 +61,7 @@ LATE_FINE_VI = [  # {you}: how they are addressed (anh, chị); {amount}: as Set
     "[playfully] Muộn xíu thôi mà, cho em xin {amount} là xong nhá. [giggles]",
     "[playfully] Em không nói nhiều đâu, cho em xin {amount} nhá!",
     "[cheerfully] Phí vào cửa của {you} hôm nay là {amount} nha! [chuckles]",
-    "[playfully] Em đã báo chị Hana ghi sổ {amount} rồi nha!",
+    "[playfully] Em đã báo chị Hana ghi sổ {amount} rồi nha! [giggles]",
     "[playfully] {Amount} thôi mà, em ghi sổ rồi ạ! [chuckles]",
     "[cheerfully] Hôm nay {you} góp {amount} cho quỹ nhá! [giggles]",
 ]
