@@ -65,6 +65,7 @@ class EdgeClient:
         self.on_say = lambda: {"ok": False, "message": "no greetings on this computer"}
         self.on_speaker = None  # plays a test sound and tells what it played on
         self.render_text = None
+        self.made_audio = None  # (employee id, on_time/late/short, index, day) -> the WAV made ahead, for the Greetings page
         self.on_create_voice = None
         self.upcoming = None  # day -> the day's written greetings, shown on the server's Greetings page
         self._preview_results = {}
@@ -284,11 +285,17 @@ class EdgeClient:
             try:
                 if time.time() >= payload["expires"]:
                     raise ValueError("Text preview expired. Generate audio again.")
-                if self.render_text is None:
-                    raise ValueError("Text previews are not available on this camera. Update the camera app.")
-                cloud = payload.get("cloud")  # the ElevenLabs values being tried on the Settings page
-                audio = (self.render_text(payload["text"], payload["voice"]) if cloud is None
-                         else self.render_text(payload["text"], payload["voice"], cloud))
+                if job.get("kind") == "greeting_audio":  # a sentence of the day, from the file made ahead
+                    if self.made_audio is None:
+                        raise ValueError("Listening to the day's audio needs a newer app on the camera.")
+                    audio = self.made_audio(payload["employee_id"], payload["line"], int(payload["index"]),
+                                            dt.date.fromisoformat(payload["day"]))
+                else:
+                    if self.render_text is None:
+                        raise ValueError("Text previews are not available on this camera. Update the camera app.")
+                    cloud = payload.get("cloud")  # the ElevenLabs values being tried on the Settings page
+                    audio = (self.render_text(payload["text"], payload["voice"]) if cloud is None
+                             else self.render_text(payload["text"], payload["voice"], cloud))
                 if not 12 <= len(audio) <= 4 * 1024 * 1024:
                     raise ValueError("Preview audio must be a WAV of at most 4 MB.")
                 result = {"ok": True}
@@ -319,7 +326,7 @@ class EdgeClient:
             pending["result"] = {"ok": False, "message": f"Camera: {type(exc).__name__}: {exc}"[:400]}
 
     def _do_job(self, job: dict) -> None:
-        if job.get("kind") == "preview_text":
+        if job.get("kind") in ("preview_text", "greeting_audio"):
             self._do_preview(job)
             return
         key = str(job["id"])

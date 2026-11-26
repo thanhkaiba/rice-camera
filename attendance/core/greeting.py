@@ -1039,6 +1039,32 @@ class Greeter:
                     for line in self.together_lines(day)]
         return {"day": day.isoformat(), "people": people, "together": together}
 
+    def made_audio(self, pid: str, kind: str, index: int, day: dt.date) -> bytes:
+        """The WAV made ahead for one of the day's written sentences, for the Greetings page to play. Never made
+        here, so listening costs no credits. `kind`: on_time, late or short; `index`: its place in that list."""
+        person = self.store.employee(pid)
+        entry = self.lines(day).get(pid)
+        if person is None or entry is None:
+            raise ValueError("Nothing is written for this person today.")
+        texts = (self._short_of(pid, entry, day) if kind == "short"
+                 else list(entry.get(kind) or []) if kind in ("on_time", "late") else [])
+        if not 0 <= index < len(texts):
+            raise ValueError("This sentence is no longer in today's list: refresh the page.")
+        language = person.greet_language
+        if not self.uses_zerotts(language):
+            raise ValueError("A macOS voice says this at the door: no audio is made ahead.")
+        said = self.voiced(texts[index], [person], language, day)
+        voices = [self.voice_for(language)]
+        try:
+            voices.append(self.zerotts_voice())  # what is read instead when ElevenLabs fails
+        except Exception:
+            pass
+        for voice in dict.fromkeys(v for v in voices if v):
+            path = self.audio_path(said, voice, day)
+            if path.is_file():
+                return path.read_bytes()
+        raise ValueError("Not made yet: the day's audio is made from 90 minutes before the camera starts.")
+
     def _short_of(self, pid: str, entry: dict, day: dt.date) -> list[str]:
         person = self.store.employee(pid)
         line = self.short_line(person, day) if person is not None else ""
@@ -2288,7 +2314,7 @@ class Greeter:
         from .config import parse_clock
 
         s = self.settings
-        if not (s.enabled and s.speaker_awake):
+        if not s.speaker_awake:  # greeting at the door switched off too: the speaker must not switch itself off
             return None
         _, _, end = self.cfg.schedule.clocks()
         if s.until_people:  # some people are greeted after the camera hours

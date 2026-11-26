@@ -364,7 +364,7 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
         payload = store.edge_job_take(job_id)
         if payload is None:
             return jsonify(ok=True)  # the answer to a job already closed
-        if payload.get("kind") == "preview_text":
+        if payload.get("kind") in ("preview_text", "greeting_audio"):
             with app.extensions["voice_preview_lock"]:
                 preview = app.extensions["voice_previews"].get(payload["preview_id"])
                 if preview is not None:

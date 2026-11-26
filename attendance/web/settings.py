@@ -304,7 +304,7 @@ def register(app: Flask, core: "App") -> None:
     def greeting_preview_text_result(preview_id):
         with text_preview_lock:
             preview = previews.get(preview_id)
-            if preview is None or preview.get("kind") != "preview_text":
+            if preview is None or preview.get("kind") not in ("preview_text", "greeting_audio"):
                 return jsonify(ok=False, message="Preview expired or server restarted. Generate audio again."), 404
             if time.time() >= preview["expires"]:
                 store.edge_job_take(preview["job_id"])

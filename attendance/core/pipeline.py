@@ -110,6 +110,7 @@ class App:
         self.machine.heard = self.greeter.listener.status
         self.edge.on_speaker = self.speaker_test
         self.edge.render_text = self.greeter.render_text
+        self.edge.made_audio = self.greeter.made_audio
         self.edge.upcoming = self.greeter.upcoming
         from .remote_voice_creation import run_on_camera
 

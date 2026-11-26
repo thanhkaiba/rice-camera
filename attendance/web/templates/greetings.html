@@ -23,14 +23,14 @@
 <details class="panel group" style="margin-bottom:18px">
   <summary><span>Still to come today</span><span class="sum">{{ coming.rows|length }} {{ 'person' if coming.rows|length == 1 else 'people' }} not greeted yet{% if coming.at %} · sent {{ coming.at.strftime('%H:%M') }}{% endif %}</span></summary>
   <div>
-    <p class="hint" style="margin:0 0 4px">The sentences written this morning for whoever the door has not greeted yet: one of them is said when they arrive, on time or late. Once said, a sentence moves to the list below to be marked.</p>
+    <p class="hint" style="margin:0 0 4px">The sentences written this morning for whoever the door has not greeted yet: one of them is said when they arrive, on time or late. Once said, a sentence moves to the list below to be marked. ▶ plays the audio the office computer made ahead (nothing is made again); someone late hears their name and the fine line after it.</p>
     {% if coming.rows %}
     <div class="greet-list" style="padding:0">
       {% for r in coming.rows %}
       <div class="greet-row">
         <div class="greet-said">
           <div style="font-weight:500">{{ r.name }}{% if r.note %} <span class="hint">· {{ r.note }}</span>{% endif %}</div>
-          {% for kind, text in r.lines %}<div class="greet-text"><span class="hint">{{ kind }}:</span> “{{ text }}”</div>{% endfor %}
+          {% for label, line, index, text in r.lines %}<div class="greet-text"><span class="hint">{{ label }}:</span> “{{ text }}” <button type="button" class="greet-play" data-employee="{{ r.id }}" data-line="{{ line }}" data-index="{{ index }}" aria-label="Listen to {{ r.name }}: {{ label }}" title="Listen to the audio made ahead" style="padding:0 8px; margin-left:4px">▶</button> <span class="hint greet-play-state" aria-live="polite"></span></div>{% endfor %}
         </div>
       </div>
       {% endfor %}
@@ -99,6 +99,43 @@
   const search = document.querySelector('#review-search');
   const filter = document.querySelector('#review-filter');
   const people = document.querySelector('#review-people');
+  let playing = null;
+  const listen = async button => {
+    const state = button.nextElementSibling;
+    if (playing) { playing.pause(); playing = null; }
+    button.disabled = true;
+    state.textContent = 'Fetching…';
+    try {
+      const body = new URLSearchParams({ csrf_token: token, employee_id: button.dataset.employee,
+                                         line: button.dataset.line, index: button.dataset.index });
+      const ask = { headers: { 'X-CSRF-Token': token, 'X-Requested-With': 'fetch' } };
+      let answer = await fetch({{ url_for('greeting_audio')|tojson }}, { ...ask, method: 'POST', body });
+      if (answer.status === 202) {  // asked of the office computer: wait for it
+        const wait = (await answer.json()).preview_url;
+        const until = Date.now() + 125000;
+        do {
+          await new Promise(done => setTimeout(done, 1000));
+          answer = await fetch(wait, ask);
+        } while (answer.status === 202 && Date.now() < until);
+      }
+      if (!answer.ok || !(answer.headers.get('Content-Type') || '').startsWith('audio/')) {
+        let message = 'Could not be played';
+        try { message = (await answer.json()).message || message; } catch (ignored) {}
+        throw new Error(message);
+      }
+      const src = URL.createObjectURL(await answer.blob());
+      const audio = new Audio(src);
+      playing = audio;
+      audio.addEventListener('ended', () => { URL.revokeObjectURL(src); state.textContent = ''; });
+      state.textContent = 'Playing';
+      await audio.play();
+    } catch (error) {
+      state.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  };
+  document.querySelectorAll('.greet-play').forEach(button => button.addEventListener('click', () => listen(button)));
   const normalize = text => text.toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
   const refresh = () => {
     if (!search) return;

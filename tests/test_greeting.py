@@ -697,7 +697,7 @@ def test_only_two_or_three_of_the_longest_streaks_are_cheered_each_day(core):
 
 def test_the_speaker_is_kept_awake_between_greetings(core):
     """A mains speaker that sleeps without a signal: a hum from "from" on, again whenever it had no sound for
-    "every" minutes, only on work days, only while the door greets, and never while someone waits."""
+    "every" minutes, only on work days, and never while someone waits."""
     import numpy as np
 
     app, clock, g, said, _ = make(core)
@@ -745,6 +745,21 @@ def test_the_speaker_is_kept_awake_between_greetings(core):
     g.set_rules({"day": DAY.isoformat(), "workday": True, "people": {}})
     g._sound_at = None
     assert g.keep_awake(broken) and "no output device" in g.awake_error and not g.keep_awake(broken)  # not tried again at once
+
+
+def test_the_speaker_is_kept_awake_while_greeting_at_the_door_is_off(core):
+    """Greeting at the door switched off (to review the sentences): the speaker must still not switch itself off,
+    only its own button switches it on again."""
+    app, clock, g, _, _ = make(core)
+    s = app.cfg.greeting
+    s.enabled, s.speaker_awake, s.speaker_awake_from, s.speaker_awake_every = False, True, "07:30", 10
+    g._sound_at = at(7, 0)
+    clock.t = at(7, 5)
+    assert g.awake_due(clock.t) is None
+    clock.t = at(7, 10)
+    assert g.awake_due(clock.t) == "again"
+    s.speaker_awake = False
+    assert g.awake_due(clock.t) is None
 
 
 def test_the_speaker_is_not_woken_twice_when_the_app_starts_again(core):

@@ -4,9 +4,12 @@ Today it also shows what the door is still going to say, to whom (sent by the Ma
 from __future__ import annotations
 
 import datetime as dt
+import io
+import time
+import uuid
 from typing import TYPE_CHECKING
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file, url_for
 
 from . import _date, current_user
 
@@ -61,16 +64,57 @@ def register(app: Flask, core: "App") -> None:
             person = people.get(emp)
             if person is None or not person.active or emp in said:
                 continue
-            lines = ([("on time", t) for t in entry.get("on_time", [])] + [("late", t) for t in entry.get("late", [])]
-                     if entry.get("timed", True) else
-                     [("any time", t) for t in entry.get("on_time", []) + entry.get("late", [])])
-            lines += [("busy door", t) for t in entry.get("short", [])]
+            # (label, list, place in it, sentence): the list and place find the audio made ahead
+            on = [("on_time", i, t) for i, t in enumerate(entry.get("on_time", []))]
+            late = [("late", i, t) for i, t in enumerate(entry.get("late", []))]
+            lines = ([("on time", *x) for x in on] + [("late", *x) for x in late] if entry.get("timed", True)
+                     else [("any time", *x) for x in on + late])
             if entry.get("on_time") and entry.get("on_time") == entry.get("late"):
-                lines = [("any arrival", t) for t in entry["on_time"]] + [("busy door", t) for t in entry.get("short", [])]
-            rows.append({"name": person.name, "note": entry.get("note", ""), "lines": lines})
+                lines = [("any arrival", *x) for x in on]
+            lines += [("busy door", "short", i, t) for i, t in enumerate(entry.get("short", []))]
+            rows.append({"id": emp, "name": person.name, "note": entry.get("note", ""), "lines": lines})
         rows.sort(key=lambda r: r["name"].lower())
         at = sent.get("at")
         return {"rows": rows, "together": sent.get("together", []), "at": dt.datetime.fromisoformat(at) if at else None}
+
+    @app.post("/greetings/audio")
+    def greeting_audio():
+        """One of today's sentences still to come, as the door will say it: the audio made ahead on the office
+        computer, never made again (no credits)."""
+        day = service.now().date()
+        emp, line = request.form.get("employee_id", ""), request.form.get("line", "")
+        try:
+            index = int(request.form.get("index", ""))
+        except ValueError:
+            index = -1
+        if not emp or line not in ("on_time", "late", "short") or index < 0:
+            return jsonify(ok=False, message="Unknown sentence."), 400
+        if not core.photos_read_elsewhere:  # the camera runs here: its own files
+            greeter = getattr(service, "greeter", None)
+            if greeter is None:
+                return jsonify(ok=False, message="No greeting audio is made on this computer."), 404
+            try:
+                data = greeter.made_audio(emp, line, index, day)
+            except ValueError as exc:
+                return jsonify(ok=False, message=str(exc)), 404
+            response = send_file(io.BytesIO(data), mimetype="audio/wav", download_name="greeting.wav")
+            response.headers["Cache-Control"] = "private, no-store"
+            return response
+        previews, lock = app.extensions["voice_previews"], app.extensions["voice_preview_lock"]
+        with lock:
+            for key, preview in list(previews.items()):
+                if preview.get("kind") == "greeting_audio" and time.time() >= preview["expires"]:
+                    store.edge_job_take(preview["job_id"])
+                    previews.pop(key)
+            if sum(p.get("kind") == "greeting_audio" for p in previews.values()) >= 3:
+                return jsonify(ok=False, message="A few sentences are still on their way: wait a moment."), 409
+            preview_id = uuid.uuid4().hex
+            expires = time.time() + 120
+            job_id = store.edge_job_add("greeting_audio", {
+                "kind": "greeting_audio", "preview_id": preview_id, "day": day.isoformat(), "employee_id": emp,
+                "line": line, "index": index, "expires": expires}, service.now())
+            previews[preview_id] = {"job_id": job_id, "expires": expires, "kind": "greeting_audio"}
+        return jsonify(ok=True, preview_url=url_for("greeting_preview_text_result", preview_id=preview_id)), 202
 
     @app.post("/greetings/rate")
     def rate_greeting():
