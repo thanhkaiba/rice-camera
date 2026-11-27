@@ -411,6 +411,37 @@ def called(person) -> str:
     return same[-1] if same else local.capitalize()
 
 
+SHORT_HELLOS_FROM = [lambda: ""]  # set by the Greeter: Settings -> Greeting -> busy-door hellos, "who = hello" per line
+_short_hellos: tuple[str, dict] = ("", {})
+
+
+def short_hellos() -> dict[str, str]:
+    """{email, email's first part, full name or the name called, lower case: their own busy-door hello}, from
+    Settings. One per line only: a hello may have commas in it."""
+    global _short_hellos
+    text = str(SHORT_HELLOS_FROM[0]() or "")
+    if _short_hellos[0] != text:
+        found = {}
+        for item in text.splitlines():
+            who, sep, hello = item.partition("=")
+            if sep and who.strip() and hello.strip():
+                found[" ".join(who.split()).lower()] = " ".join(hello.split())[:200]
+        _short_hellos = (text, found)
+    return _short_hellos[1]
+
+
+def own_short(person) -> str:
+    """Their own busy-door hello from Settings, or ""."""
+    hellos = short_hellos()
+    if not hellos:
+        return ""
+    email = (person.email or "").strip().lower()
+    for key in (email, email.partition("@")[0], " ".join(person.name.split()).lower(), called(person).lower()):
+        if key and key in hellos:
+            return hellos[key]
+    return ""
+
+
 def addressed(name: str, honorific: str) -> str:
     """What the built-in greetings call someone: "anh Minh", "chị Lan", or just "Minh"."""
     said = SAID.get(honorific)
@@ -879,6 +910,7 @@ class Greeter:
         """`cfg` is the whole Config; `late_from(day)` the usual first late minute of a day."""
         self.cfg, self.store, self.now, self.late_from = cfg, store, now, late_from
         CALL_NAMES_FROM[0] = lambda: getattr(cfg.greeting, "call_names", "")
+        SHORT_HELLOS_FROM[0] = lambda: getattr(cfg.greeting, "short_hellos", "")
         self._speak = speak or self._say
         self.speak_failed: str | None = None  # the last greeting that could not be played; None once one plays
         self.listener = Listener(cfg.base_dir)  # the office computer's microphone, hearing the speaker (listen.py)
@@ -1132,11 +1164,17 @@ class Greeter:
         if fixed_short(said):
             return True
         plain_said = untagged(said)
+        if any(untagged(hello) == plain_said for hello in short_hellos().values()):
+            return True
         return any(untagged(line) == plain_said for _, you in HONORIFICS.values() for line in self.fine_lines(you))
 
     def short_line(self, person, day: dt.date) -> str:
         """The short hello for a busy door. Vietnamese: one of SHORT_VI, picked once per person (the same every day).
-        English: today's from Claude, else the one kept for them; empty when there is none."""
+        English: today's from Claude, else the one kept for them; empty when there is none. Their own from
+        Settings (own_short) comes first."""
+        own = own_short(person)
+        if own:
+            return own
         if person.greet_language == "vi":
             who = addressed(called(person), person.honorific)
             line = SHORT_VI[int(hashlib.sha1(person.id.encode()).hexdigest(), 16) % len(SHORT_VI)]

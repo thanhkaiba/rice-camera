@@ -267,7 +267,10 @@
         <textarea name="greeting.call_names" rows="2" placeholder="tan.nguyen@offspringdigital.com = Tân">{{ s.greeting.call_names }}</textarea>
         <span class="hint">For someone whose name or email has no accents: email (or its first part, or the full name) = the name the door says, one per line. Their greetings are written again.</span>{{ src('greeting.call_names') }}</label>
       {{ field('greeting', 'late_fine', 'Late fine, as it is said', 'Someone who comes in late hears their name, then a light line about the fine, e.g. “hai mươi nghìn” (write it in words, the way the voice should say it) · empty: off · never for bosses') }}
-      {{ field('greeting', 'busy_seconds', 'Busy door (seconds)', 'Someone who arrives this soon after the last greeting, or while others wait, hears their short hello (“A, anh Terry!”). 0: only while others wait.', type='number') }}
+      {{ field('greeting', 'busy_seconds', 'Busy door (seconds)', 'Someone who arrives this soon after the last greeting, or while others wait, hears their short hello (“Em chào anh Terry ạ!”). 0: only while others wait.', type='number') }}
+      <label class="field">Busy-door hello of their own
+        <textarea name="greeting.short_hellos" rows="2" placeholder="Peter Vu = Em chào Chủ tịch Peter ạ!">{{ s.greeting.short_hellos }}</textarea>
+        <span class="hint">For some people, instead of the usual short hello at a busy door: their email, its first part, their full name or the name the door calls them = the hello, one per line.</span>{{ src('greeting.short_hellos') }}</label>
       {{ check('greeting', 'days_off', 'Write greetings on days off too', 'Off: Claude writes the sentences and ElevenLabs reads them ahead only on work days, so weekends and holidays cost nothing; someone who comes in then hears a plain hello') }}
       {{ check('greeting', 'tease', 'Joke about how people have arrived lately', 'Someone often late who comes early, or on time many days in a row. Only that label goes to Claude with the name, never a time. A late arrival is never teased about the habit.') }}
     </div>

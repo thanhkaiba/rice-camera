@@ -438,6 +438,10 @@ class GreetingConfig:
     # How the door calls someone whose name or email has no accents: "who = name", one per line or comma separated;
     # who is their email, its first part or their full name ("tan.nguyen@offspringdigital.com = Tân").
     call_names: str = ""
+    # A busy door's short hello of their own for some people, instead of the usual one: "who = hello", one per line;
+    # who is their email, its first part, their full name or the name the door calls them
+    # ("Peter Vu = Em chào Chủ tịch Peter ạ!").
+    short_hellos: str = ""
     # Someone who comes in late hears their name, then a light line about the office's fine with this amount as it
     # is said ("hai mươi nghìn"); empty: no fine lines, they hear the greeting written for them. Bosses never.
     late_fine: str = "hai mươi nghìn"
