@@ -729,8 +729,9 @@ def test_the_speaker_test_is_not_hidden_with_the_voices_not_chosen(core):
     from attendance.web import create_app
     app, _, _ = core
     page = create_app(app).test_client().get("/settings").get_data(as_text=True)
-    box = page.split('id="speaker-watch"')[0].rsplit("<div", 1)[1]
-    assert "data-engine" not in box and "Test the speaker" in page
+    box = page.split('id="g-greeting-speaker"')[0].rsplit("<details", 1)[1]
+    group = page.split('id="g-greeting-speaker"')[1].split('id="g-greeting-new-voice"')[0]
+    assert "data-engine" not in box and "engine-box" not in group and "Test the speaker" in group
     assert "querySelectorAll('.engine-box[data-engine]')" in page  # only voice boxes are shown and hidden by engine
 
 

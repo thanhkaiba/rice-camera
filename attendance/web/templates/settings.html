@@ -239,10 +239,25 @@
     </div></details>
   </section>
 
-  <section class="card tab" id="greeting">
-    <h2 class="row">{{ icon('wave') }}Greeting at the door</h2>
-    <p class="hint" style="margin-top:0">The office computer says hello through its speaker the first time each day the camera recognises someone.
+  <section class="tab groups" id="greeting">
+    {% set gs = (edge_beat or {}).get('greeting') %}
+    {% set sp = (edge_beat or {}).get('speaker') %}
+      {% set out = (sp or {}).get('output') %}
+{% set NAMED = {'zerotts': 'ZeroTTS', 'elevenlabs': 'ElevenLabs', 'macos': 'macOS'} %}
+    <details class="panel group" id="g-greeting-door">
+      <summary>{{ icon('wave') }}<span>Greeting at the door</span><span class="sum">{{ 'on' if s.greeting.enabled else 'off' }}{% if gs %} · sentences for {{ gs.ready }} people today · {{ gs.spoken }} greeted{% endif %}</span></summary>
+    <div>
+    <p class="hint">The office computer says hello through its speaker the first time each day the camera recognises someone.
       Who is greeted, as <em>anh</em> or <em>chị</em>, and in which language is set per person on <a href="{{ url_for('honorifics_page') }}">People → Greetings</a>.</p>
+    <div class="row between" style="margin:14px 0">
+      <span class="hint">{% if gs %}Office computer: {{ 'on' if gs.enabled else 'off' }} ·
+        {% if gs.voice %}voices ready{% else %}<strong>Check {{ s.greeting.zerotts_voice if s.greeting.engine == 'zerotts' else s.greeting.voice }} ({{ s.greeting.engine }}) and {{ s.greeting.zerotts_voice if s.greeting.engine_en == 'zerotts' else s.greeting.voice_en }} ({{ s.greeting.engine_en }}) on the office computer</strong>{% endif %} ·
+        sentences for {{ gs.ready }} people today{% if gs.audio %} · {{ gs.audio }} read ahead by ZeroTTS{% endif %} · {{ gs.spoken }} greeted today
+        {% if gs.error %}<br><span class="badge bad">Problem</span> {{ gs.error }}{% endif %}
+        {% elif edge_beat is not none %}Office computer: no greeting yet (it needs version 1.1.48 or later){% else %}Greets on the computer with the camera{% endif %}</span>
+      <button formaction="{{ url_for('greeting_test') }}" formnovalidate title="The office computer says a test sentence, then asks Claude for a greeting and says it: checks the key and the model">{{ icon('play') }}Say a test greeting</button>
+      <span class="plays" title="You hear nothing in this browser: someone has to be at the office door">{{ icon('wave') }}Plays on the office speaker</span>
+    </div>
     <div class="stack">
       {{ check('greeting', 'enabled', 'Greet people at the door', 'Off: silent') }}
       {{ check('greeting', 'unknown', 'Say hello to faces the camera cannot name', '“Xin chào!” without a name, at most once every 2 minutes') }}
@@ -266,9 +281,44 @@
       </div>
       {{ src('greeting.until_people') }}
     </details>
+    </div></details>
 
-    <h3 style="margin-top:18px">Voice</h3>
-    {% set gs = (edge_beat or {}).get('greeting') %}
+    <details class="panel group" id="g-greeting-sentences">
+      <summary>{{ icon('sparkles') }}<span>Sentences · written by Claude</span><span class="sum">{{ s.greeting.model if s.greeting.key else 'no API key: short built-in greetings' }}</span></summary>
+    <div>
+        <p class="hint" style="margin-top:0">Claude writes everyone's sentences once in the morning, so nothing waits for the network at the door.
+          Late arrivals get a playful line (an approved coming-late request on Base counts as on time). Without a key, short built-in greetings are used.</p>
+        <div class="form-row">
+          <label class="field grow">Claude API key<input name="greeting.key" type="password" autocomplete="off"
+            placeholder="{{ 'saved · leave empty to keep' if s.greeting.key else 'none: short built-in greetings' }}">
+            <span class="hint">From console.anthropic.com → API keys. Only names and anh/chị are sent, never photos.</span>{{ src('greeting.key') }}</label>
+          {{ field('greeting', 'model', 'Model', 'claude-opus-5-5, or claude-haiku-5-5 for a cheaper one') }}
+        </div>
+        <label class="field">In fashion at the office
+          <textarea name="greeting.trends" rows="3" maxlength="800" placeholder="One per line, e.g.&#10;đỉnh nóc kịch trần bay phấp phới&#10;“ổn áp” thay cho “ổn”">{{ s.greeting.trends }}</textarea>
+          <span class="hint">Optional: your office's own catchphrases, in-jokes or songs. Claude works one of these, or of the ones it finds itself, into about one greeting in four.</span>{{ src('greeting.trends') }}</label>
+        <label class="field">About the office
+          <textarea name="greeting.office" rows="3" maxlength="600" placeholder="One per line, e.g.&#10;No printer, no sticky notes&#10;Everyone has lunch together at 12">{{ s.greeting.office }}</textarea>
+          <span class="hint">Optional: what the office has and does, so the greetings never invent things that are not there.</span>{{ src('greeting.office') }}</label>
+        <div class="stack">
+          {{ check('greeting', 'trends_research', 'Claude looks up what is in fashion', 'Once a week Claude searches the web for catchphrases and memes people in Vietnam are saying now, keeps only the harmless ones, and uses them in the greetings. A few web searches a week on the Claude key.') }}
+        </div>
+        {% if gs and gs.trends and (gs.trends.lines or gs.trends.error) %}
+        <p class="hint">{% if gs.trends.lines %}Found on {{ gs.trends.day }}:{% for line in gs.trends.lines %}<br>· {{ line }}{% endfor %}{% endif %}
+          {% if gs.trends.error %}<br><span class="badge bad">Problem</span> {{ gs.trends.error }}{% endif %}</p>
+        {% endif %}
+        {{ field('greeting', 'style', 'Extra wishes for the sentences', 'Optional, e.g. "nhắc uống nước", "hài hước hơn"', cls='grow') }}
+        <div class="form-row">
+          <label class="field grow">Office location, for the weather
+            <input name="greeting.location" value="{{ s.greeting.location }}" placeholder="21.0285, 105.8542">
+            <span class="hint">In Google Maps, right-click the office and click the numbers to copy them, then paste here (a Google Maps link works too). A city name such as “Hà Nội” also works · the morning forecast comes from open-meteo.com · empty: no weather.
+              {% if gs and gs.weather %}<br>Office computer: {{ gs.weather }}{% endif %}</span>{{ src('greeting.location') }}</label>
+        </div>
+    </div></details>
+
+    <details class="panel group" id="g-greeting-voice">
+      <summary>{{ icon('play') }}<span>Voice</span><span class="sum">Vietnamese: {{ NAMED.get(s.greeting.engine, s.greeting.engine) }} · English: {{ NAMED.get(s.greeting.engine_en, s.greeting.engine_en) }}</span></summary>
+    <div>
     {% set ENGINES = (('zerotts', 'ZeroTTS · on the office computer, free'), ('elevenlabs', 'ElevenLabs · online, paid per character'), ('macos', 'macOS · the computer’s built-in voice')) %}
     <div class="form-row">
       <label class="field">Vietnamese is read by
@@ -374,46 +424,6 @@
       {{ field('greeting', 'loudness', 'Louder at the door', '1.0 = as made · 1.5 a good deal louder · up to 3 · for ZeroTTS and ElevenLabs, when the speaker is at full volume and still too quiet. Higher sounds harsher.', type='number', step='0.1') }}
     </div>
 
-    {% set sp = (edge_beat or {}).get('speaker') %}
-    <div class="engine-box" id="speaker-watch">
-      <h4>Speaker watch</h4>
-      <p class="hint" style="margin:0 0 8px">Every 10 minutes the office computer checks, without a sound, where it plays, its volume and mute, and tells the system space when something is wrong. A speaker that is switched off or turned down by its own knob cannot be seen: use the test.</p>
-      <div class="form-row">
-        <label class="field">Speaker the greetings play on
-          <input name="greeting.speaker" value="{{ s.greeting.speaker }}" list="speaker-names" placeholder="any" maxlength="80" autocomplete="off">
-          <datalist id="speaker-names">{% for name in (sp.devices if sp else []) %}<option value="{{ name }}">{% endfor %}</datalist>
-          <span class="hint">As macOS names it, e.g. External Headphones (the headphone socket). Empty: where it plays is not checked.</span>{{ src('greeting.speaker') }}
-        </label>
-        {{ field('greeting', 'speaker_min_volume', 'Alert below volume (%)', '0 = volume not checked', type='number') }}
-      </div>
-      <div class="stack" style="margin:10px 0 4px">
-        {{ check('greeting', 'speaker_listen', 'Listen with the computer\'s microphone', 'While a greeting plays, the office computer (a MacBook) records a few seconds with its own microphone and checks that the speaker really made the sound; after three greetings in a row it did not hear, the system space is told. Nothing is kept. The first time, macOS asks at the office computer whether “FaceAttendance Mic” may use the microphone: someone there clicks OK (or “Test the speaker” asks it). The test always listens.') }}
-        {{ check('greeting', 'speaker_awake', 'Keep the speaker awake', 'For a mains speaker that goes to sleep without sound and then swallows a greeting. On work days, at the time below, the office computer plays a soft low hum of 6 seconds that wakes the speaker (it can be heard). After that, day and night, whenever the speaker had no sound for the minutes below it gets a soft 60 Hz tone of 3 seconds. Not while the computer\'s own speaker is in use.') }}
-      </div>
-      <div class="form-row">
-        {{ time24('greeting', 'speaker_awake_from', 'Wake it at') }}
-        {{ field('greeting', 'speaker_awake_every', 'Keep-awake tone every (min)', 'Day and night, every day · shorter than the time after which the speaker switches off · 1–480', type='number') }}
-        {{ field('greeting', 'speaker_awake_level', 'Hum level (%)', '1–50 · the wake-up hum and the 60 Hz tone are three times this', type='number') }}
-      </div>
-      <div class="row between">
-        <span class="hint">{% if sp %}Office computer now: <strong>{{ sp.device or 'unknown output' }}</strong> · {{ 'volume ' ~ sp.volume ~ '%' if sp.volume is not none else 'volume unknown' }} · {% if sp.muted %}<span class="badge bad">muted</span>{% else %}not muted{% endif %}{% set hd = sp.heard %}{% if hd %}<br>Microphone: {% if hd.allowed is sameas false %}<span class="badge bad">not allowed</span> (System Settings → Privacy &amp; Security → Microphone → FaceAttendance Mic){% elif hd.heard is sameas true %}<span class="badge ok">heard the speaker</span>{% elif hd.heard is sameas false %}<span class="badge bad">did not hear the speaker</span>{% else %}{{ hd.message or 'no answer yet' }}{% endif %}{% if hd.at_text %} · {{ hd.kind }} at {{ hd.at_text }}{% endif %}{% if hd.corr is not none %} · match {{ '%.2f' % hd.corr }}{% endif %}{% endif %}{% else %}No speaker reading from the office computer yet (greetings on, version 1.1.83 or later).{% endif %}</span>
-        <button formaction="{{ url_for('speaker_test') }}" formnovalidate title="The office computer plays one short sound; what it played on is written to Audit">{{ icon('play') }}Test the speaker</button>
-        <span class="plays" title="You hear nothing in this browser: someone has to be at the office">{{ icon('wave') }}Plays on the office speaker</span>
-      </div>
-      {% set out = (sp or {}).get('output') %}
-      <div class="row between" id="speaker-output" style="margin-top:10px">
-        <span class="hint">Greetings play on: <strong>{% if out and out.output == 'builtin' %}the computer's own speaker (louder){% elif out and out.output == 'external' %}the external speaker{% else %}not chosen yet{% endif %}</strong>{% if out and out.why %} · {{ out.why }}{% endif %}<br>Every morning at 07:00 the office computer plays the test on the external speaker and listens: not heard (switched off: only its own button switches it on), the greetings go to the computer's own speaker. After pressing the speaker's button, switch back here. Each speaker is set to its volume below at every switch: save first, then switch.</span>
-        <span class="row">
-          {{ field('greeting', 'speaker_volume_external', 'External speaker volume (%)', 'set at every switch to it · not below the volume alert', type='number') }}
-          {{ field('greeting', 'speaker_volume_builtin', 'Computer speaker volume (%)', 'set at every switch to it · not below the volume alert', type='number') }}
-        </span>
-        <span class="row">
-          <button formaction="{{ url_for('speaker_output') }}" name="output" value="external" formnovalidate title="The greetings play on the external speaker from now on; a test sound is played there">{{ icon('wave') }}Use the external speaker</button>
-          <button formaction="{{ url_for('speaker_output') }}" name="output" value="builtin" formnovalidate title="The greetings play on the computer's own speaker, at full volume and louder">{{ icon('wave') }}Use the computer's speaker</button>
-        </span>
-      </div>
-    </div>
-
     <div class="listen-box">
       <h4>Listen <span class="plays" title="The office computer makes the audio and sends it here; the office speaker stays silent">{{ icon('play') }}Plays in this browser, not at the office</span></h4>
       <label class="field">Text to read
@@ -430,54 +440,51 @@
       <p class="hint" id="voice-text-status" role="status" aria-live="polite"></p>
       <audio id="voice-text-audio" controls preload="none" hidden aria-label="Listen to your text"></audio>
     </div>
+    </div></details>
 
-    <div class="row between" style="margin:14px 0">
-      <span class="hint">{% if gs %}Office computer: {{ 'on' if gs.enabled else 'off' }} ·
-        {% if gs.voice %}voices ready{% else %}<strong>Check {{ s.greeting.zerotts_voice if s.greeting.engine == 'zerotts' else s.greeting.voice }} ({{ s.greeting.engine }}) and {{ s.greeting.zerotts_voice if s.greeting.engine_en == 'zerotts' else s.greeting.voice_en }} ({{ s.greeting.engine_en }}) on the office computer</strong>{% endif %} ·
-        sentences for {{ gs.ready }} people today{% if gs.audio %} · {{ gs.audio }} read ahead by ZeroTTS{% endif %} · {{ gs.spoken }} greeted today
-        {% if gs.error %}<br><span class="badge bad">Problem</span> {{ gs.error }}{% endif %}
-        {% elif edge_beat is not none %}Office computer: no greeting yet (it needs version 1.1.48 or later){% else %}Greets on the computer with the camera{% endif %}</span>
-      <button formaction="{{ url_for('greeting_test') }}" formnovalidate title="The office computer says a test sentence, then asks Claude for a greeting and says it: checks the key and the model">{{ icon('play') }}Say a test greeting</button>
-      <span class="plays" title="You hear nothing in this browser: someone has to be at the office door">{{ icon('wave') }}Plays on the office speaker</span>
-    </div>
-
-    <details class="panel" {{ 'open' if not s.greeting.key }}>
-      <summary>Sentences · written by Claude ({{ s.greeting.model }}{{ '' if s.greeting.key else ', no API key yet' }})</summary>
-      <div>
-        <p class="hint" style="margin-top:0">Claude writes everyone's sentences once in the morning, so nothing waits for the network at the door.
-          Late arrivals get a playful line (an approved coming-late request on Base counts as on time). Without a key, short built-in greetings are used.</p>
-        <div class="form-row">
-          <label class="field grow">Claude API key<input name="greeting.key" type="password" autocomplete="off"
-            placeholder="{{ 'saved · leave empty to keep' if s.greeting.key else 'none: short built-in greetings' }}">
-            <span class="hint">From console.anthropic.com → API keys. Only names and anh/chị are sent, never photos.</span>{{ src('greeting.key') }}</label>
-          {{ field('greeting', 'model', 'Model', 'claude-opus-5-5, or claude-haiku-5-5 for a cheaper one') }}
-        </div>
-        <label class="field">In fashion at the office
-          <textarea name="greeting.trends" rows="3" maxlength="800" placeholder="One per line, e.g.&#10;đỉnh nóc kịch trần bay phấp phới&#10;“ổn áp” thay cho “ổn”">{{ s.greeting.trends }}</textarea>
-          <span class="hint">Optional: your office's own catchphrases, in-jokes or songs. Claude works one of these, or of the ones it finds itself, into about one greeting in four.</span>{{ src('greeting.trends') }}</label>
-        <label class="field">About the office
-          <textarea name="greeting.office" rows="3" maxlength="600" placeholder="One per line, e.g.&#10;No printer, no sticky notes&#10;Everyone has lunch together at 12">{{ s.greeting.office }}</textarea>
-          <span class="hint">Optional: what the office has and does, so the greetings never invent things that are not there.</span>{{ src('greeting.office') }}</label>
-        <div class="stack">
-          {{ check('greeting', 'trends_research', 'Claude looks up what is in fashion', 'Once a week Claude searches the web for catchphrases and memes people in Vietnam are saying now, keeps only the harmless ones, and uses them in the greetings. A few web searches a week on the Claude key.') }}
-        </div>
-        {% if gs and gs.trends and (gs.trends.lines or gs.trends.error) %}
-        <p class="hint">{% if gs.trends.lines %}Found on {{ gs.trends.day }}:{% for line in gs.trends.lines %}<br>· {{ line }}{% endfor %}{% endif %}
-          {% if gs.trends.error %}<br><span class="badge bad">Problem</span> {{ gs.trends.error }}{% endif %}</p>
-        {% endif %}
-        {{ field('greeting', 'style', 'Extra wishes for the sentences', 'Optional, e.g. "nhắc uống nước", "hài hước hơn"', cls='grow') }}
-        <div class="form-row">
-          <label class="field grow">Office location, for the weather
-            <input name="greeting.location" value="{{ s.greeting.location }}" placeholder="21.0285, 105.8542">
-            <span class="hint">In Google Maps, right-click the office and click the numbers to copy them, then paste here (a Google Maps link works too). A city name such as “Hà Nội” also works · the morning forecast comes from open-meteo.com · empty: no weather.
-              {% if gs and gs.weather %}<br>Office computer: {{ gs.weather }}{% endif %}</span>{{ src('greeting.location') }}</label>
-        </div>
+    <details class="panel group" id="g-greeting-speaker">
+      <summary>{{ icon('bell') }}<span>Speaker</span><span class="sum">{% if out and out.output == 'builtin' %}the computer's own speaker{% elif out and out.output == 'external' %}the external speaker{% else %}not chosen yet{% endif %}{% if sp and sp.volume is not none %} · volume {{ sp.volume }}%{% endif %}{% if sp and sp.muted %} · muted{% endif %}</span></summary>
+    <div>
+      <div class="row between" id="speaker-output">
+        <span class="hint">Greetings play on: <strong>{% if out and out.output == 'builtin' %}the computer's own speaker (louder){% elif out and out.output == 'external' %}the external speaker{% else %}not chosen yet{% endif %}</strong>{% if out and out.why %} · {{ out.why }}{% endif %}<br>Every morning at 07:00 the office computer plays the test on the external speaker and listens: not heard (switched off: only its own button switches it on), the greetings go to the computer's own speaker. After pressing the speaker's button, switch back here. Each speaker is set to its volume below at every switch: save first, then switch.</span>
+        <span class="row">
+          {{ field('greeting', 'speaker_volume_external', 'External speaker volume (%)', 'set at every switch to it · not below the volume alert', type='number') }}
+          {{ field('greeting', 'speaker_volume_builtin', 'Computer speaker volume (%)', 'set at every switch to it · not below the volume alert', type='number') }}
+        </span>
+        <span class="row">
+          <button formaction="{{ url_for('speaker_output') }}" name="output" value="external" formnovalidate title="The greetings play on the external speaker from now on; a test sound is played there">{{ icon('wave') }}Use the external speaker</button>
+          <button formaction="{{ url_for('speaker_output') }}" name="output" value="builtin" formnovalidate title="The greetings play on the computer's own speaker, at full volume and louder">{{ icon('wave') }}Use the computer's speaker</button>
+        </span>
       </div>
-    </details>
+      <h3 style="margin-top:18px">Speaker watch</h3>
+      <p class="hint" style="margin:0 0 8px">Every 10 minutes the office computer checks, without a sound, where it plays, its volume and mute, and tells the system space when something is wrong. A speaker that is switched off or turned down by its own knob cannot be seen: use the test.</p>
+      <div class="form-row">
+        <label class="field">Speaker the greetings play on
+          <input name="greeting.speaker" value="{{ s.greeting.speaker }}" list="speaker-names" placeholder="any" maxlength="80" autocomplete="off">
+          <datalist id="speaker-names">{% for name in (sp.devices if sp else []) %}<option value="{{ name }}">{% endfor %}</datalist>
+          <span class="hint">As macOS names it, e.g. External Headphones (the headphone socket). Empty: where it plays is not checked.</span>{{ src('greeting.speaker') }}
+        </label>
+        {{ field('greeting', 'speaker_min_volume', 'Alert below volume (%)', '0 = volume not checked', type='number') }}
+      </div>
+      <div class="stack" style="margin:10px 0 4px">
+        {{ check('greeting', 'speaker_listen', 'Listen with the computer\'s microphone', 'While a greeting plays, the office computer (a MacBook) records a few seconds with its own microphone and checks that the speaker really made the sound; after three greetings in a row it did not hear, the system space is told. Nothing is kept. The first time, macOS asks at the office computer whether “FaceAttendance Mic” may use the microphone: someone there clicks OK (or “Test the speaker” asks it). The test always listens.') }}
+        {{ check('greeting', 'speaker_awake', 'Keep the speaker awake', 'For a mains speaker that goes to sleep without sound and then swallows a greeting. On work days, at the time below, the office computer plays a soft low hum of 6 seconds that wakes the speaker (it can be heard). After that, day and night, whenever the speaker had no sound for the minutes below it gets a soft 60 Hz tone of 3 seconds. While the computer\'s own speaker greets, the tone is still played on the external one, for a moment.') }}
+      </div>
+      <div class="form-row">
+        {{ time24('greeting', 'speaker_awake_from', 'Wake it at') }}
+        {{ field('greeting', 'speaker_awake_every', 'Keep-awake tone every (min)', 'Day and night, every day · shorter than the time after which the speaker switches off · 1–480', type='number') }}
+        {{ field('greeting', 'speaker_awake_level', 'Hum level (%)', '1–50 · the wake-up hum and the 60 Hz tone are three times this', type='number') }}
+      </div>
+      <div class="row between">
+        <span class="hint">{% if sp %}Office computer now: <strong>{{ sp.device or 'unknown output' }}</strong> · {{ 'volume ' ~ sp.volume ~ '%' if sp.volume is not none else 'volume unknown' }} · {% if sp.muted %}<span class="badge bad">muted</span>{% else %}not muted{% endif %}{% set hd = sp.heard %}{% if hd %}<br>Microphone: {% if hd.allowed is sameas false %}<span class="badge bad">not allowed</span> (System Settings → Privacy &amp; Security → Microphone → FaceAttendance Mic){% elif hd.heard is sameas true %}<span class="badge ok">heard the speaker</span>{% elif hd.heard is sameas false %}<span class="badge bad">did not hear the speaker</span>{% else %}{{ hd.message or 'no answer yet' }}{% endif %}{% if hd.at_text %} · {{ hd.kind }} at {{ hd.at_text }}{% endif %}{% if hd.corr is not none %} · match {{ '%.2f' % hd.corr }}{% endif %}{% endif %}{% else %}No speaker reading from the office computer yet (greetings on, version 1.1.83 or later).{% endif %}</span>
+        <button formaction="{{ url_for('speaker_test') }}" formnovalidate title="The office computer plays one short sound; what it played on is written to Audit">{{ icon('play') }}Test the speaker</button>
+        <span class="plays" title="You hear nothing in this browser: someone has to be at the office">{{ icon('wave') }}Plays on the office speaker</span>
+      </div>
+    </div></details>
 
-    <details class="panel">
-      <summary>Add a ZeroTTS voice <span class="sum"><span class="plays">{{ icon('play') }}Preview plays in this browser</span></span></summary>
-      <div>
+    <details class="panel group" id="g-greeting-new-voice">
+      <summary>{{ icon('plus') }}<span>Add a ZeroTTS voice</span><span class="sum"><span class="plays">{{ icon('play') }}Preview plays in this browser</span></span></summary>
+    <div>
         <h3 style="margin-top:0">Record a voice here</h3>
         <p class="hint">Use a clean recording of your own voice, or a speaker who has agreed to its use. It is processed on the office computer, without an external voice service. Listen to the result before choosing it.</p>
         <div class="form-row">
@@ -537,16 +544,14 @@
           <button type="submit" form="voice-upload">{{ icon('upload') }}Upload and use voice</button>
         </div>
         </details>
-      </div>
-    </details>
+    </div></details>
 
-    <details class="panel">
-      <summary>Advanced</summary>
-      <div>
+    <details class="panel group" id="g-greeting-advanced">
+      <summary>{{ icon('sliders') }}<span>Advanced</span></summary>
+    <div>
         {{ field('greeting', 'zerotts_voices_dir', 'Custom voice folder', 'Folder on the office computer, e.g. data/voices, containing <voice name>/voice.npz. Voices added on this page go there by themselves.', cls='grow') }}
         <p class="hint">Missing ZeroTTS models download on the office computer on first use (about 1 GB; Internet required). Where you hear things: “Say a test greeting” and every real greeting come out of the office speaker (the computer with the camera); “Listen” and new-voice previews play in this browser only.</p>
-      </div>
-    </details>
+    </div></details>
   </section>
 
   <section class="tab groups" id="camera">

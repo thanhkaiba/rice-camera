@@ -1,7 +1,7 @@
 """Spoken greetings at the door, on the office Mac: the first time each day the camera recognises
 someone, the Mac says hello by name, a little differently when they come late.
 
-The sentences are written by Claude once in the morning, for everyone, and kept for the day, so a
+The sentences are written by Claude once in the morning, for everyone expected in, and kept for the day, so a
 greeting is spoken the moment the person is recognised, without waiting for the network. The camera
 loop only drops the arrival in a queue: writing and speaking run in threads of their own, and a
 greeting that fails is skipped without touching the camera.
@@ -993,9 +993,11 @@ class Greeter:
         return {}
 
     def away(self, day: dt.date) -> set[str]:
-        """Who is on leave, or has an absence (working from home) approved, on `day`: their greetings are not read
-        ahead (ElevenLabs credits). Should one come in after all, theirs is read at the door. From the server's
-        rules ("away"; older servers: the people never late that day), and this computer's own leave list."""
+        """Who is on leave or working from home on `day` (asked for or approved): nothing is written for them
+        (Claude) nor read ahead (ElevenLabs credits), and the sentences they have not heard yet stay kept, with their
+        audio, for a later day (carry_over). Should one come in after all, they hear a plain hello, or what was kept.
+        From the server's rules ("away"; older servers: the people never late that day), and this computer's own
+        leave list."""
         rules = self.rules(day)
         if "away" in rules:
             away = set(rules.get("away") or [])
@@ -1041,12 +1043,13 @@ class Greeter:
 
     def upcoming(self, day: dt.date) -> dict:
         """Today's written sentences as people read them (no emotion tags), for the server's Greetings page:
-        what the door is going to say to whom, and the lines kept for a group."""
+        what the door is going to say to whom (nobody away that day), and the lines kept for a group."""
+        away = self.away(day)
         people = {pid: {"on_time": [untagged(t) for t in entry.get("on_time") or []],
                         "late": [untagged(t) for t in entry.get("late") or []],
                         "short": [untagged(t) for t in self._short_of(pid, entry, day)],
                         "timed": entry.get("timed", True) is not False, "note": entry.get("note", "")}
-                  for pid, entry in self.lines(day).items()}
+                  for pid, entry in self.lines(day).items() if pid not in away}
         together = [{"language": line.get("language", "vi"), "text": untagged(line.get("text", ""))}
                     for line in self.together_lines(day)]
         return {"day": day.isoformat(), "people": people, "together": together}
@@ -1322,7 +1325,9 @@ class Greeter:
             return False
         self.carry_over(day)
         have = self.lines(day)
-        people = [p for p in self.store.all_employees() if p.active and p.greet and not self._entry(p, day)]
+        away = self.away(day)  # on leave or working from home: nothing written; what they did not hear stays kept
+        people = [p for p in self.store.all_employees()
+                  if p.active and p.greet and p.id not in away and not self._entry(p, day)]
         self._taken = [untagged(t) for e in have.values() for k in ("on_time", "late") for t in e.get(k) or []]
         if not people:
             return False
