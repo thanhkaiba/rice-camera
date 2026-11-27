@@ -2463,27 +2463,50 @@ class Greeter:
                 outputs.NAMES[self.output], self.output_note["why"])
         return True
 
-    def use_output(self, kind: str, who: str = "") -> dict:
-        """Asked from the Settings page, e.g. by whoever has just pressed the external speaker's button: the
-        greetings play on `kind` from now on, until the next morning check. The test sound is played there and
-        heard by the microphone."""
+    def use_output(self, kind: str, who: str = "", force: bool = False) -> dict:
+        """Ticked on the Settings page, e.g. by whoever has just pressed the external speaker's button: the
+        greetings play on `kind` from now on, until the next morning check. A ping (the speaker test) is played
+        there and heard by the microphone. Not heard, the speaker in use before stays and "ask" is set: the page
+        asks, and `force` then switches without the ping. "output": the speaker in use afterwards."""
         if kind not in outputs.NAMES:
-            return {"ok": False, "message": f"unknown speaker: {kind}"[:100]}
+            return {"ok": False, "message": f"unknown speaker: {kind}"[:100], "output": self.output}
         now = self.now()
+        by = f" by {who}" if who else ""
+        day = now.date().isoformat() if now.time() >= outputs.CHECK_AT else None
+        name = outputs.NAMES[kind]
         with self._speech_lock:
+            before = self.output
             chosen = self._use(kind)
             if not chosen["ok"]:
-                return {"ok": False, "message": f"could not switch to {outputs.NAMES[kind]}: {chosen['message']}"}
+                if before and before != kind:
+                    self._outputs.ensure(before)
+                return {"ok": False, "message": f"Could not switch to {name}: {chosen['message']}", "output": before}
+            if force:
+                self._keep_output(kind, f"{now:%H:%M} chosen on the Settings page{by}, without the ping", day, None)
+                log.info("Speaker in use: %s (%s, without the ping)", name, chosen["message"])
+                return {"ok": True, "message": f"The greetings play on {name} now, without the ping test "
+                                               f"({chosen['message']}).", "output": kind, "heard": None}
             heard = self._test_sound()
             self._sound_at = self.now()
-        day = now.date().isoformat() if now.time() >= outputs.CHECK_AT else None
-        self._keep_output(kind, f"{now:%H:%M} chosen on the Settings page" + (f" by {who}" if who else ""), day,
-                          heard.get("heard"))
-        message = f"{chosen['message']} · {heard.get('message') or 'no answer from the microphone'}"
-        if heard.get("heard") is False:
-            message += ": nothing was heard, is the speaker switched on?"
-        log.info("Speaker in use: %s (%s)", outputs.NAMES[kind], message)
-        return {"ok": heard.get("heard") is not False, "message": message, "heard": heard.get("heard")}
+            said = heard.get("message") or "no answer from the microphone"
+            if heard.get("heard") is True:
+                self._keep_output(kind, f"{now:%H:%M} chosen on the Settings page{by}: the microphone heard it", day, True)
+                log.info("Speaker in use: %s (%s · %s)", name, chosen["message"], said)
+                return {"ok": True, "message": f"The microphone heard {name}: the greetings play on it now "
+                                               f"({chosen['message']}).", "output": kind, "heard": True}
+            if before and before != kind:  # not heard: the speaker in use stays until the page says otherwise
+                back = self._use(before)
+                log.warning("Speaker not changed: the microphone did not hear %s (%s); still %s (%s)", name, said,
+                            outputs.NAMES[before], back["message"])
+                return {"ok": False, "ask": True, "heard": heard.get("heard"), "output": before,
+                        "message": f"The microphone did not hear {name} ({said}), so the greetings stay on "
+                                   f"{outputs.NAMES[before]}. Is it switched on and turned up? Use it anyway?"}
+            self._keep_output(kind, f"{now:%H:%M} chosen on the Settings page{by}: the microphone did not hear it",
+                              day, heard.get("heard"))
+        log.warning("Speaker in use: %s, not heard (%s)", name, said)
+        return {"ok": False, "heard": heard.get("heard"), "output": kind,
+                "message": f"The greetings play on {name}, but the microphone did not hear it ({said}): "
+                           "is the speaker switched on?"}
 
     def _awake_loop(self) -> None:
         if self.output and self._outputs.SUPPORTED:  # the app started again: the speaker chosen before, at its volume

@@ -151,7 +151,7 @@ def test_the_settings_page_switches_the_speaker_on_the_office_computer(live, tmp
     _, core, c = live
     _, edge = follower(live, tmp_path)
     asked = []
-    edge.on_output = lambda kind: asked.append(kind) or {"ok": True, "message": f"playing on {kind}"}
+    edge.on_output = lambda kind, who="", force=False: asked.append(kind) or {"ok": True, "message": f"playing on {kind}"}
     assert c.post("/settings/speaker/output", data={"output": "builtin"}, headers=admin()).status_code == 302
     edge.follow()
     assert asked == ["builtin"] and core.store.edge_jobs() == []
@@ -160,7 +160,9 @@ def test_the_settings_page_switches_the_speaker_on_the_office_computer(live, tmp
     assert c.post("/settings/speaker/output", data={"output": "nope"}, headers=admin()).status_code == 302
     assert core.store.edge_jobs() == []
     settings = c.get("/settings", headers=admin()).get_data(as_text=True)
-    assert "Use the external speaker" in settings and "Use the computer" in settings
+    assert 'name="output" value="external" form="speaker-choice-form"' in settings
+    assert 'name="output" value="builtin" form="speaker-choice-form"' in settings and 'id="speaker-choice-ask"' in settings
+    assert 'name="greeting.speaker"' not in settings  # where it plays is the ticked speaker, not a name typed in
 
 
 def test_the_heartbeat_tells_which_speaker_is_in_use():
@@ -221,3 +223,57 @@ def test_a_speaker_volume_below_the_volume_alert_is_refused(core):
         app.cfg.validate()
     app.cfg.greeting.speaker_min_volume = 0
     app.cfg.validate()
+
+
+def test_a_ticked_speaker_that_is_not_heard_keeps_the_one_in_use_and_asks(core):
+    _, clock, g = setup(core, False, False, False)
+    clock.t = at(7, 0)
+    g.check_output()
+    assert g.output == "builtin"
+    clock.t = at(8, 40)
+    result = g.use_output("external", "admin")
+    assert not result["ok"] and result["ask"] and result["output"] == "builtin" and g.output == "builtin"
+    assert "did not hear the external speaker" in result["message"] and "Use it anyway?" in result["message"]
+    assert g._outputs.used == ["external", "builtin", "external", "builtin"]  # back to the one in use, at its volume
+    result = g.use_output("external", "admin", force=True)  # the page asked, and was told yes
+    assert result["ok"] and result["output"] == "external" and g.output == "external"
+    assert g.listener.played == 3 and "without the ping" in g.output_note["why"]  # no ping the second time
+
+
+def test_a_ticked_speaker_that_is_heard_is_used(core):
+    _, clock, g = setup(core, False, False, True)
+    clock.t = at(7, 0)
+    g.check_output()
+    clock.t = at(8, 40)
+    result = g.use_output("external", "admin")
+    assert result["ok"] and not result.get("ask") and result["output"] == "external" and result["heard"] is True
+    assert "heard it" in g.output_note["why"]
+
+
+def test_the_settings_page_waits_for_the_office_computer_and_asks(live, tmp_path):
+    _, core, c = live
+    _, edge = follower(live, tmp_path)
+    asked = []
+
+    def on_output(kind, who="", force=False):
+        asked.append((kind, force))
+        if force:
+            return {"ok": True, "output": kind, "message": f"playing on {kind}"}
+        return {"ok": False, "ask": True, "heard": False, "output": "builtin", "message": "not heard <b>"}
+
+    edge.on_output = on_output
+    fetch = {**admin(), "X-Requested-With": "fetch"}
+    answer = c.post("/settings/speaker/output", data={"output": "external"}, headers=fetch)
+    assert answer.status_code == 202 and answer.get_json()["pending"]
+    poll = answer.get_json()["poll"]
+    assert c.get(poll, headers=fetch).status_code == 202  # the office computer has not answered yet
+    edge.follow()
+    seen = c.get(poll, headers=fetch).get_json()
+    assert asked == [("external", False)]
+    assert seen == {"pending": False, "ok": False, "ask": True, "heard": False, "output": "builtin", "message": "not heard <b>"}
+    answer = c.post("/settings/speaker/output", data={"output": "external", "force": "1"}, headers=fetch)
+    assert c.get(poll, headers=fetch).status_code == 409  # an older answer is not mistaken for this one
+    edge.follow()
+    seen = c.get(answer.get_json()["poll"], headers=fetch).get_json()
+    assert asked[-1] == ("external", True) and seen["ok"] and seen["output"] == "external"
+    assert c.post("/settings/speaker/output", data={"output": "nope"}, headers=fetch).status_code == 400

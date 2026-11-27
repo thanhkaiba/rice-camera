@@ -413,25 +413,56 @@ def register(app: Flask, core: "App") -> None:
 
     @app.post("/settings/speaker/output")
     def speaker_output():
-        """The greetings play on the external speaker or the computer's own from now on (core/outputs.py)."""
-        output = request.form.get("output", "")
+        """The speaker ticked on the Settings page (core/outputs.py): a ping is played there and heard by the
+        microphone (Greeter.use_output). From the page's script the answer is waited for (speaker_output_result);
+        "force" switches without the ping, after the page asked."""
+        from .edge_api import SPEAKER_SWITCH_KEY, keep_speaker_switch
+
+        output, force = request.form.get("output", ""), request.form.get("force") == "1"
         names = {"external": "the external speaker", "builtin": "the computer's own speaker"}
         if output not in names:
+            if wants_json():
+                return jsonify(pending=False, message="Choose the external speaker or the computer's own."), 400
             return failed("Choose the external speaker or the computer's own.", "settings_page", _anchor="greeting")
-        who = current_user(cfg)
+        who, token = current_user(cfg), uuid.uuid4().hex
+        store.put(SPEAKER_SWITCH_KEY, json.dumps({"token": token, "output": output, "at": service.now().isoformat()}))
         if service.greeter is not None:  # the camera runs on this computer
             def switch():
-                result = service.greeter.use_output(output, who)
+                try:
+                    result = service.greeter.use_output(output, who, force=force)
+                except Exception as exc:
+                    result = {"ok": False, "message": f"{type(exc).__name__}: {exc}"[:300]}
                 store.log(service.now(), who, "speaker in use",
                           ("ok: " if result.get("ok") else "problem: ") + str(result.get("message", ""))[:400])
+                keep_speaker_switch(store, token, result)
 
             threading.Thread(target=switch, name="speaker-output", daemon=True).start()
-            return done(f"The greetings play on {names[output]} now; a test sound is played there and the result "
-                        "is in Audit.", "settings_page", _anchor="greeting")
-        store.edge_job_add("speaker_output", {"kind": "speaker_output", "output": output}, service.now())
-        store.log(service.now(), who, "speaker in use", f"asked the office computer: {names[output]}")
-        return done(f"The office computer switches to {names[output]} within a minute and plays a test sound there; "
-                    "the result is in Audit.", "settings_page", _anchor="greeting")
+            message = f"Switching to {names[output]}; the result is in Audit."
+        else:
+            store.edge_job_add("speaker_output", {"kind": "speaker_output", "output": output, "force": force,
+                                                  "who": who, "token": token}, service.now())
+            store.log(service.now(), who, "speaker in use",
+                      f"asked the office computer: {names[output]}" + (", without the ping" if force else ""))
+            message = (f"The office computer switches to {names[output]} within a minute and plays a ping there; "
+                       "the result is in Audit.")
+        if wants_json():
+            return jsonify(pending=True, poll=url_for("speaker_output_result", token=token)), 202
+        return done(message, "settings_page", _anchor="greeting")
+
+    @app.get("/settings/speaker/output/<token>")
+    def speaker_output_result(token):
+        from .edge_api import SPEAKER_SWITCH_KEY
+
+        kept = json.loads(store.get(SPEAKER_SWITCH_KEY) or "{}")
+        if kept.get("token") != token:
+            return jsonify(pending=False, message="Another speaker was ticked since: reload the page."), 409
+        if "result" not in kept:
+            response = jsonify(pending=True, poll=url_for("speaker_output_result", token=token))
+            response.headers["Cache-Control"] = "private, no-store"
+            return response, 202
+        response = jsonify(pending=False, **kept["result"])
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     def background_gallery() -> dict:
         """The pictures to choose from on the Settings page, which one is selected, and today's."""

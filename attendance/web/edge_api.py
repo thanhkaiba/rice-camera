@@ -35,6 +35,21 @@ MAC_SECTIONS = ("schedule", "camera", "tracking", "recognition", "collect", "gre
 SHADOW_DIFF_KEY = "shadow_diff"
 MAX_DIFF_LISTED = 50
 HEARTBEAT_KEY = "edge_heartbeat"
+SPEAKER_SWITCH_KEY = "speaker_switch"  # {"token", "output", "at", "result"}: the last speaker ticked on Settings
+
+
+def keep_speaker_switch(store, token, result: dict) -> None:
+    """The answer to a speaker ticked on the Settings page (Greeter.use_output), for the page waiting for it."""
+    kept = json.loads(store.get(SPEAKER_SWITCH_KEY) or "{}")
+    if not token or kept.get("token") != token:
+        return  # another one was ticked since
+    output = result.get("output")
+    heard = result.get("heard")
+    kept["result"] = {"ok": result.get("ok") is True, "ask": result.get("ask") is True,
+                      "heard": heard if isinstance(heard, bool) else None,
+                      "output": output if output in ("external", "builtin") else None,
+                      "message": str(result.get("message", ""))[:400]}
+    store.put(SPEAKER_SWITCH_KEY, json.dumps(kept))
 UPCOMING_KEY = "greeting_upcoming"  # {"day", "at", "people": {id: {on_time, late, timed, note}}, "together": [...]}
 MAX_UPCOMING_PEOPLE = 2000
 MAX_EVENTS = 200
@@ -411,6 +426,7 @@ def register(app: Flask, core: "App", token_sha256: str, shadow: bool = False) -
         if payload.get("kind") == "speaker_output":
             store.log(service.now(), "office computer", "speaker in use",
                       ("ok: " if result.get("ok") else "problem: ") + str(result.get("message", ""))[:400])
+            keep_speaker_switch(store, payload.get("token"), result)
             return jsonify(ok=True)
         if payload.get("kind") == "say":
             store.log(service.now(), "office computer", "test greeting",

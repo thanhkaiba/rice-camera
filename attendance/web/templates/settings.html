@@ -445,25 +445,28 @@
     <details class="panel group" id="g-greeting-speaker">
       <summary>{{ icon('bell') }}<span>Speaker</span><span class="sum">{% if out and out.output == 'builtin' %}the computer's own speaker{% elif out and out.output == 'external' %}the external speaker{% else %}not chosen yet{% endif %}{% if sp and sp.volume is not none %} · volume {{ sp.volume }}%{% endif %}{% if sp and sp.muted %} · muted{% endif %}</span></summary>
     <div>
-      <div class="row between" id="speaker-output">
-        <span class="hint">Greetings play on: <strong>{% if out and out.output == 'builtin' %}the computer's own speaker (louder){% elif out and out.output == 'external' %}the external speaker{% else %}not chosen yet{% endif %}</strong>{% if out and out.why %} · {{ out.why }}{% endif %}<br>Every morning at 07:00 the office computer plays the test on the external speaker and listens: not heard (switched off: only its own button switches it on), the greetings go to the computer's own speaker. After pressing the speaker's button, switch back here. Each speaker is set to its volume below at every switch: save first, then switch.</span>
-        <span class="row">
-          {{ field('greeting', 'speaker_volume_external', 'External speaker volume (%)', 'set at every switch to it · not below the volume alert', type='number') }}
-          {{ field('greeting', 'speaker_volume_builtin', 'Computer speaker volume (%)', 'set at every switch to it · not below the volume alert', type='number') }}
-        </span>
-        <span class="row">
-          <button formaction="{{ url_for('speaker_output') }}" name="output" value="external" formnovalidate title="The greetings play on the external speaker from now on; a test sound is played there">{{ icon('wave') }}Use the external speaker</button>
-          <button formaction="{{ url_for('speaker_output') }}" name="output" value="builtin" formnovalidate title="The greetings play on the computer's own speaker, at full volume and louder">{{ icon('wave') }}Use the computer's speaker</button>
-        </span>
+      {% set ns = namespace(external='', builtin='') %}
+      {% for d in (sp.devices if sp else []) or [] %}{% if 'headphone' in d|lower and not ns.external %}{% set ns.external = d %}{% elif 'speaker' in d|lower and not ns.builtin %}{% set ns.builtin = d %}{% endif %}{% endfor %}
+      <div id="speaker-choice" data-current="{{ out.output if out and out.output else '' }}">
+        <p class="hint" style="margin-top:0">The speaker the greetings play on. Tick another one: the office computer plays a short ping there and listens with its microphone. Heard, it stays on it; not heard, it goes back to the speaker in use and asks you here. Every morning at 07:00 it checks the external speaker the same way by itself. Each speaker is set to its own volume at every switch (press Save after changing a volume).</p>
+        {% for kind, label in (('external', 'External speaker'), ('builtin', "The computer's own speaker")) %}
+        {% set dev = ns[kind] %}
+        <div class="speaker-row{{ ' on' if out and out.output == kind }}" data-kind="{{ kind }}">
+          <label class="pick"><input type="radio" name="output" value="{{ kind }}" form="speaker-choice-form" {{ 'checked' if out and out.output == kind }}>
+            <span><strong>{{ label }}</strong>{{ ' · louder' if kind == 'builtin' }}<span class="hint">{{ dev or ('not seen on the office computer' if sp else 'no reading from the office computer yet') }}</span></span></label>
+          <span class="badge ok in-use"{{ ' hidden' if not (out and out.output == kind) }}>in use</span>
+          {{ field('greeting', 'speaker_volume_' ~ kind, 'Volume (%)', type='number') }}
+        </div>
+        {% endfor %}
+        <p class="hint" id="speaker-choice-status" role="status" aria-live="polite">{% if out and out.why %}{{ out.why }}{% elif not out %}Not chosen yet.{% endif %}</p>
+        <div class="row" id="speaker-choice-ask" hidden>
+          <button type="button" id="speaker-choice-force">{{ icon('check') }}Use it anyway</button>
+          <button type="button" id="speaker-choice-cancel">Keep the one in use</button>
+        </div>
       </div>
       <h3 style="margin-top:18px">Speaker watch</h3>
-      <p class="hint" style="margin:0 0 8px">Every 10 minutes the office computer checks, without a sound, where it plays, its volume and mute, and tells the system space when something is wrong. A speaker that is switched off or turned down by its own knob cannot be seen: use the test.</p>
+      <p class="hint" style="margin:0 0 8px">Every 10 minutes the office computer checks, without a sound, its volume and mute, and tells the system space when something is wrong. A speaker that is switched off or turned down by its own knob cannot be seen: use the test.</p>
       <div class="form-row">
-        <label class="field">Speaker the greetings play on
-          <input name="greeting.speaker" value="{{ s.greeting.speaker }}" list="speaker-names" placeholder="any" maxlength="80" autocomplete="off">
-          <datalist id="speaker-names">{% for name in (sp.devices if sp else []) %}<option value="{{ name }}">{% endfor %}</datalist>
-          <span class="hint">As macOS names it, e.g. External Headphones (the headphone socket). Empty: where it plays is not checked.</span>{{ src('greeting.speaker') }}
-        </label>
         {{ field('greeting', 'speaker_min_volume', 'Alert below volume (%)', '0 = volume not checked', type='number') }}
       </div>
       <div class="stack" style="margin:10px 0 4px">
@@ -907,6 +910,7 @@
 <form method="post" action="{{ url_for('greeting_voice_upload') }}" enctype="multipart/form-data" id="voice-upload" hidden>{% include "_csrf.html" %}</form>
 <form method="post" action="{{ url_for('greeting_voice_upload') }}" enctype="multipart/form-data" id="voice-file-upload" hidden>{% include "_csrf.html" %}</form>
 <form method="post" action="{{ url_for('greeting_preview_text') }}" id="voice-text-test" hidden>{% include "_csrf.html" %}</form>
+<form method="post" action="{{ url_for('speaker_output') }}" id="speaker-choice-form" hidden>{% include "_csrf.html" %}</form>
 <form method="post" action="{{ url_for('greeting_voice_create') }}" enctype="multipart/form-data" id="voice-create" hidden>{% include "_csrf.html" %}</form>
 <form method="post" action="{{ url_for('greeting_creation_use') }}" id="voice-use" hidden>{% include "_csrf.html" %}<input type="hidden" name="job_id" id="voice-creation-id"></form>
 <form method="post" action="{{ url_for('choose_late_background') }}" id="late-bg-choose" hidden>{% include "_csrf.html" %}</form>
@@ -977,6 +981,55 @@
   engineVi.addEventListener('change', showEngines);
   engineEn.addEventListener('change', showEngines);
   showEngines();
+
+  // Speaker: tick another one; the office computer plays a ping there and listens (Greeter.use_output). Not heard,
+  // it stays on the speaker in use and this asks whether to use the ticked one anyway.
+  const choice = document.getElementById('speaker-choice'), choiceForm = document.getElementById('speaker-choice-form');
+  const choiceStatus = document.getElementById('speaker-choice-status'), choiceAsk = document.getElementById('speaker-choice-ask');
+  const choiceRadios = [...choice.querySelectorAll('input[type=radio]')];
+  let choiceAsked = '';
+  function showInUse(kind) {
+    choice.dataset.current = kind || '';
+    choice.querySelectorAll('.speaker-row').forEach(row => {
+      const on = row.dataset.kind === kind;
+      row.classList.toggle('on', on);
+      row.querySelector('.in-use').hidden = !on;
+      row.querySelector('input[type=radio]').checked = on;
+    });
+  }
+  async function switchSpeaker(kind, force) {
+    choiceAsk.hidden = true;
+    choiceRadios.forEach(r => { r.disabled = true; });
+    choiceStatus.textContent = force ? 'Switching…' : 'The office computer plays a ping on it and listens… (up to a minute and a half)';
+    try {
+      const data = new FormData(choiceForm);
+      data.set('output', kind);
+      if (force) data.set('force', '1');
+      const headers = {'X-Requested-With': 'fetch'};
+      let response = await fetch(choiceForm.action, {method: 'POST', body: data, headers});
+      let answer = await response.json().catch(() => ({message: `HTTP ${response.status}`}));
+      const until = Date.now() + 150000;
+      while (response.ok && answer.pending && Date.now() < until) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        response = await fetch(answer.poll, {cache: 'no-store', headers});
+        answer = await response.json().catch(() => ({message: `HTTP ${response.status}`}));
+      }
+      if (answer.pending) throw new Error('No answer from the office computer in two and a half minutes: is it on and online? The result will be in Audit.');
+      if (!response.ok) throw new Error(answer.message || `HTTP ${response.status}`);
+      showInUse(answer.output || choice.dataset.current);
+      choiceStatus.textContent = answer.message || '';
+      if (answer.ask) { choiceAsked = kind; choiceAsk.hidden = false; }
+    } catch (error) {
+      showInUse(choice.dataset.current);
+      choiceStatus.textContent = error.message;
+    } finally { choiceRadios.forEach(r => { r.disabled = false; }); }
+  }
+  choiceRadios.forEach(r => r.addEventListener('change', () => { if (r.checked) switchSpeaker(r.value, false); }));
+  document.getElementById('speaker-choice-force').addEventListener('click', () => { if (choiceAsked) switchSpeaker(choiceAsked, true); });
+  document.getElementById('speaker-choice-cancel').addEventListener('click', () => {
+    choiceAsk.hidden = true;
+    choiceStatus.textContent = 'Kept the speaker in use.';
+  });
 
   const textForm = document.getElementById('voice-text-test');
   const textButton = document.getElementById('voice-text-button');

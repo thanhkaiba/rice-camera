@@ -672,3 +672,9 @@ button.listen { margin-left: 6px; white-space: nowrap; color: var(--muted); } bu
 
 /* Moments page: the door, second by second */
 .moment-player img { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); background: #000; }
+.speaker-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin: 8px 0; }
+.speaker-row.on { border-color: var(--brand); background: var(--brand-soft); }
+.speaker-row .pick { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 220px; cursor: pointer; }
+.speaker-row .pick input { width: 18px; height: 18px; flex: none; accent-color: var(--brand); }
+.speaker-row .pick .hint { display: block; font-weight: 400; }
+.speaker-row .field { width: 120px; margin: 0; }

@@ -356,4 +356,4 @@ def test_speaker_test_button_asks_the_office_computer(core):
     app, _, _ = core
     client = create_app(app).test_client()
     page = client.get("/settings").get_data(as_text=True)
-    assert 'name="greeting.speaker"' in page and "Test the speaker" in page
+    assert 'name="greeting.speaker"' not in page and "Test the speaker" in page  # the speaker is ticked, not typed
